@@ -137,6 +137,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
 
       const data = await unwrapApiResponse<LoginResponseData>(res, 'Invalid email or password');
+      queryClient.clear();
       setAuthToken(data.accessToken);
       setUser(data.user);
       setMerchant(data.merchant);

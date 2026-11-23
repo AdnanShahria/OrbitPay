@@ -17,6 +17,7 @@ import com.orbitsaas.payment.data.local.SmsEntity
 import com.orbitsaas.payment.data.remote.IngestSmsItem
 import com.orbitsaas.payment.data.remote.MerchantOrderDto
 import com.orbitsaas.payment.data.remote.OrbitApiClient
+import com.orbitsaas.payment.data.remote.UnauthorizedException
 import com.orbitsaas.payment.service.StickyForegroundService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -254,10 +255,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        val sanitizedUrl = serverUrl.trim().removeSuffix("/")
-        if (sanitizedUrl.isNotBlank()) {
-            preferences.serverUrl = sanitizedUrl
-        }
+        val sanitizedUrl = PreferencesManager.normalizeServerUrl(serverUrl)
+        preferences.serverUrl = sanitizedUrl
 
         viewModelScope.launch {
             _isLoggingIn.value = true
@@ -319,6 +318,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun handleUnauthorized(message: String?) {
+        if (!preferences.isLoggedIn()) return
+        preferences.clearAuthSession()
+        StickyForegroundService.stopService(getApplication())
+        _orders.value = emptyList()
+        _pendingOrderCount.value = 0
+        _loginError.value = message?.takeIf { it.isNotBlank() }
+            ?: "Session expired or revoked. Please sign in again."
+    }
+
     /**
      * Fetches merchant orders and pending confirmation count from ORBIT Hub.
      */
@@ -334,7 +343,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _orders.value = data.items
                 _pendingOrderCount.value = data.pendingConfirmationCount
             }.onFailure { err ->
-                Log.w(TAG, "Failed to refresh orders: ${err.message}")
+                if (err is UnauthorizedException) {
+                    handleUnauthorized(err.message)
+                } else {
+                    Log.w(TAG, "Failed to refresh orders: ${err.message}")
+                }
             }
             _isOrdersLoading.value = false
         }
@@ -370,7 +383,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _feedbackMessage.value = "Order #$externalOrderId $actionLabel$syncSuffix"
                 refreshOrders()
             }.onFailure { err ->
-                _feedbackMessage.value = "Order update failed: ${err.message ?: "Unknown error"}"
+                if (err is UnauthorizedException) {
+                    handleUnauthorized(err.message)
+                } else {
+                    _feedbackMessage.value = "Order update failed: ${err.message ?: "Unknown error"}"
+                }
             }
 
             _actionInProgressOrderId.value = null
@@ -408,7 +425,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             database.smsDao().markUploaded(pending.map { it.id })
                             _feedbackMessage.value = "Synced ${items.size} SMS (Verified: ${res.autoVerifiedCount})"
                         } else {
-                            _feedbackMessage.value = "Sync error: ${result.exceptionOrNull()?.message}"
+                            val err = result.exceptionOrNull()
+                            if (err is UnauthorizedException) {
+                                withContext(Dispatchers.Main) { handleUnauthorized(err.message) }
+                                return@withContext
+                            }
+                            _feedbackMessage.value = "Sync error: ${err?.message}"
                         }
                     } else if (pending.isEmpty()) {
                         _feedbackMessage.value = "Everything up to date."
@@ -424,11 +446,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 preferences.storeName = stats.storeName
                             }
                             Log.d(TAG, "Backend stats refreshed: verified=${stats.verifiedCount}, vol=${stats.totalVerifiedVolume}")
+                        }.onFailure { err ->
+                            if (err is UnauthorizedException) {
+                                withContext(Dispatchers.Main) { handleUnauthorized(err.message) }
+                                return@withContext
+                            }
                         }
 
                         apiClient.fetchOrders().onSuccess { ordersData ->
                             _orders.value = ordersData.items
                             _pendingOrderCount.value = ordersData.pendingConfirmationCount
+                        }.onFailure { err ->
+                            if (err is UnauthorizedException) {
+                                withContext(Dispatchers.Main) { handleUnauthorized(err.message) }
+                                return@withContext
+                            }
                         }
                     }
                 }
@@ -443,24 +475,39 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun refreshStatsFromServer() {
         if (!preferences.isLoggedIn()) return
 
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                apiClient.fetchStats().onSuccess { stats ->
-                    if (stats.storeName.isNotBlank() && preferences.storeName.isBlank()) {
-                        preferences.storeName = stats.storeName
-                    }
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                apiClient.fetchStats()
+            }
+            result.onSuccess { stats ->
+                if (stats.storeName.isNotBlank() && preferences.storeName.isBlank()) {
+                    preferences.storeName = stats.storeName
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to refresh stats: ${e.message}")
+            }.onFailure { err ->
+                if (err is UnauthorizedException) {
+                    handleUnauthorized(err.message)
+                } else {
+                    Log.w(TAG, "Failed to refresh stats: ${err.message}")
+                }
             }
         }
     }
 
     fun saveSettings(serverUrl: String, merchantId: String, deviceKey: String, enableForeground: Boolean) {
-        preferences.serverUrl = serverUrl
-        preferences.merchantId = merchantId
-        preferences.deviceKey = deviceKey
+        val trimmedMerchantId = merchantId.trim()
+        val trimmedDeviceKey = deviceKey.trim()
+        if (preferences.merchantId.isNotBlank() &&
+            trimmedMerchantId.isNotBlank() &&
+            preferences.merchantId != trimmedMerchantId
+        ) {
+            preferences.clearAuthSession()
+        }
+
+        preferences.serverUrl = PreferencesManager.normalizeServerUrl(serverUrl)
+        preferences.merchantId = trimmedMerchantId
+        preferences.deviceKey = trimmedDeviceKey
         preferences.isForegroundServiceEnabled = enableForeground
+        _loginError.value = null
 
         if (enableForeground && preferences.isConfigured()) {
             StickyForegroundService.startService(getApplication())
@@ -473,11 +520,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         refreshOrders()
     }
 
-    fun testConnection(onResult: (Boolean, String) -> Unit) {
+    fun testConnection(
+        serverUrl: String? = null,
+        merchantId: String? = null,
+        deviceKey: String? = null,
+        onResult: (Boolean, String) -> Unit
+    ) {
         viewModelScope.launch {
             try {
                 val result = withContext(Dispatchers.IO) {
-                    apiClient.testConnection()
+                    apiClient.testConnection(serverUrl, merchantId, deviceKey)
                 }
                 if (result.isSuccess && result.getOrThrow()) {
                     onResult(true, "Connection successful! ORBIT Central Hub reachable.")

@@ -20,6 +20,7 @@ import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.http.encodeURLPathPart
 import io.ktor.http.isSuccess
@@ -28,6 +29,8 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+
+class UnauthorizedException(message: String) : Exception(message)
 
 class OrbitApiClient(
     private val preferencesManager: PreferencesManager
@@ -104,12 +107,21 @@ class OrbitApiClient(
         return "HTTP ${response.status.value}: ${response.status.description}"
     }
 
+    private suspend fun throwHttpException(response: HttpResponse): Nothing {
+        val message = extractErrorMessage(response)
+        if (response.status == HttpStatusCode.Unauthorized) {
+            throw UnauthorizedException(message)
+        }
+        throw Exception(message)
+    }
+
     /**
      * Authenticates a merchant user against ORBIT Central Hub and returns session + device info.
      */
     suspend fun login(email: String, password: String, deviceName: String): Result<LoginData> {
         return runCatching {
-            val url = "$baseUrl/api/v1/auth/login"
+            val resolvedBaseUrl = PreferencesManager.normalizeServerUrl(baseUrl)
+            val url = "$resolvedBaseUrl/api/v1/auth/login"
             val payload = LoginRequest(
                 email = email.trim(),
                 password = password,
@@ -150,7 +162,7 @@ class OrbitApiClient(
                 header(HttpHeaders.Authorization, "Bearer $authToken")
             }
 
-            if (!response.status.isSuccess()) {
+            if (!response.status.isSuccess() && response.status != HttpStatusCode.Unauthorized) {
                 throw Exception(extractErrorMessage(response))
             }
         }
@@ -177,7 +189,7 @@ class OrbitApiClient(
                     throw Exception(body.error ?: body.message ?: "Failed to load orders")
                 }
             } else {
-                throw Exception(extractErrorMessage(response))
+                throwHttpException(response)
             }
         }
     }
@@ -212,7 +224,7 @@ class OrbitApiClient(
                     throw Exception(body.error ?: body.message ?: "Order action failed")
                 }
             } else {
-                throw Exception(extractErrorMessage(response))
+                throwHttpException(response)
             }
         }
     }
@@ -253,7 +265,7 @@ class OrbitApiClient(
                     throw Exception(envelope.error ?: envelope.message ?: "Ingest rejected")
                 }
             } else {
-                throw Exception(extractErrorMessage(response))
+                throwHttpException(response)
             }
         }
     }
@@ -276,7 +288,7 @@ class OrbitApiClient(
                     throw Exception(envelope.error ?: envelope.message ?: "Invalid stats response")
                 }
             } else {
-                throw Exception(extractErrorMessage(response))
+                throwHttpException(response)
             }
         }
     }
@@ -305,21 +317,48 @@ class OrbitApiClient(
                 preferencesManager.lastHeartbeatTime = System.currentTimeMillis()
                 result
             } else {
-                throw Exception("Heartbeat failed: ${extractErrorMessage(response)}")
+                throwHttpException(response)
             }
         }
     }
 
     /**
-     * Verifies server reachability and credential validity.
+     * Verifies server reachability and credential validity using either overrides or saved preferences.
      */
-    suspend fun testConnection(): Result<Boolean> {
+    suspend fun testConnection(
+        serverUrlOverride: String? = null,
+        merchantIdOverride: String? = null,
+        deviceKeyOverride: String? = null
+    ): Result<Boolean> {
         return runCatching {
-            val statsResult = fetchStats()
-            if (statsResult.isFailure) {
-                throw statsResult.exceptionOrNull() ?: Exception("Connection test failed")
+            val targetUrl = PreferencesManager.normalizeServerUrl(serverUrlOverride ?: baseUrl)
+            val targetMerchantId = (merchantIdOverride ?: merchantId).trim()
+            val targetDeviceKey = (deviceKeyOverride ?: deviceKey).trim()
+
+            val url = "$targetUrl/api/v1/device/stats"
+            val response: HttpResponse = client.get(url) {
+                header(HttpHeaders.UserAgent, USER_AGENT)
+                if (targetDeviceKey.isBlank() && authToken.isNotBlank()) {
+                    header(HttpHeaders.Authorization, "Bearer $authToken")
+                }
+                if (targetDeviceKey.isNotBlank()) {
+                    header("X-Device-Key", targetDeviceKey)
+                }
+                if (targetMerchantId.isNotBlank()) {
+                    header("X-Merchant-Id", targetMerchantId)
+                }
             }
-            true
+
+            if (response.status.isSuccess()) {
+                val envelope = response.body<ApiEnvelope<DeviceStatsResponse>>()
+                if (envelope.success && envelope.data != null) {
+                    true
+                } else {
+                    throw Exception(envelope.error ?: envelope.message ?: "Invalid stats response")
+                }
+            } else {
+                throwHttpException(response)
+            }
         }
     }
 

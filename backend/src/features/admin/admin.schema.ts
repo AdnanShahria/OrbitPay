@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { USER_ROLES } from '../../db/schema';
 
 export const verifyAdminKeySchema = z.object({
-  adminKey: z.string().min(1, 'Admin key is required'),
+  adminKey: z.string().trim().min(1, 'Admin key is required'),
 });
 
 const optionalWebhookUrl = z

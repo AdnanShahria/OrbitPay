@@ -11,7 +11,7 @@ export const updateMerchantSettingsSchema = z.object({
 });
 
 export const rotateKeysSchema = z.object({
-  target: z.enum(['WEBHOOK_SECRET', 'DEVICE_API_KEY', 'BOTH']),
+  target: z.enum(['WEBHOOK_SECRET', 'DEVICE_API_KEY', 'DEVICE_KEY', 'BOTH']),
 });
 
 export const registerMerchantSchema = z.object({

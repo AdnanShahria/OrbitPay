@@ -3,7 +3,7 @@ import { ZodError } from 'zod';
 import { eq, and, isNull, gt } from 'drizzle-orm';
 import { getDb, type AppDb } from '../db/client';
 import { merchants, merchantUsers, authSessions, merchantDevices } from '../db/schema';
-import { hashDeviceApiKey, verifyJwt } from './crypto';
+import { hashDeviceApiKey, timingSafeEqual, verifyJwt } from './crypto';
 import { AppError, UnauthorizedError, ValidationError } from './errors';
 import type { AppContextEnv, Env } from './types';
 
@@ -23,6 +23,16 @@ export interface OrbitJwtClaims extends Record<string, unknown> {
  */
 export function resolveJwtSecret(env: Env): string {
   return env.JWT_SECRET || env.ENCRYPTION_PEPPER || env.MASTER_ADMIN_KEY || 'orbit_dev_jwt_secret_2026';
+}
+
+/**
+ * Resolves the Master Admin Key from environment secrets, falling back to the
+ * local development default only in non-production environments.
+ */
+export function resolveMasterAdminKey(env: Env): string | undefined {
+  const configured = env.MASTER_ADMIN_KEY?.trim();
+  if (configured) return configured;
+  return env.ENVIRONMENT !== 'production' ? 'orbit_master_admin_2026' : undefined;
 }
 
 /**
@@ -157,18 +167,42 @@ export const authMerchantMiddleware: MiddlewareHandler<AppContextEnv> = async (c
 /**
  * Android Device Companion Authentication Middleware
  * Accepts EITHER:
+ * - Authorization: Bearer <jwt> (3 segments, checked against auth_sessions so session revocation is enforced)
  * - X-Device-Key (checked against merchant_devices.device_key_hash first, falling back to merchants.device_api_key_hash)
- * - Authorization: Bearer <jwt> (3 segments, checked against auth_sessions)
  */
 export const authDeviceMiddleware: MiddlewareHandler<AppContextEnv> = async (c, next) => {
   const db = c.get('db') || getDb(c.env.DB);
-  const deviceKey = c.req.header('x-device-key');
+  const deviceKey = c.req.header('x-device-key')?.trim();
   const bearerToken = extractBearerToken(c.req.header('authorization'));
-  const merchantIdHeader = c.req.header('x-merchant-id');
+  const merchantIdHeader = c.req.header('x-merchant-id')?.trim();
+
+  // When a Bearer JWT is present, always enforce session & user validity first so
+  // admin session revocations, password resets, and user deactivations take effect immediately.
+  if (bearerToken && bearerToken.split('.').length === 3) {
+    await authenticateJwtSession(c, db, bearerToken, merchantIdHeader);
+
+    if (deviceKey) {
+      const pepper = c.env.ENCRYPTION_PEPPER || '';
+      const keyHash = await hashDeviceApiKey(deviceKey, pepper);
+      await db
+        .update(merchantDevices)
+        .set({ lastSeenAt: new Date() })
+        .where(
+          and(
+            eq(merchantDevices.merchantId, c.get('merchantId')!),
+            eq(merchantDevices.deviceKeyHash, keyHash),
+            eq(merchantDevices.isActive, true)
+          )
+        );
+    }
+
+    await next();
+    return;
+  }
 
   if (deviceKey) {
     const pepper = c.env.ENCRYPTION_PEPPER || '';
-    const keyHash = await hashDeviceApiKey(deviceKey.trim(), pepper);
+    const keyHash = await hashDeviceApiKey(deviceKey, pepper);
 
     // 1. Check per-device key in merchant_devices first
     const deviceConditions = merchantIdHeader
@@ -230,12 +264,6 @@ export const authDeviceMiddleware: MiddlewareHandler<AppContextEnv> = async (c, 
     return;
   }
 
-  if (bearerToken && bearerToken.split('.').length === 3) {
-    await authenticateJwtSession(c, db, bearerToken, merchantIdHeader);
-    await next();
-    return;
-  }
-
   throw new UnauthorizedError('Missing device API key header (X-Device-Key) or Bearer JWT');
 };
 
@@ -243,8 +271,9 @@ export const authDeviceMiddleware: MiddlewareHandler<AppContextEnv> = async (c, 
  * Combined Middleware accepting either Merchant Auth (Secret / JWT) or Device Auth (X-Device-Key / JWT).
  */
 export const authMerchantOrDeviceMiddleware: MiddlewareHandler<AppContextEnv> = async (c, next) => {
-  const deviceKey = c.req.header('x-device-key');
-  if (deviceKey) {
+  const bearerToken = extractBearerToken(c.req.header('authorization'));
+  const deviceKey = c.req.header('x-device-key')?.trim();
+  if (deviceKey || (bearerToken && bearerToken.split('.').length === 3)) {
     return authDeviceMiddleware(c, next);
   }
   return authMerchantMiddleware(c, next);
@@ -252,20 +281,18 @@ export const authMerchantOrDeviceMiddleware: MiddlewareHandler<AppContextEnv> = 
 
 /**
  * Master Admin Key Middleware
- * Validates 'X-Admin-Key' against MASTER_ADMIN_KEY.
+ * Validates 'X-Admin-Key' (or optional 'adminKey' query param) against MASTER_ADMIN_KEY in constant time.
  */
 export const authMasterAdminMiddleware: MiddlewareHandler<AppContextEnv> = async (c, next) => {
-  const adminKey = c.req.header('x-admin-key');
-  const expectedKey =
-    c.env.MASTER_ADMIN_KEY ||
-    (c.env.ENVIRONMENT !== 'production' ? 'orbit_master_admin_2026' : undefined);
+  const adminKey = (c.req.header('x-admin-key') || c.req.query('adminKey'))?.trim();
+  const expectedKey = resolveMasterAdminKey(c.env);
 
   if (!expectedKey) {
     throw new AppError('MASTER_ADMIN_KEY is not configured on this environment', 500, 'ADMIN_NOT_CONFIGURED');
   }
 
-  if (!adminKey || adminKey !== expectedKey) {
-    throw new UnauthorizedError('Invalid or missing administrative key (X-Admin-Key)');
+  if (!adminKey || !timingSafeEqual(adminKey, expectedKey)) {
+    throw new UnauthorizedError('Invalid or missing Master Admin Key');
   }
 
   await next();

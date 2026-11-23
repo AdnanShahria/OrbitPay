@@ -14,6 +14,7 @@ import { ThemeToggle } from '@/components/application/theme/theme-toggle';
 import { Chip } from '@/components/base/badges/chip';
 import { StatusDot } from '@/components/base/badges/status-dot';
 import { Button } from '@/components/base/buttons/button';
+import { Spinner } from '@/components/base/spinner/spinner';
 import { Tab, TabList, TabPanel, Tabs } from '@/components/base/tabs/tabs';
 import { toast } from '@/components/base/toast/toast';
 import { useRealtime } from '@/shared/hooks/useRealtime';
@@ -37,20 +38,42 @@ interface AdminDashboardProps {
 }
 
 export function AdminDashboard({ onExit }: AdminDashboardProps) {
-  const { isAuthenticated, login, logout } = useAdminAuth();
+  const { isAuthenticated, isVerifying, login, logout } = useAdminAuth();
+
+  if (isVerifying) {
+    return (
+      <div className="min-h-screen bg-background-full flex flex-col items-center justify-center gap-3">
+        <Spinner size="lg" aria-label="Verifying admin session" className="text-text-primary" />
+        <span className="text-body-regular text-text-secondary">
+          Verifying admin session...
+        </span>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <AdminAuthGate onSuccess={login} onExit={onExit} />;
+  }
+
+  return <AdminDashboardContent onLogout={logout} onExit={onExit} />;
+}
+
+function AdminDashboardContent({
+  onLogout,
+  onExit,
+}: {
+  onLogout: () => void;
+  onExit: () => void;
+}) {
   const [activeTab, setActiveTab] = useState<AdminTab>('projects');
   const [isSimulating, setIsSimulating] = useState(false);
 
   const { status: realtimeStatus, simulateTransaction } = useRealtime();
 
-  const { data: stats, isLoading: statsLoading } = useAdminOverview();
-  const { data: projects, isLoading: projectsLoading } = useAdminProjects();
-  const { data: webhooks, isLoading: webhooksLoading } = useAdminWebhooks();
-  const { data: queue, isLoading: queueLoading } = useAdminQueue();
-
-  if (!isAuthenticated) {
-    return <AdminAuthGate onSuccess={login} onExit={onExit} />;
-  }
+  const { data: stats, isLoading: statsLoading } = useAdminOverview(true);
+  const { data: projects, isLoading: projectsLoading } = useAdminProjects(true);
+  const { data: webhooks, isLoading: webhooksLoading } = useAdminWebhooks(true);
+  const { data: queue, isLoading: queueLoading } = useAdminQueue(true);
 
   const handleSimulateGlobal = async () => {
     setIsSimulating(true);
@@ -125,7 +148,7 @@ export function AdminDashboard({ onExit }: AdminDashboardProps) {
           <Button
             variant="ghost"
             size="small"
-            onClick={logout}
+            onClick={onLogout}
             leadingIcon={RiLockLine}
             title="Lock Master Admin Session"
           >

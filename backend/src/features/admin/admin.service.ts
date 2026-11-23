@@ -217,7 +217,7 @@ export async function createAdminProject(
     const existingUser = await db
       .select({ id: merchantUsers.id })
       .from(merchantUsers)
-      .where(eq(merchantUsers.email, normalizedEmail))
+      .where(sql`lower(${merchantUsers.email}) = ${normalizedEmail}`)
       .limit(1);
 
     if (existingUser[0]) {
@@ -478,7 +478,7 @@ export async function createProjectUser(
   const existing = await db
     .select({ id: merchantUsers.id })
     .from(merchantUsers)
-    .where(eq(merchantUsers.email, normalizedEmail))
+    .where(sql`lower(${merchantUsers.email}) = ${normalizedEmail}`)
     .limit(1);
 
   if (existing[0]) {

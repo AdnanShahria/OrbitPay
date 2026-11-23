@@ -72,7 +72,7 @@ fun SettingsScreen(
     onBackClick: () -> Unit,
     onToggleTheme: () -> Unit,
     onSaveSettings: (serverUrl: String, merchantId: String, deviceKey: String, enableForeground: Boolean) -> Unit,
-    onTestConnection: ((Boolean, String) -> Unit) -> Unit,
+    onTestConnection: (serverUrl: String, merchantId: String, deviceKey: String, (Boolean, String) -> Unit) -> Unit,
     onLogoutClick: () -> Unit = {}
 ) {
     var serverUrl by remember(state.serverUrl) {
@@ -433,7 +433,7 @@ fun SettingsScreen(
                         onClick = {
                             isTestingConnection = true
                             testResult = null
-                            onTestConnection { success, message ->
+                            onTestConnection(serverUrl, merchantId, deviceKey) { success, message ->
                                 isTestingConnection = false
                                 testResult = Pair(success, message)
                             }

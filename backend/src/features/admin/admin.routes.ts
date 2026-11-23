@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
 import type { AppContextEnv } from '../../shared/types';
-import { UnauthorizedError } from '../../shared/errors';
+import { AppError, UnauthorizedError } from '../../shared/errors';
+import { timingSafeEqual } from '../../shared/crypto';
+import { authMasterAdminMiddleware, resolveMasterAdminKey } from '../../shared/middleware';
 import {
   verifyAdminKeySchema,
   createProjectSchema,
@@ -25,37 +27,23 @@ import { merchants } from '../../db/schema';
 import { eq } from 'drizzle-orm';
 
 const router = new Hono<AppContextEnv>();
-
-// Helper to get master key with development default
-function getMasterKey(envMasterKey?: string): string {
-  return envMasterKey || 'orbit_master_admin_2026';
-}
-
-/**
- * Master Admin Key Middleware
- */
-const requireAdminAuth = async (c: any, next: any) => {
-  const adminKey = c.req.header('x-admin-key') || c.req.query('adminKey');
-  const expectedKey = getMasterKey(c.env.MASTER_ADMIN_KEY);
-
-  if (!adminKey || adminKey !== expectedKey) {
-    throw new UnauthorizedError('Invalid or missing Master Admin Key');
-  }
-
-  await next();
-};
+const requireAdminAuth = authMasterAdminMiddleware;
 
 /**
  * POST /api/v1/admin/auth/verify
- * Validates admin key and returns session token/confirmation.
+ * Validates admin key and returns session confirmation.
  */
 router.post('/auth/verify', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const input = verifyAdminKeySchema.parse(body);
-  const expectedKey = getMasterKey(c.env.MASTER_ADMIN_KEY);
+  const expectedKey = resolveMasterAdminKey(c.env);
 
-  if (input.adminKey !== expectedKey) {
-    return c.json({ success: false, error: 'Incorrect Master Admin Key' }, 401);
+  if (!expectedKey) {
+    throw new AppError('MASTER_ADMIN_KEY is not configured on this environment', 500, 'ADMIN_NOT_CONFIGURED');
+  }
+
+  if (!timingSafeEqual(input.adminKey, expectedKey)) {
+    throw new UnauthorizedError('Incorrect Master Admin Key');
   }
 
   return c.json({

@@ -4,7 +4,7 @@ import { desc } from 'drizzle-orm';
 import { routerProviderLogs } from '../db/schema';
 import { BadRequestError, UnauthorizedError } from '../shared/errors';
 import { toExactArrayBuffer } from '../shared/crypto';
-import { authDeviceMiddleware, authMerchantMiddleware } from '../shared/middleware';
+import { authDeviceMiddleware, authMasterAdminMiddleware, authMerchantMiddleware } from '../shared/middleware';
 import type { AppContextEnv } from '../shared/types';
 import { getDatabaseProviderCapabilities, checkPrimaryDatabaseHealth, routeKvDelete, routeKvGet, routeKvSet } from './database';
 import { getEmailProviderCapabilities, routeEmail } from './email';
@@ -13,10 +13,6 @@ import { createHealthSnapshot } from './secrets';
 import { getSmsProviderCapabilities, routeSmsOrPush } from './sms';
 
 const router = new Hono<AppContextEnv>();
-
-function getMasterKey(envMasterKey?: string): string {
-  return envMasterKey || 'orbit_master_admin_2026';
-}
 
 /**
  * Backend Verification Gate
@@ -27,12 +23,10 @@ function getMasterKey(envMasterKey?: string): string {
 const authRouterCallerMiddleware: MiddlewareHandler<AppContextEnv> = async (c, next) => {
   const adminKey = c.req.header('x-admin-key');
   if (adminKey) {
-    if (adminKey !== getMasterKey(c.env.MASTER_ADMIN_KEY)) {
-      throw new UnauthorizedError('Invalid administrative key (X-Admin-Key)');
-    }
-    c.set('merchantId', 'master_admin');
-    await next();
-    return;
+    return authMasterAdminMiddleware(c, async () => {
+      c.set('merchantId', 'master_admin');
+      await next();
+    });
   }
 
   const deviceKey = c.req.header('x-device-key');

@@ -56,17 +56,25 @@ export function useRotateWebhookSecret() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (target: 'WEBHOOK_SECRET' | 'DEVICE_KEY' | 'BOTH' = 'WEBHOOK_SECRET') => {
+    mutationFn: async (target: 'WEBHOOK_SECRET' | 'DEVICE_API_KEY' | 'DEVICE_KEY' | 'BOTH' = 'WEBHOOK_SECRET') => {
+      const normalizedTarget = target === 'DEVICE_KEY' ? 'DEVICE_API_KEY' : target;
       const res = await authFetch('/api/v1/merchants/keys/rotate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ target }),
+        body: JSON.stringify({ target: normalizedTarget }),
       });
 
-      return unwrapApiResponse<{ webhookSecret?: string; deviceKey?: string }>(
-        res,
-        'Failed to rotate webhook secret',
-      );
+      const data = await unwrapApiResponse<{
+        webhookSecret?: string;
+        deviceKey?: string;
+        newWebhookSecret?: string;
+        newDeviceApiKey?: string;
+      }>(res, 'Failed to rotate keys');
+
+      return {
+        webhookSecret: data.webhookSecret ?? data.newWebhookSecret,
+        deviceKey: data.deviceKey ?? data.newDeviceApiKey,
+      };
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['merchant'] });

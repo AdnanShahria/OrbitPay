@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { extractApiErrorMessage } from '@/shared/utils/api';
+import { extractApiErrorMessage, unwrapApiResponse } from '@/shared/utils/api';
 
 export interface AdminProjectSummary {
   id: string;
@@ -64,77 +64,173 @@ export interface QueueSummaryItem {
 }
 
 export const ADMIN_KEY_STORAGE = 'orbit_master_admin_key';
+export const ADMIN_UNAUTHORIZED_EVENT = 'orbit:admin-unauthorized';
 
 export function getStoredAdminKey(): string | null {
-  return sessionStorage.getItem(ADMIN_KEY_STORAGE);
+  try {
+    return sessionStorage.getItem(ADMIN_KEY_STORAGE);
+  } catch {
+    return null;
+  }
+}
+
+export function setStoredAdminKey(key: string): void {
+  try {
+    sessionStorage.setItem(ADMIN_KEY_STORAGE, key.trim());
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
+export function clearStoredAdminKey(): void {
+  try {
+    sessionStorage.removeItem(ADMIN_KEY_STORAGE);
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+/**
+ * Authenticated fetch wrapper for Root Admin Hub API calls.
+ * Reads the current key dynamically at request time and clears stale keys on 401.
+ */
+export async function adminFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+  const adminKey = getStoredAdminKey()?.trim() || '';
+  const headers = new Headers(init.headers);
+
+  if (adminKey && !headers.has('x-admin-key')) {
+    headers.set('x-admin-key', adminKey);
+  }
+
+  const res = await fetch(input, {
+    ...init,
+    headers,
+  });
+
+  if (res.status === 401) {
+    const currentKey = getStoredAdminKey()?.trim() || '';
+    if (adminKey && currentKey === adminKey) {
+      clearStoredAdminKey();
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent(ADMIN_UNAUTHORIZED_EVENT));
+      }
+    }
+  }
+
+  return res;
 }
 
 export function useAdminAuth() {
-  const [adminKey, setAdminKey] = useState<string | null>(getStoredAdminKey);
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(!!getStoredAdminKey());
+  const queryClient = useQueryClient();
+  const [adminKey, setAdminKey] = useState<string | null>(() => getStoredAdminKey());
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [isVerifying, setIsVerifying] = useState<boolean>(() => Boolean(getStoredAdminKey()?.trim()));
 
-  useEffect(() => {
-    const key = getStoredAdminKey();
-    setAdminKey(key);
-    setIsAuthenticated(!!key);
-  }, []);
-
-  const login = (key: string) => {
-    sessionStorage.setItem(ADMIN_KEY_STORAGE, key);
-    setAdminKey(key);
-    setIsAuthenticated(true);
-  };
-
-  const logout = () => {
-    sessionStorage.removeItem(ADMIN_KEY_STORAGE);
+  const clearAdminSession = useCallback(() => {
+    clearStoredAdminKey();
     setAdminKey(null);
     setIsAuthenticated(false);
-  };
+    setIsVerifying(false);
+    queryClient.removeQueries({ queryKey: ['admin'] });
+  }, [queryClient]);
+
+  useEffect(() => {
+    let active = true;
+    const storedKey = getStoredAdminKey()?.trim();
+
+    if (!storedKey) {
+      setIsAuthenticated(false);
+      setIsVerifying(false);
+      return;
+    }
+
+    (async () => {
+      try {
+        const res = await fetch('/api/v1/admin/auth/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ adminKey: storedKey }),
+        });
+        const json = await res.json().catch(() => null);
+        if (!active) return;
+
+        if (res.ok && json?.success) {
+          setAdminKey(storedKey);
+          setIsAuthenticated(true);
+        } else {
+          clearAdminSession();
+        }
+      } catch {
+        if (!active) return;
+        clearAdminSession();
+      } finally {
+        if (active) {
+          setIsVerifying(false);
+        }
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [clearAdminSession]);
+
+  useEffect(() => {
+    const handleUnauthorized = () => {
+      clearAdminSession();
+    };
+
+    window.addEventListener(ADMIN_UNAUTHORIZED_EVENT, handleUnauthorized);
+    return () => window.removeEventListener(ADMIN_UNAUTHORIZED_EVENT, handleUnauthorized);
+  }, [clearAdminSession]);
+
+  const login = useCallback(
+    (key: string) => {
+      const cleanKey = key.trim();
+      setStoredAdminKey(cleanKey);
+      setAdminKey(cleanKey);
+      setIsAuthenticated(true);
+      setIsVerifying(false);
+      queryClient.invalidateQueries({ queryKey: ['admin'] });
+    },
+    [queryClient],
+  );
+
+  const logout = useCallback(() => {
+    clearAdminSession();
+  }, [clearAdminSession]);
 
   return {
     adminKey,
     isAuthenticated,
+    isVerifying,
     login,
     logout,
   };
 }
 
-export function useAdminOverview() {
-  const adminKey = getStoredAdminKey();
-
+export function useAdminOverview(enabled = true) {
   return useQuery<AdminOverviewStats>({
     queryKey: ['admin', 'overview'],
     queryFn: async () => {
-      const res = await fetch('/api/v1/admin/overview', {
-        headers: {
-          'x-admin-key': adminKey || '',
-        },
-      });
-      if (!res.ok) throw new Error(`Failed to load admin overview: ${res.statusText}`);
-      const json = await res.json();
-      return json.data;
+      const res = await adminFetch('/api/v1/admin/overview');
+      return unwrapApiResponse<AdminOverviewStats>(res, 'Failed to load admin overview');
     },
-    enabled: !!adminKey,
+    enabled: Boolean(enabled && getStoredAdminKey()),
+    retry: false,
     refetchInterval: 10_000,
   });
 }
 
-export function useAdminProjects() {
-  const adminKey = getStoredAdminKey();
-
+export function useAdminProjects(enabled = true) {
   return useQuery<AdminProjectSummary[]>({
     queryKey: ['admin', 'projects'],
     queryFn: async () => {
-      const res = await fetch('/api/v1/admin/projects', {
-        headers: {
-          'x-admin-key': adminKey || '',
-        },
-      });
-      if (!res.ok) throw new Error(`Failed to load admin projects: ${res.statusText}`);
-      const json = await res.json();
-      return json.data;
+      const res = await adminFetch('/api/v1/admin/projects');
+      return unwrapApiResponse<AdminProjectSummary[]>(res, 'Failed to load admin projects');
     },
-    enabled: !!adminKey,
+    enabled: Boolean(enabled && getStoredAdminKey()),
+    retry: false,
     refetchInterval: 10_000,
   });
 }
@@ -179,7 +275,6 @@ export interface CreateProjectResponseData {
 
 export function useCreateProjectMutation() {
   const queryClient = useQueryClient();
-  const adminKey = getStoredAdminKey();
 
   return useMutation({
     mutationFn: async (payload: {
@@ -191,12 +286,9 @@ export function useCreateProjectMutation() {
       ownerPassword?: string;
       ownerName?: string;
     }): Promise<{ success: boolean; data: CreateProjectResponseData }> => {
-      const res = await fetch('/api/v1/admin/projects', {
+      const res = await adminFetch('/api/v1/admin/projects', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-admin-key': adminKey || '',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
       if (!res.ok) {
@@ -213,30 +305,22 @@ export function useCreateProjectMutation() {
 }
 
 export function useAdminProjectUsers(projectId: string | null) {
-  const adminKey = getStoredAdminKey();
-
   return useQuery<{ users: AdminMerchantUser[]; sessions: AdminAuthSession[] }>({
     queryKey: ['admin', 'project-users', projectId],
     queryFn: async () => {
-      const res = await fetch(`/api/v1/admin/projects/${projectId}/users`, {
-        headers: {
-          'x-admin-key': adminKey || '',
-        },
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(extractApiErrorMessage(err, 'Failed to load project users'));
-      }
-      const json = await res.json();
-      return json.data;
+      const res = await adminFetch(`/api/v1/admin/projects/${projectId}/users`);
+      return unwrapApiResponse<{ users: AdminMerchantUser[]; sessions: AdminAuthSession[] }>(
+        res,
+        'Failed to load project users',
+      );
     },
-    enabled: Boolean(adminKey && projectId),
+    enabled: Boolean(getStoredAdminKey() && projectId),
+    retry: false,
   });
 }
 
 export function useCreateProjectUserMutation() {
   const queryClient = useQueryClient();
-  const adminKey = getStoredAdminKey();
 
   return useMutation({
     mutationFn: async ({
@@ -252,20 +336,15 @@ export function useCreateProjectUserMutation() {
       password?: string;
       role?: 'MERCHANT_OWNER' | 'MERCHANT_STAFF';
     }): Promise<{ user: AdminMerchantUser; generatedPassword?: string }> => {
-      const res = await fetch(`/api/v1/admin/projects/${projectId}/users`, {
+      const res = await adminFetch(`/api/v1/admin/projects/${projectId}/users`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-admin-key': adminKey || '',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, fullName, password, role }),
       });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(extractApiErrorMessage(err, 'Failed to create user'));
-      }
-      const json = await res.json();
-      return json.data;
+      return unwrapApiResponse<{ user: AdminMerchantUser; generatedPassword?: string }>(
+        res,
+        'Failed to create user',
+      );
     },
     onSuccess: (_, vars) => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'project-users', vars.projectId] });
@@ -275,7 +354,6 @@ export function useCreateProjectUserMutation() {
 
 export function useResetUserPasswordMutation() {
   const queryClient = useQueryClient();
-  const adminKey = getStoredAdminKey();
 
   return useMutation({
     mutationFn: async ({
@@ -286,20 +364,22 @@ export function useResetUserPasswordMutation() {
       userId: string;
       password?: string;
     }): Promise<{ userId: string; email: string; newPassword: string }> => {
-      const res = await fetch(`/api/v1/admin/users/${userId}/reset-password`, {
+      const res = await adminFetch(`/api/v1/admin/users/${userId}/reset-password`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-admin-key': adminKey || '',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password }),
       });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(extractApiErrorMessage(err, 'Failed to reset password'));
-      }
-      const json = await res.json();
-      return json.data;
+      const data = await unwrapApiResponse<{
+        userId: string;
+        email: string;
+        password?: string;
+        newPassword?: string;
+      }>(res, 'Failed to reset password');
+      return {
+        userId: data.userId,
+        email: data.email,
+        newPassword: data.newPassword ?? data.password ?? '',
+      };
     },
     onSuccess: (_, vars) => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'project-users', vars.projectId] });
@@ -309,7 +389,6 @@ export function useResetUserPasswordMutation() {
 
 export function useRevokeSessionMutation() {
   const queryClient = useQueryClient();
-  const adminKey = getStoredAdminKey();
 
   return useMutation({
     mutationFn: async ({
@@ -318,17 +397,10 @@ export function useRevokeSessionMutation() {
       projectId: string;
       sessionId: string;
     }) => {
-      const res = await fetch(`/api/v1/admin/sessions/${sessionId}`, {
+      const res = await adminFetch(`/api/v1/admin/sessions/${sessionId}`, {
         method: 'DELETE',
-        headers: {
-          'x-admin-key': adminKey || '',
-        },
       });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(extractApiErrorMessage(err, 'Failed to revoke session'));
-      }
-      return await res.json();
+      return unwrapApiResponse(res, 'Failed to revoke session');
     },
     onSuccess: (_, vars) => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'project-users', vars.projectId] });
@@ -338,7 +410,6 @@ export function useRevokeSessionMutation() {
 
 export function useUpdateProjectMutation() {
   const queryClient = useQueryClient();
-  const adminKey = getStoredAdminKey();
 
   return useMutation({
     mutationFn: async ({
@@ -353,16 +424,12 @@ export function useUpdateProjectMutation() {
         isActive?: boolean;
       };
     }) => {
-      const res = await fetch(`/api/v1/admin/projects/${id}`, {
+      const res = await adminFetch(`/api/v1/admin/projects/${id}`, {
         method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-admin-key': adminKey || '',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates),
       });
-      if (!res.ok) throw new Error('Failed to update project settings');
-      return await res.json();
+      return unwrapApiResponse(res, 'Failed to update project settings');
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'projects'] });
@@ -371,40 +438,28 @@ export function useUpdateProjectMutation() {
   });
 }
 
-export function useAdminWebhooks() {
-  const adminKey = getStoredAdminKey();
-
+export function useAdminWebhooks(enabled = true) {
   return useQuery<WebhookDeliverySummary[]>({
     queryKey: ['admin', 'webhooks'],
     queryFn: async () => {
-      const res = await fetch('/api/v1/admin/webhooks', {
-        headers: {
-          'x-admin-key': adminKey || '',
-        },
-      });
-      if (!res.ok) throw new Error('Failed to load webhook audit logs');
-      const json = await res.json();
-      return json.data;
+      const res = await adminFetch('/api/v1/admin/webhooks');
+      return unwrapApiResponse<WebhookDeliverySummary[]>(res, 'Failed to load webhook audit logs');
     },
-    enabled: !!adminKey,
+    enabled: Boolean(enabled && getStoredAdminKey()),
+    retry: false,
     refetchInterval: 10_000,
   });
 }
 
 export function useRetryWebhooksMutation() {
   const queryClient = useQueryClient();
-  const adminKey = getStoredAdminKey();
 
   return useMutation({
     mutationFn: async () => {
-      const res = await fetch('/api/v1/admin/webhooks/retry', {
+      const res = await adminFetch('/api/v1/admin/webhooks/retry', {
         method: 'POST',
-        headers: {
-          'x-admin-key': adminKey || '',
-        },
       });
-      if (!res.ok) throw new Error('Retry trigger failed');
-      return await res.json();
+      return unwrapApiResponse(res, 'Retry trigger failed');
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'webhooks'] });
@@ -413,40 +468,28 @@ export function useRetryWebhooksMutation() {
   });
 }
 
-export function useAdminQueue() {
-  const adminKey = getStoredAdminKey();
-
+export function useAdminQueue(enabled = true) {
   return useQuery<QueueSummaryItem[]>({
     queryKey: ['admin', 'queue'],
     queryFn: async () => {
-      const res = await fetch('/api/v1/admin/queue', {
-        headers: {
-          'x-admin-key': adminKey || '',
-        },
-      });
-      if (!res.ok) throw new Error('Failed to load verification queue');
-      const json = await res.json();
-      return json.data;
+      const res = await adminFetch('/api/v1/admin/queue');
+      return unwrapApiResponse<QueueSummaryItem[]>(res, 'Failed to load verification queue');
     },
-    enabled: !!adminKey,
+    enabled: Boolean(enabled && getStoredAdminKey()),
+    retry: false,
     refetchInterval: 8_000,
   });
 }
 
 export function useSeedDemoProjectsMutation() {
   const queryClient = useQueryClient();
-  const adminKey = getStoredAdminKey();
 
   return useMutation({
     mutationFn: async () => {
-      const res = await fetch('/api/v1/admin/seed-demo', {
+      const res = await adminFetch('/api/v1/admin/seed-demo', {
         method: 'POST',
-        headers: {
-          'x-admin-key': adminKey || '',
-        },
       });
-      if (!res.ok) throw new Error('Demo seeding failed');
-      return await res.json();
+      return unwrapApiResponse(res, 'Demo seeding failed');
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'projects'] });

@@ -44,9 +44,12 @@ export async function authFetch(input: RequestInfo | URL, init: RequestInit = {}
   });
 
   if (res.status === 401) {
-    clearAuthToken();
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT));
+    const currentToken = getAuthToken();
+    if (token && currentToken === token) {
+      clearAuthToken();
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT));
+      }
     }
   }
 

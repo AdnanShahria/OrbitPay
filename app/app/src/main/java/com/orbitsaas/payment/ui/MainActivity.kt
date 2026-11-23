@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -118,6 +119,17 @@ fun OrbitPaymentApp(
         }
     }
 
+    LaunchedEffect(uiState.isLoggedIn, uiState.isOnboardingCompleted) {
+        if (uiState.isOnboardingCompleted && !uiState.isLoggedIn) {
+            val currentRoute = navController.currentBackStackEntry?.destination?.route
+            if (currentRoute == Screen.Dashboard.route) {
+                navController.navigate(Screen.Login.route) {
+                    popUpTo(0) { inclusive = true }
+                }
+            }
+        }
+    }
+
     NavHost(
         navController = navController,
         startDestination = startDestination
@@ -186,8 +198,8 @@ fun OrbitPaymentApp(
                         navController.popBackStack()
                     }
                 },
-                onTestConnection = { onResult ->
-                    viewModel.testConnection(onResult)
+                onTestConnection = { serverUrl, merchantId, deviceKey, onResult ->
+                    viewModel.testConnection(serverUrl, merchantId, deviceKey, onResult)
                 },
                 onLogoutClick = {
                     viewModel.logoutMerchant {

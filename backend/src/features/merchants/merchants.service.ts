@@ -30,6 +30,8 @@ export interface KeyRotationResult {
   merchantId: string;
   newWebhookSecret?: string;
   newDeviceApiKey?: string; // Revealed ONLY ONCE on generation/rotation
+  webhookSecret?: string;
+  deviceKey?: string;
 }
 
 export interface RegisterMerchantResult {
@@ -99,7 +101,7 @@ export async function updateMerchantSettings(
 export async function rotateKeys(
   db: AppDb,
   merchantId: string,
-  target: 'WEBHOOK_SECRET' | 'DEVICE_API_KEY' | 'BOTH',
+  target: 'WEBHOOK_SECRET' | 'DEVICE_API_KEY' | 'DEVICE_KEY' | 'BOTH',
   pepper = ''
 ): Promise<KeyRotationResult> {
   const existing = await db.select().from(merchants).where(eq(merchants.id, merchantId)).limit(1);
@@ -114,13 +116,15 @@ export async function rotateKeys(
     const newSecret = generateWebhookSecret();
     updateData.webhookSecret = newSecret;
     result.newWebhookSecret = newSecret;
+    result.webhookSecret = newSecret;
   }
 
-  if (target === 'DEVICE_API_KEY' || target === 'BOTH') {
+  if (target === 'DEVICE_API_KEY' || target === 'DEVICE_KEY' || target === 'BOTH') {
     const rawDeviceKey = generateDeviceApiKey();
     const keyHash = await hashDeviceApiKey(rawDeviceKey, pepper);
     updateData.deviceApiKeyHash = keyHash;
     result.newDeviceApiKey = rawDeviceKey;
+    result.deviceKey = rawDeviceKey;
   }
 
   await db.update(merchants).set(updateData).where(eq(merchants.id, merchantId));

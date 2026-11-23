@@ -1,4 +1,4 @@
-import { eq, desc, and, isNull } from 'drizzle-orm';
+import { eq, desc, and, isNull, sql } from 'drizzle-orm';
 import type { AppDb } from '../../db/client';
 import {
   merchants,
@@ -81,10 +81,11 @@ export async function loginUser(
   input: LoginInput,
   ipAddress?: string
 ) {
+  const normalizedEmail = input.email.trim().toLowerCase();
   const userRes = await db
     .select()
     .from(merchantUsers)
-    .where(eq(merchantUsers.email, input.email))
+    .where(sql`lower(${merchantUsers.email}) = ${normalizedEmail}`)
     .limit(1);
 
   const user = userRes[0];

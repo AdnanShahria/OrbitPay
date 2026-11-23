@@ -37,7 +37,7 @@ class PreferencesManager(context: Context) {
     var serverUrl: String
         get() = prefs.getString(KEY_SERVER_URL, DEFAULT_SERVER_URL) ?: DEFAULT_SERVER_URL
         set(value) {
-            val sanitized = value.trim().removeSuffix("/")
+            val sanitized = normalizeServerUrl(value)
             prefs.edit().putString(KEY_SERVER_URL, sanitized).apply()
             _serverUrlFlow.value = sanitized
         }
@@ -147,6 +147,18 @@ class PreferencesManager(context: Context) {
     companion object {
         private const val PREFS_NAME = "orbit_payment_preferences"
         private const val DEFAULT_SERVER_URL = "https://payment.orbitsaas.cloud"
+
+        fun normalizeServerUrl(raw: String): String {
+            val trimmed = raw.trim().removeSuffix("/")
+            if (trimmed.isBlank()) return DEFAULT_SERVER_URL
+            return if (trimmed.startsWith("http://", ignoreCase = true) ||
+                trimmed.startsWith("https://", ignoreCase = true)
+            ) {
+                trimmed
+            } else {
+                "https://$trimmed"
+            }
+        }
 
         private const val KEY_SERVER_URL = "server_url"
         private const val KEY_MERCHANT_ID = "merchant_id"

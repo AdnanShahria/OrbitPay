@@ -47,8 +47,8 @@ export function AdminAuthGate({ onSuccess, onExit }: AdminAuthGateProps) {
         body: JSON.stringify({ adminKey: cleanKey }),
       });
 
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
+      const data = await res.json().catch(() => null);
+      if (!res.ok || (data && data.success === false)) {
         throw new Error(extractApiErrorMessage(data, 'Invalid Master Admin Key'));
       }
 
@@ -60,6 +60,12 @@ export function AdminAuthGate({ onSuccess, onExit }: AdminAuthGateProps) {
       setIsLoading(false);
     }
   };
+
+  const isLocalDev =
+    typeof window !== 'undefined' &&
+    (window.location.hostname === 'localhost' ||
+      window.location.hostname === '127.0.0.1' ||
+      Boolean((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV));
 
   const handleDevQuickFill = () => {
     setKeyInput('orbit_master_admin_2026');
@@ -123,17 +129,19 @@ export function AdminAuthGate({ onSuccess, onExit }: AdminAuthGateProps) {
               </button>
             </div>
 
-            <div className="flex items-center justify-between text-caption-1-regular">
-              <span className="text-text-tertiary">Local dev default</span>
-              <Button
-                type="button"
-                variant="ghost"
-                size="xs"
-                onClick={handleDevQuickFill}
-              >
-                Fill dev key
-              </Button>
-            </div>
+            {isLocalDev && (
+              <div className="flex items-center justify-between text-caption-1-regular">
+                <span className="text-text-tertiary">Local dev default</span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  onClick={handleDevQuickFill}
+                >
+                  Fill dev key
+                </Button>
+              </div>
+            )}
 
             <div className="pt-1 flex flex-col gap-2.5">
               <Button
