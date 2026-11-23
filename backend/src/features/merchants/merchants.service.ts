@@ -83,9 +83,9 @@ export async function updateMerchantSettings(
   await db
     .update(merchants)
     .set({
-      ...(settings.storeName && { storeName: settings.storeName }),
-      ...(settings.webhookUrl && { webhookUrl: settings.webhookUrl }),
-      ...(settings.gracePeriodMinutes && { gracePeriodMinutes: settings.gracePeriodMinutes }),
+      ...(settings.storeName !== undefined && { storeName: settings.storeName }),
+      ...(settings.webhookUrl !== undefined && { webhookUrl: settings.webhookUrl }),
+      ...(settings.gracePeriodMinutes !== undefined && { gracePeriodMinutes: settings.gracePeriodMinutes }),
       updatedAt: now,
     })
     .where(eq(merchants.id, merchantId));

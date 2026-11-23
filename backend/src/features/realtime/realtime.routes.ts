@@ -98,13 +98,13 @@ router.post('/simulate', async (c) => {
   let merchant = merchantList[0];
 
   if (!merchant) {
-    const demoId = 'mer_live_default';
+    const demoId = 'mer_live_fb8eb757cceb7c35';
     await db
       .insert(merchants)
       .values({
         id: demoId,
         storeName: 'ORBIT Demo Storefront',
-        webhookUrl: 'http://localhost:3000/api/webhook-mock',
+        webhookUrl: '',
         webhookSecret: 'orbit_sec_mock_key_001',
         deviceApiKeyHash: 'hash_demo_device_key',
         gracePeriodMinutes: 60,

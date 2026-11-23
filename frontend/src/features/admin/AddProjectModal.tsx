@@ -76,13 +76,13 @@ export function AddProjectModal({ isOpen, onClose }: AddProjectModalProps) {
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!storeName.trim() || !webhookUrl.trim()) return;
+    if (!storeName.trim()) return;
 
     try {
       const res = await createMutation.mutateAsync({
         id: projectId.trim() || undefined,
         storeName: storeName.trim(),
-        webhookUrl: webhookUrl.trim(),
+        webhookUrl: webhookUrl.trim() || undefined,
         gracePeriodMinutes: Number(gracePeriod) || 60,
         ownerEmail: ownerEmail.trim() || undefined,
         ownerName: ownerName.trim() || undefined,
@@ -314,12 +314,12 @@ export function AddProjectModal({ isOpen, onClose }: AddProjectModalProps) {
             </div>
 
             <Input
-              label="Store Webhook Callback URL"
+              label="Store Webhook Callback URL (Optional)"
               placeholder="https://client-store.com/payment/v1"
               value={webhookUrl}
               onChange={setWebhookUrl}
-              isRequired
               type="url"
+              hint="Optional while testing. Leave blank if you only want to verify payments in the portal."
               leadingIcon={RiGlobalLine}
               inputClassName="font-mono"
             />

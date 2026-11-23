@@ -54,16 +54,35 @@ export async function authFetch(input: RequestInfo | URL, init: RequestInit = {}
 }
 
 /**
+ * Extracts a human-readable message from an ORBIT API error payload.
+ */
+export function extractApiErrorMessage(json: unknown, fallbackError: string): string {
+  if (json && typeof json === 'object') {
+    const obj = json as { error?: unknown; message?: unknown };
+    if (typeof obj.error === 'string' && obj.error.trim()) {
+      return obj.error;
+    }
+    if (obj.error && typeof obj.error === 'object') {
+      const nested = obj.error as { message?: unknown };
+      if (typeof nested.message === 'string' && nested.message.trim()) {
+        return nested.message;
+      }
+    }
+    if (typeof obj.message === 'string' && obj.message.trim()) {
+      return obj.message;
+    }
+  }
+  return fallbackError;
+}
+
+/**
  * Unwraps standard `{ success: true, data: T }` ORBIT API responses.
  */
 export async function unwrapApiResponse<T>(res: Response, fallbackError = 'Request failed'): Promise<T> {
   const json = await res.json().catch(() => null);
 
   if (!res.ok || (json && json.success === false)) {
-    const message =
-      (json && (json.error || json.message)) ||
-      `${fallbackError} (HTTP ${res.status})`;
-    throw new Error(message);
+    throw new Error(extractApiErrorMessage(json, `${fallbackError} (HTTP ${res.status})`));
   }
 
   if (json && typeof json === 'object' && 'data' in json) {

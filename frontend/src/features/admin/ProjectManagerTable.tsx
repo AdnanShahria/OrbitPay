@@ -247,20 +247,26 @@ export function ProjectManagerTable({
                   </TableCell>
 
                   <TableCell>
-                    <div className="flex items-center gap-1.5 max-w-xs">
-                      <span className="text-caption-1-medium font-mono text-text-secondary truncate">
-                        {p.webhookUrl}
+                    {p.webhookUrl ? (
+                      <div className="flex items-center gap-1.5 max-w-xs">
+                        <span className="text-caption-1-medium font-mono text-text-secondary truncate">
+                          {p.webhookUrl}
+                        </span>
+                        <a
+                          href={p.webhookUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          aria-label={`Open webhook URL for ${p.storeName}`}
+                          className="text-foreground-icon-tertiary hover:text-foreground-icon-primary transition-colors shrink-0"
+                        >
+                          <RiExternalLinkLine className="size-3.5" aria-hidden />
+                        </a>
+                      </div>
+                    ) : (
+                      <span className="text-caption-1-regular text-text-tertiary">
+                        Not configured (testing)
                       </span>
-                      <a
-                        href={p.webhookUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        aria-label={`Open webhook URL for ${p.storeName}`}
-                        className="text-foreground-icon-tertiary hover:text-foreground-icon-primary transition-colors shrink-0"
-                      >
-                        <RiExternalLinkLine className="size-3.5" aria-hidden />
-                      </a>
-                    </div>
+                    )}
                     <span className="text-caption-2-regular text-text-tertiary block mt-0.5 tabular-nums">
                       Grace: {p.gracePeriodMinutes} mins
                     </span>
@@ -386,7 +392,7 @@ export function ProjectManagerTable({
               <Input
                 label="Storefront Callback URL"
                 isReadOnly
-                value={selectedCreds.webhookUrl}
+                value={selectedCreds.webhookUrl || 'Not configured'}
                 inputClassName="font-mono text-caption-1-regular"
               />
             </ModalBody>

@@ -43,7 +43,16 @@ export async function dispatchWebhook(
   const externalOrderId = String(data.externalOrderId || data.orderId || 'UNKNOWN');
   const payloadObj = buildWebhookPayload(event, data);
   const payloadJson = JSON.stringify(payloadObj);
-  const targetUrl = targetUrlOverride || merchant.webhookUrl;
+  const targetUrl = (targetUrlOverride || merchant.webhookUrl || '').trim();
+
+  // Skip new webhook dispatches when no callback URL is configured (e.g. during testing)
+  if (!targetUrl && !existingDeliveryId) {
+    return {
+      success: false,
+      deliveryId: 'skipped_no_webhook_url',
+      error: 'No webhook URL configured (skipped)',
+    };
+  }
 
   let signature = '';
   try {

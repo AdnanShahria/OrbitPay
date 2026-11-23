@@ -7,7 +7,8 @@
     "dev": "wrangler dev --config ../wrangler.toml --port 8787",
     "build": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "wrangler d1 migrations apply orbit-payment-d1 --local"
+    "db:migrate": "wrangler d1 migrations apply orbit-pay --local",
+    "db:migrate:remote": "wrangler d1 migrations apply orbit-pay --remote"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",

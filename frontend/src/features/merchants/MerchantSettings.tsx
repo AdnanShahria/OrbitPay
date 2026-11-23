@@ -77,6 +77,10 @@ export function MerchantSettings() {
   };
 
   const handleTestPing = async () => {
+    if (!webhookUrl.trim()) {
+      toast.error('Enter a webhook URL first to send a test ping');
+      return;
+    }
     setPingResult(null);
     const start = performance.now();
     try {
@@ -227,13 +231,12 @@ export function MerchantSettings() {
             {/* Webhook URL Input */}
             <div className="space-y-2.5">
               <Input
-                label="Custom callback endpoint URL"
+                label="Custom callback endpoint URL (Optional)"
                 type="url"
                 placeholder="https://yourstore.com/payment/v1"
                 value={webhookUrl}
                 onChange={setWebhookUrl}
-                hint="Must be HTTPS and accessible publicly. Exempt this path from CSRF checks on your server."
-                isRequired
+                hint="Optional while testing. When configured, must be publicly accessible HTTPS and exempt from CSRF checks."
               />
 
               <div className="flex flex-wrap items-center gap-2 pt-0.5">

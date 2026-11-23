@@ -91,6 +91,8 @@ export function App() {
 }
 
 function AppRouter() {
+  const { merchant: authMerchant, isLoading: authLoading } = useAuth();
+
   // Check URL query and hash for standalone / embedded checkout mode
   const urlParams = new URLSearchParams(window.location.search);
   const isEmbedded =
@@ -106,11 +108,14 @@ function AppRouter() {
 
   const [isAdminMode, setIsAdminMode] = useState<boolean>(checkIsAdmin);
 
-  // Read URL parameters if provided for embedded checkout
+  // Read URL parameters if provided for embedded checkout (fall back to signed-in merchant or default merchant ID)
+  const DEFAULT_MERCHANT_ID = 'mer_live_fb8eb757cceb7c35';
   const paramMerchantId = urlParams.get('merchantId') || '';
+  const resolvedMerchantId = paramMerchantId || authMerchant?.id || DEFAULT_MERCHANT_ID;
   const paramOrderId = urlParams.get('orderId') || 'ORD-10492';
   const paramAmount = Number(urlParams.get('amount')) || 50;
-  const paramStoreName = urlParams.get('storeName') || 'ORBIT Secure Checkout';
+  const paramStoreName =
+    urlParams.get('storeName') || authMerchant?.storeName || 'ORBIT Secure Checkout';
   const paramCustomerEmail = urlParams.get('customerEmail') || 'customer@example.com';
 
   // Listen for Ctrl+Alt+A stealth hotkey and URL changes
@@ -163,10 +168,21 @@ function AppRouter() {
 
   // 2. Embedded / Standalone Checkout Mode — bypasses merchant login so buyers can pay
   if (isEmbedded) {
+    if (!paramMerchantId && authLoading) {
+      return (
+        <div className="min-h-screen bg-background-full flex flex-col items-center justify-center gap-3">
+          <Spinner size="lg" aria-label="Loading checkout session" className="text-text-primary" />
+          <span className="text-body-regular text-text-secondary">
+            Loading checkout session...
+          </span>
+        </div>
+      );
+    }
+
     return (
       <EmbeddedCheckoutView
         config={{
-          merchantId: paramMerchantId,
+          merchantId: resolvedMerchantId,
           orderId: paramOrderId,
           amount: paramAmount,
           storeName: paramStoreName,

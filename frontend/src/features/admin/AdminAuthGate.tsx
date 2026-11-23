@@ -16,6 +16,7 @@ import {
   CardTitle,
 } from '@/components/base/card/card';
 import { Input } from '@/components/base/input/input';
+import { extractApiErrorMessage } from '@/shared/utils/api';
 
 interface AdminAuthGateProps {
   onSuccess: (key: string) => void;
@@ -48,7 +49,7 @@ export function AdminAuthGate({ onSuccess, onExit }: AdminAuthGateProps) {
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || 'Invalid Master Admin Key');
+        throw new Error(extractApiErrorMessage(data, 'Invalid Master Admin Key'));
       }
 
       onSuccess(cleanKey);

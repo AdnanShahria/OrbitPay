@@ -45,9 +45,12 @@ export interface VerifyCheckoutResponse {
   expiresAt?: string;
 }
 
+export const DEFAULT_MERCHANT_ID = 'mer_live_fb8eb757cceb7c35';
+
 export type CheckoutStep = 'SELECT_PROVIDER' | 'INSTRUCTIONS' | 'SUBMIT_TRX' | 'POLLING' | 'SUCCESS';
 
 export function useCheckout(config: CheckoutConfig) {
+  const effectiveMerchantId = config.merchantId?.trim() || DEFAULT_MERCHANT_ID;
   const [currentStep, setCurrentStep] = useState<CheckoutStep>('SELECT_PROVIDER');
   const [selectedProvider, setSelectedProvider] = useState<MfsProvider>('BKASH');
   const [senderNumber, setSenderNumber] = useState('');
@@ -83,6 +86,7 @@ export function useCheckout(config: CheckoutConfig) {
   // Initialize checkout session & allocate unique poisha amount
   useEffect(() => {
     let isMounted = true;
+
     setIsSessionLoading(true);
     setBaseAmount(config.amount);
     setUniqueAmount(config.amount);
@@ -96,7 +100,7 @@ export function useCheckout(config: CheckoutConfig) {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            merchantId: config.merchantId,
+            merchantId: effectiveMerchantId,
             orderId: config.orderId,
             amount: config.amount,
             customerEmail: config.customerEmail || 'customer@example.com',
@@ -149,7 +153,7 @@ export function useCheckout(config: CheckoutConfig) {
       isMounted = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config.merchantId, config.orderId, config.amount, config.customerEmail]);
+  }, [effectiveMerchantId, config.orderId, config.amount, config.customerEmail]);
 
   const onSuccessCallback = config.onSuccess;
   const onSuccessRef = useRef(onSuccessCallback);
@@ -183,7 +187,7 @@ export function useCheckout(config: CheckoutConfig) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          merchantId: config.merchantId,
+          merchantId: effectiveMerchantId,
           orderId: config.orderId,
           provider: selectedProvider,
           amount: numericPaid,

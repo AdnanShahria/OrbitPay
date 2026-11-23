@@ -74,7 +74,7 @@ declare global {
         : 'https://payment.orbitsaas.cloud');
 
     const params = new URLSearchParams({
-      merchantId: config.merchantId,
+      merchantId: config.merchantId || 'mer_live_fb8eb757cceb7c35',
       orderId: config.orderId,
       amount: config.amount.toString(),
       customerEmail: config.customerEmail || '',

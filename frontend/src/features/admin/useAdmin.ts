@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { extractApiErrorMessage } from '@/shared/utils/api';
 
 export interface AdminProjectSummary {
   id: string;
@@ -184,7 +185,7 @@ export function useCreateProjectMutation() {
     mutationFn: async (payload: {
       id?: string;
       storeName: string;
-      webhookUrl: string;
+      webhookUrl?: string;
       gracePeriodMinutes: number;
       ownerEmail?: string;
       ownerPassword?: string;
@@ -200,7 +201,7 @@ export function useCreateProjectMutation() {
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || 'Failed to onboard project');
+        throw new Error(extractApiErrorMessage(err, 'Failed to onboard project'));
       }
       return await res.json();
     },
@@ -224,7 +225,7 @@ export function useAdminProjectUsers(projectId: string | null) {
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || 'Failed to load project users');
+        throw new Error(extractApiErrorMessage(err, 'Failed to load project users'));
       }
       const json = await res.json();
       return json.data;
@@ -261,7 +262,7 @@ export function useCreateProjectUserMutation() {
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || 'Failed to create user');
+        throw new Error(extractApiErrorMessage(err, 'Failed to create user'));
       }
       const json = await res.json();
       return json.data;
@@ -295,7 +296,7 @@ export function useResetUserPasswordMutation() {
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || 'Failed to reset password');
+        throw new Error(extractApiErrorMessage(err, 'Failed to reset password'));
       }
       const json = await res.json();
       return json.data;
@@ -325,7 +326,7 @@ export function useRevokeSessionMutation() {
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || 'Failed to revoke session');
+        throw new Error(extractApiErrorMessage(err, 'Failed to revoke session'));
       }
       return await res.json();
     },

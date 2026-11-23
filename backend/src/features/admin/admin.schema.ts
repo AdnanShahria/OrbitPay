@@ -5,10 +5,18 @@ export const verifyAdminKeySchema = z.object({
   adminKey: z.string().min(1, 'Admin key is required'),
 });
 
+const optionalWebhookUrl = z
+  .union([
+    z.string().trim().url('A valid HTTPS/HTTP webhook URL is required'),
+    z.literal(''),
+  ])
+  .optional()
+  .default('');
+
 export const createProjectSchema = z.object({
   id: z.string().trim().min(3).regex(/^[a-z0-9_-]+$/i, 'Alphanumeric project ID required').optional(),
   storeName: z.string().trim().min(2, 'Store name must be at least 2 characters'),
-  webhookUrl: z.string().url('A valid HTTPS/HTTP webhook URL is required'),
+  webhookUrl: optionalWebhookUrl,
   gracePeriodMinutes: z.number().int().min(5).max(1440).default(60),
   ownerEmail: z
     .string()
@@ -22,7 +30,7 @@ export const createProjectSchema = z.object({
 
 export const updateProjectSchema = z.object({
   storeName: z.string().trim().min(2).optional(),
-  webhookUrl: z.string().url().optional(),
+  webhookUrl: z.union([z.string().trim().url('Must be a valid HTTP/HTTPS URL'), z.literal('')]).optional(),
   gracePeriodMinutes: z.number().int().min(5).max(1440).optional(),
   isActive: z.boolean().optional(),
 });
