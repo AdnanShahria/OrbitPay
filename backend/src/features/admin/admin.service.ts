@@ -4,6 +4,7 @@ import {
   merchants,
   merchantWallets,
   merchantUsers,
+  merchantDevices,
   authSessions,
   smsLedger,
   verificationQueue,
@@ -550,6 +551,11 @@ export async function resetProjectUserPassword(
     .update(authSessions)
     .set({ revokedAt: now })
     .where(and(eq(authSessions.userId, userId), isNull(authSessions.revokedAt)));
+
+  await db
+    .update(merchantDevices)
+    .set({ isActive: false })
+    .where(and(eq(merchantDevices.userId, userId), eq(merchantDevices.isActive, true)));
 
   return {
     userId: user.id,

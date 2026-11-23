@@ -10,6 +10,7 @@ import android.os.Build
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.work.WorkManager
 import com.orbitsaas.payment.data.local.LocalStats
 import com.orbitsaas.payment.data.local.OrbitDatabase
 import com.orbitsaas.payment.data.local.PreferencesManager
@@ -301,20 +302,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Signs out from ORBIT Hub, clears local session tokens, and stops foreground sync.
+     * Signs out from ORBIT Hub, clears local session tokens immediately, stops foreground sync,
+     * and revokes the server-side session & paired device key in the background.
      */
     fun logoutMerchant(onComplete: () -> Unit = {}) {
-        viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                runCatching { apiClient.logout() }
+        val tokenToRevoke = preferences.authToken
+        val deviceKeyToRevoke = preferences.deviceKey
+
+        preferences.clearAuthSession()
+        StickyForegroundService.stopService(getApplication())
+        WorkManager.getInstance(getApplication()).cancelAllWork()
+        _orders.value = emptyList()
+        _pendingOrderCount.value = 0
+        _loginError.value = null
+        _feedbackMessage.value = "Signed out of ORBIT Hub."
+        onComplete()
+
+        if (tokenToRevoke.isNotBlank()) {
+            viewModelScope.launch(Dispatchers.IO) {
+                runCatching { apiClient.logout(tokenToRevoke, deviceKeyToRevoke) }
             }
-            preferences.clearAuthSession()
-            StickyForegroundService.stopService(getApplication())
-            _orders.value = emptyList()
-            _pendingOrderCount.value = 0
-            _loginError.value = null
-            _feedbackMessage.value = "Signed out of ORBIT Hub."
-            onComplete()
         }
     }
 
@@ -322,6 +329,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (!preferences.isLoggedIn()) return
         preferences.clearAuthSession()
         StickyForegroundService.stopService(getApplication())
+        WorkManager.getInstance(getApplication()).cancelAllWork()
         _orders.value = emptyList()
         _pendingOrderCount.value = 0
         _loginError.value = message?.takeIf { it.isNotBlank() }

@@ -152,14 +152,22 @@ class OrbitApiClient(
     /**
      * Revokes the current merchant session on ORBIT Central Hub.
      */
-    suspend fun logout(): Result<Unit> {
+    suspend fun logout(
+        tokenOverride: String? = null,
+        deviceKeyOverride: String? = null
+    ): Result<Unit> {
         return runCatching {
-            if (authToken.isBlank()) return@runCatching
+            val token = (tokenOverride ?: authToken).trim()
+            val devKey = (deviceKeyOverride ?: deviceKey).trim()
+            if (token.isBlank()) return@runCatching
             val url = "$baseUrl/api/v1/auth/logout"
             val response: HttpResponse = client.post(url) {
                 contentType(ContentType.Application.Json)
                 header(HttpHeaders.UserAgent, USER_AGENT)
-                header(HttpHeaders.Authorization, "Bearer $authToken")
+                header(HttpHeaders.Authorization, "Bearer $token")
+                if (devKey.isNotBlank()) {
+                    header("X-Device-Key", devKey)
+                }
             }
 
             if (!response.status.isSuccess() && response.status != HttpStatusCode.Unauthorized) {

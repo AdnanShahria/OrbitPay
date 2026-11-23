@@ -52,12 +52,17 @@ router.get('/me', authMerchantMiddleware, async (c) => {
  */
 router.post('/logout', authMerchantMiddleware, async (c) => {
   const sessionId = c.get('sessionId');
+  const merchantId = c.get('merchantId');
   if (!sessionId) {
     throw new UnauthorizedError('Bearer JWT session token is required');
   }
 
   const db = c.get('db');
-  await revokeSession(db, sessionId);
+  await revokeSession(db, sessionId, {
+    merchantId,
+    deviceKey: c.req.header('x-device-key')?.trim(),
+    pepper: c.env.ENCRYPTION_PEPPER || '',
+  });
   return c.json({ success: true, message: 'Session revoked successfully' });
 });
 

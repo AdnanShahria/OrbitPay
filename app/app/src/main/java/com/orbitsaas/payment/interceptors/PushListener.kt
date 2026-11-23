@@ -50,6 +50,10 @@ class PushListener : NotificationListenerService() {
             serviceScope.launch {
                 try {
                     val prefs = PreferencesManager(applicationContext)
+                    if (!prefs.isLoggedIn()) {
+                        Log.d(TAG, "Ignoring MFS notification while signed out.")
+                        return@launch
+                    }
                     val database = OrbitDatabase.getDatabase(applicationContext)
 
                     val entity = SmsEntity(

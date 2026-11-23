@@ -31,6 +31,10 @@ class SmsReceiver : BroadcastReceiver() {
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val prefs = PreferencesManager(context)
+                if (!prefs.isLoggedIn()) {
+                    Log.d(TAG, "Ignoring incoming SMS while signed out.")
+                    return@launch
+                }
                 val database = OrbitDatabase.getDatabase(context)
 
                 // Group multi-part SMS messages by originating address

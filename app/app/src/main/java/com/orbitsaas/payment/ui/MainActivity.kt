@@ -122,7 +122,10 @@ fun OrbitPaymentApp(
     LaunchedEffect(uiState.isLoggedIn, uiState.isOnboardingCompleted) {
         if (uiState.isOnboardingCompleted && !uiState.isLoggedIn) {
             val currentRoute = navController.currentBackStackEntry?.destination?.route
-            if (currentRoute == Screen.Dashboard.route) {
+            val previousRoute = navController.previousBackStackEntry?.destination?.route
+            if (currentRoute == Screen.Dashboard.route ||
+                (currentRoute == Screen.Settings.route && previousRoute != Screen.Login.route)
+            ) {
                 navController.navigate(Screen.Login.route) {
                     popUpTo(0) { inclusive = true }
                 }

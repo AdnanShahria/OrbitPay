@@ -15,6 +15,7 @@ import com.orbitsaas.payment.data.local.OrbitDatabase
 import com.orbitsaas.payment.data.local.PreferencesManager
 import com.orbitsaas.payment.data.remote.IngestSmsItem
 import com.orbitsaas.payment.data.remote.OrbitApiClient
+import com.orbitsaas.payment.data.remote.UnauthorizedException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -32,8 +33,8 @@ class SyncWorker(
     private val apiClient = OrbitApiClient(preferencesManager)
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
-        if (!preferencesManager.isConfigured()) {
-            Log.w(TAG, "Device not configured with merchantId & deviceKey. Skipping sync.")
+        if (!preferencesManager.isLoggedIn()) {
+            Log.w(TAG, "Device not signed in or configured. Skipping sync.")
             return@withContext Result.success()
         }
 
@@ -60,7 +61,14 @@ class SyncWorker(
                     database.smsDao().markUploaded(uploadedIds)
                     Log.i(TAG, "Successfully ingested ${ingestItems.size} transactions. Auto-verified: ${response.autoVerifiedCount}")
                 } else {
-                    Log.e(TAG, "Ingest failed: ${result.exceptionOrNull()?.message}")
+                    val err = result.exceptionOrNull()
+                    if (err is UnauthorizedException) {
+                        Log.w(TAG, "Background ingest returned 401 Unauthorized; clearing stale session.")
+                        preferencesManager.clearAuthSession()
+                        StickyForegroundService.stopService(applicationContext)
+                        return@withContext Result.failure()
+                    }
+                    Log.e(TAG, "Ingest failed: ${err?.message}")
                     if (runAttemptCount < 5) {
                         return@withContext Result.retry()
                     }
@@ -68,11 +76,20 @@ class SyncWorker(
             }
 
             // Sync stats & heartbeat
-            try {
-                apiClient.fetchStats()
-                sendDeviceHeartbeat()
-            } catch (e: Exception) {
-                Log.w(TAG, "Stats / heartbeat update error: ${e.message}")
+            val statsRes = apiClient.fetchStats()
+            if (statsRes.exceptionOrNull() is UnauthorizedException) {
+                Log.w(TAG, "Background stats returned 401 Unauthorized; clearing stale session.")
+                preferencesManager.clearAuthSession()
+                StickyForegroundService.stopService(applicationContext)
+                return@withContext Result.failure()
+            }
+
+            val hbRes = sendDeviceHeartbeat()
+            if (hbRes.exceptionOrNull() is UnauthorizedException) {
+                Log.w(TAG, "Background heartbeat returned 401 Unauthorized; clearing stale session.")
+                preferencesManager.clearAuthSession()
+                StickyForegroundService.stopService(applicationContext)
+                return@withContext Result.failure()
             }
 
             Result.success()
@@ -82,7 +99,7 @@ class SyncWorker(
         }
     }
 
-    private suspend fun sendDeviceHeartbeat() {
+    private suspend fun sendDeviceHeartbeat() = run {
         val batteryStatus = applicationContext.registerReceiver(null, android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED))
         val level = batteryStatus?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
         val scale = batteryStatus?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1

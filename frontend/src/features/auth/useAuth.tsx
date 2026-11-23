@@ -10,6 +10,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import {
   authFetch,
   clearAuthToken,
+  CLIENT_JWT_STORAGE_KEY,
   getAuthToken,
   setAuthToken,
   UNAUTHORIZED_EVENT,
@@ -120,9 +121,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       queryClient.clear();
     };
 
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== CLIENT_JWT_STORAGE_KEY) return;
+      if (!event.newValue) {
+        setUser(null);
+        setMerchant(null);
+        setSession(null);
+        queryClient.clear();
+      } else if (event.newValue !== event.oldValue) {
+        refreshSession();
+      }
+    };
+
     window.addEventListener(UNAUTHORIZED_EVENT, handleUnauthorized);
-    return () => window.removeEventListener(UNAUTHORIZED_EVENT, handleUnauthorized);
-  }, [queryClient]);
+    window.addEventListener('storage', handleStorage);
+    return () => {
+      window.removeEventListener(UNAUTHORIZED_EVENT, handleUnauthorized);
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, [queryClient, refreshSession]);
 
   const login = useCallback(
     async (email: string, password: string) => {
@@ -153,14 +170,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const logout = useCallback(async () => {
+    const token = getAuthToken();
+    clearState();
+    if (!token) return;
+
     try {
-      if (getAuthToken()) {
-        await authFetch('/api/v1/auth/logout', { method: 'POST' });
-      }
+      await fetch('/api/v1/auth/logout', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
     } catch {
       // Best-effort server revocation
-    } finally {
-      clearState();
     }
   }, [clearState]);
 

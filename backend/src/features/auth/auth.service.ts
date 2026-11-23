@@ -221,13 +221,31 @@ export async function getCurrentAuthContext(
 }
 
 /**
- * Revokes an active auth session immediately.
+ * Revokes an active auth session immediately and deactivates the paired device key if supplied.
  */
-export async function revokeSession(db: AppDb, sessionId: string): Promise<void> {
+export async function revokeSession(
+  db: AppDb,
+  sessionId: string,
+  deviceContext?: { merchantId?: string; deviceKey?: string; pepper?: string }
+): Promise<void> {
   await db
     .update(authSessions)
     .set({ revokedAt: new Date() })
     .where(and(eq(authSessions.id, sessionId), isNull(authSessions.revokedAt)));
+
+  if (deviceContext?.deviceKey && deviceContext.merchantId) {
+    const keyHash = await hashDeviceApiKey(deviceContext.deviceKey, deviceContext.pepper || '');
+    await db
+      .update(merchantDevices)
+      .set({ isActive: false })
+      .where(
+        and(
+          eq(merchantDevices.merchantId, deviceContext.merchantId),
+          eq(merchantDevices.deviceKeyHash, keyHash),
+          eq(merchantDevices.isActive, true)
+        )
+      );
+  }
 }
 
 /**
