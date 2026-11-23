@@ -1,0 +1,32 @@
+name = "orbit-payment"
+main = "backend/src/worker.ts"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+[assets]
+directory = "frontend/dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "orbit-payment-d1"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "backend/drizzle"
+
+# Optional R2 / KV bindings for the Service Router (`backend/src/router/`)
+# [[r2_buckets]]
+# binding = "R2_BUCKET"
+# bucket_name = "orbit-payment-media"
+#
+# [[kv_namespaces]]
+# binding = "KV"
+# id = "00000000000000000000000000000000"
+
+[triggers]
+crons = ["* * * * *"]
+
+[vars]
+ENVIRONMENT = "production"
+PRODUCTION_DOMAIN = "payment.orbitsaas.cloud"

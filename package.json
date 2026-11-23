@@ -1,0 +1,36 @@
+{
+  "name": "orbit-payment-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ORBIT Payment Hub - Multi-tenant 3-party MFS verification SaaS",
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:full": "node scripts/dev.mjs",
+    "dev:realtime": "node scripts/dev.mjs --realtime",
+    "dev:backend": "wrangler dev --port 8787",
+    "dev:frontend": "npm --workspace=frontend run dev",
+    "simulate": "node scripts/simulate-realtime.mjs",
+    "build:frontend": "npm --workspace=frontend run build",
+    "build:backend": "npm --workspace=backend run build",
+    "build": "npm --workspace=frontend run build && npm --workspace=backend run build",
+    "deploy": "npm run build && npx wrangler deploy",
+    "db:generate": "npm --workspace=backend run db:generate",
+    "db:migrate": "npm --workspace=backend run db:migrate"
+  },
+  "keywords": [
+    "orbit-pay",
+    "mfs",
+    "bkash",
+    "nagad",
+    "cloudflare-pages",
+    "hono",
+    "react19",
+    "android"
+  ],
+  "author": "ORBIT SaaS",
+  "license": "UNLICENSED"
+}

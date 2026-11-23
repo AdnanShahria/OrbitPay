@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ORBIT Pay</string>
+    <string name="push_listener_label">ORBIT Notification Listener</string>
+    <string name="foreground_service_title">ORBIT MFS Sync Active</string>
+    <string name="foreground_service_desc">Actively monitoring incoming bKash &amp; Nagad payments</string>
+    <string name="sync_channel_name">ORBIT Background Sync</string>
+    <string name="sync_channel_desc">Shows background MFS sync state and persistent listener</string>
+    <string name="alert_channel_name">ORBIT Payment Alerts</string>
+    <string name="alert_channel_desc">Instant alerts for verified storefront payments</string>
+</resources>

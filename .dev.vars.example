@@ -1,0 +1,62 @@
+# ==============================================================================
+# ORBIT Payment Hub — Cloudflare Worker Local Secrets Template (.dev.vars)
+# ==============================================================================
+# Copy this file to `.dev.vars` for local `wrangler dev` execution.
+# NEVER commit `.dev.vars` to Git.
+# In production, push secrets with:
+#   npx wrangler secret put <KEY_NAME>
+# ==============================================================================
+
+# --- Core Platform Secrets ---
+ENVIRONMENT="development"
+MASTER_ADMIN_KEY="orbit_master_admin_2026"
+ENCRYPTION_PEPPER="orbit_local_dev_pepper_change_in_prod"
+
+# --- Email Service Router (`backend/src/router/email.ts`) ---
+# Comma-separated priority order; router falls back automatically on error/quota.
+EMAIL_PROVIDER_ORDER="resend,brevo,sendpulse,aws_ses,sendgrid,cloudflare,apps_script,custom_webhook"
+EMAIL_FROM="noreply@payment.orbitsaas.cloud"
+EMAIL_FROM_NAME="ORBIT Payment Hub"
+
+RESEND_API_KEY=""
+BREVO_API_KEY=""
+SENDPULSE_CLIENT_ID=""
+SENDPULSE_CLIENT_SECRET=""
+SENDGRID_API_KEY=""
+AWS_SES_ACCESS_KEY_ID=""
+AWS_SES_SECRET_ACCESS_KEY=""
+AWS_SES_REGION="us-east-1"
+CLOUDFLARE_EMAIL_API_KEY=""
+MAILCHANNELS_API_KEY=""
+APPS_SCRIPT_EMAIL_URL=""
+CUSTOM_EMAIL_WEBHOOK_URL=""
+CUSTOM_EMAIL_WEBHOOK_SECRET=""
+
+# --- SMS & Push Notification Router (`backend/src/router/sms.ts`) ---
+SMS_PROVIDER_ORDER="bulksmsbd,ssl_wireless,twilio,fcm,custom_webhook"
+FCM_SERVER_KEY=""
+BULKSMSBD_API_KEY=""
+BULKSMSBD_SENDER_ID=""
+SSL_WIRELESS_API_TOKEN=""
+SSL_WIRELESS_SID=""
+TWILIO_ACCOUNT_SID=""
+TWILIO_AUTH_TOKEN=""
+TWILIO_FROM_NUMBER=""
+CUSTOM_SMS_WEBHOOK_URL=""
+
+# --- Image Storage Router (`backend/src/router/image.ts`) ---
+# Note: `d1` built-in fallback works locally out of the box without external keys.
+IMAGE_PROVIDER_ORDER="r2,imgbb,supabase,mongodb,d1"
+IMGBB_API_KEY=""
+SUPABASE_URL=""
+SUPABASE_SERVICE_ROLE_KEY=""
+SUPABASE_STORAGE_BUCKET="orbit-media"
+MONGODB_DATA_API_URL=""
+MONGODB_API_KEY=""
+MONGODB_DATABASE="orbit_payment"
+
+# --- Database & KV Router (`backend/src/router/database.ts`) ---
+# Note: `d1` (`router_kv_store`) works locally out of the box even without KV bound.
+DATABASE_PROVIDER_ORDER="kv,d1,supabase,mongodb,turso"
+TURSO_DATABASE_URL=""
+TURSO_AUTH_TOKEN=""

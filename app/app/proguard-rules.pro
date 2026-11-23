@@ -1,0 +1,24 @@
+# Proguard rules for Orbit Payment Companion App
+
+# Room DB
+-keep class * extends androidx.room.RoomDatabase
+-dontwarn androidx.room.paging.**
+
+# Kotlinx Serialization
+-keepattributes *Annotation*,InnerClasses
+-dontnote kotlinx.serialization.SerializationKt
+-keepclassmembers class * {
+    *** Companion;
+}
+-keepclasseswithmembers class * {
+    kotlinx.serialization.KSerializer serializer(...);
+}
+-keep,allowobfuscation,allowshrinking class * {
+    <fields>;
+}
+
+# Ktor
+-keep class io.ktor.** { *; }
+
+# Firebase Messaging
+-keep class com.google.firebase.messaging.** { *; }
