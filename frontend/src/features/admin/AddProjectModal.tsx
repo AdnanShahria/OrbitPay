@@ -44,10 +44,11 @@ export function AddProjectModal({ isOpen, onClose }: AddProjectModalProps) {
   const [storeName, setStoreName] = useState('');
   const [projectId, setProjectId] = useState('');
   const [webhookUrl, setWebhookUrl] = useState('');
-  const [gracePeriod, setGracePeriod] = useState(60);
+  const [gracePeriod, setGracePeriod] = useState('60');
   const [ownerEmail, setOwnerEmail] = useState('');
   const [ownerName, setOwnerName] = useState('');
   const [ownerPassword, setOwnerPassword] = useState('');
+  const [validationError, setValidationError] = useState<string | null>(null);
 
   const [createdResult, setCreatedResult] = useState<CreateProjectResponseData | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -66,27 +67,59 @@ export function AddProjectModal({ isOpen, onClose }: AddProjectModalProps) {
     setStoreName('');
     setProjectId('');
     setWebhookUrl('');
-    setGracePeriod(60);
+    setGracePeriod('60');
     setOwnerEmail('');
     setOwnerName('');
     setOwnerPassword('');
+    setValidationError(null);
     createMutation.reset();
     onClose();
   };
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!storeName.trim()) return;
+    if (createMutation.isPending) return;
+
+    const trimmedStore = storeName.trim();
+    const trimmedId = projectId.trim();
+    const trimmedWebhook = webhookUrl.trim();
+    const trimmedEmail = ownerEmail.trim();
+    const trimmedOwnerName = ownerName.trim();
+    const trimmedPassword = ownerPassword.trim();
+    const parsedGrace = gracePeriod.trim() === '' ? 60 : Number(gracePeriod);
+
+    if (trimmedStore.length < 2) {
+      setValidationError('Storefront name must be at least 2 characters.');
+      return;
+    }
+    if (trimmedId && (trimmedId.length < 3 || !/^[a-z0-9_-]+$/i.test(trimmedId))) {
+      setValidationError('Project ID must be at least 3 characters using only letters, numbers, "-" or "_".');
+      return;
+    }
+    if (!Number.isInteger(parsedGrace) || parsedGrace < 5 || parsedGrace > 1440) {
+      setValidationError('Grace period must be a whole number between 5 and 1440 minutes.');
+      return;
+    }
+    if ((trimmedOwnerName || trimmedPassword) && !trimmedEmail) {
+      setValidationError('Client Owner Email is required when providing an owner name or password.');
+      return;
+    }
+    if (trimmedPassword && trimmedPassword.length < 6) {
+      setValidationError('Owner password must be at least 6 characters.');
+      return;
+    }
+
+    setValidationError(null);
 
     try {
       const res = await createMutation.mutateAsync({
-        id: projectId.trim() || undefined,
-        storeName: storeName.trim(),
-        webhookUrl: webhookUrl.trim() || undefined,
-        gracePeriodMinutes: Number(gracePeriod) || 60,
-        ownerEmail: ownerEmail.trim() || undefined,
-        ownerName: ownerName.trim() || undefined,
-        ownerPassword: ownerPassword.trim() || undefined,
+        id: trimmedId || undefined,
+        storeName: trimmedStore,
+        webhookUrl: trimmedWebhook || undefined,
+        gracePeriodMinutes: parsedGrace,
+        ownerEmail: trimmedEmail || undefined,
+        ownerName: trimmedOwnerName || undefined,
+        ownerPassword: trimmedPassword || undefined,
       });
       setCreatedResult(res.data);
       toast.success(`Storefront ${res.data.storeName} onboarded`);
@@ -298,6 +331,7 @@ export function AddProjectModal({ isOpen, onClose }: AddProjectModalProps) {
                 placeholder="Leave blank to auto-generate"
                 value={projectId}
                 onChange={setProjectId}
+                hint="3+ chars: letters, numbers, - or _."
                 leadingIcon={RiHashtag}
                 inputClassName="font-mono"
               />
@@ -305,8 +339,8 @@ export function AddProjectModal({ isOpen, onClose }: AddProjectModalProps) {
               <Input
                 label="Grace Period (Minutes)"
                 type="number"
-                value={String(gracePeriod)}
-                onChange={(val) => setGracePeriod(Number(val))}
+                value={gracePeriod}
+                onChange={setGracePeriod}
                 leadingIcon={RiTimeLine}
                 hint="Accepted range: 5 to 1440 mins."
                 inputClassName="tabular-nums"
@@ -356,37 +390,43 @@ export function AddProjectModal({ isOpen, onClose }: AddProjectModalProps) {
                 />
               </div>
 
-              <div className="flex items-end gap-2">
-                <Input
-                  label="Owner Password (Optional)"
-                  placeholder="Leave blank to auto-generate strong password"
-                  value={ownerPassword}
-                  onChange={setOwnerPassword}
-                  leadingIcon={RiKey2Line}
-                  className="flex-1"
-                  inputClassName="font-mono"
-                />
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="medium"
-                  leadingIcon={RiRefreshLine}
-                  onClick={() => setOwnerPassword(generateStrongPassword())}
-                  className="shrink-0"
-                >
-                  Generate Strong Password
-                </Button>
+              <div className="space-y-1">
+                <div className="flex items-end gap-2">
+                  <Input
+                    label="Owner Password (Optional)"
+                    placeholder="Leave blank to auto-generate strong password"
+                    value={ownerPassword}
+                    onChange={setOwnerPassword}
+                    leadingIcon={RiKey2Line}
+                    className="flex-1"
+                    inputClassName="font-mono"
+                  />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="medium"
+                    leadingIcon={RiRefreshLine}
+                    onClick={() => setOwnerPassword(generateStrongPassword())}
+                    className="shrink-0"
+                  >
+                    Generate Strong Password
+                  </Button>
+                </div>
+                <p className="text-caption-2-medium text-text-tertiary">
+                  Minimum 6 characters if provided.
+                </p>
               </div>
             </div>
 
-            {createMutation.isError && (
+            {(validationError || createMutation.isError) && (
               <div
                 role="alert"
                 className="p-3 rounded-xl bg-notification-error-background border border-border-error-default/20 text-notification-error-foreground text-caption-1-medium flex items-center gap-2"
               >
                 <RiErrorWarningLine className="size-4 shrink-0" aria-hidden />
                 <span>
-                  {(createMutation.error as Error).message ||
+                  {validationError ||
+                    (createMutation.error as Error).message ||
                     'Failed to create project'}
                 </span>
               </div>

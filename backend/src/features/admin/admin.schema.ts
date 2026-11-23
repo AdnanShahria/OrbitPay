@@ -13,19 +13,25 @@ const optionalWebhookUrl = z
   .optional()
   .default('');
 
+const optionalBlankToUndefined = <T extends z.ZodTypeAny>(schema: T) =>
+  z.preprocess((val) => (typeof val === 'string' && val.trim() === '' ? undefined : val), schema.optional());
+
 export const createProjectSchema = z.object({
-  id: z.string().trim().min(3).regex(/^[a-z0-9_-]+$/i, 'Alphanumeric project ID required').optional(),
+  id: optionalBlankToUndefined(
+    z.string().trim().min(3, 'Project ID must be at least 3 characters').regex(/^[a-z0-9_-]+$/i, 'Alphanumeric project ID required')
+  ),
   storeName: z.string().trim().min(2, 'Store name must be at least 2 characters'),
   webhookUrl: optionalWebhookUrl,
   gracePeriodMinutes: z.number().int().min(5).max(1440).default(60),
-  ownerEmail: z
-    .string()
-    .trim()
-    .email('Valid owner email is required')
-    .transform((v) => v.toLowerCase())
-    .optional(),
-  ownerPassword: z.string().min(6, 'Owner password must be at least 6 characters').optional(),
-  ownerName: z.string().trim().min(2, 'Owner name must be at least 2 characters').optional(),
+  ownerEmail: optionalBlankToUndefined(
+    z
+      .string()
+      .trim()
+      .email('Valid owner email is required')
+      .transform((v) => v.toLowerCase())
+  ),
+  ownerPassword: optionalBlankToUndefined(z.string().min(6, 'Owner password must be at least 6 characters')),
+  ownerName: optionalBlankToUndefined(z.string().trim().min(2, 'Owner name must be at least 2 characters')),
 });
 
 export const updateProjectSchema = z.object({

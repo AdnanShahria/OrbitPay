@@ -202,6 +202,16 @@ export async function createAdminProject(
 
   const now = new Date();
 
+  const existingMerchant = await db
+    .select({ id: merchants.id })
+    .from(merchants)
+    .where(eq(merchants.id, merchantId))
+    .limit(1);
+
+  if (existingMerchant[0]) {
+    throw new ConflictError(`A project with ID '${merchantId}' already exists`);
+  }
+
   if (input.ownerEmail) {
     const normalizedEmail = input.ownerEmail.toLowerCase();
     const existingUser = await db
@@ -215,7 +225,7 @@ export async function createAdminProject(
     }
   }
 
-  await db.insert(merchants).values({
+  const merchantInsert = db.insert(merchants).values({
     id: merchantId,
     storeName: input.storeName,
     webhookUrl: input.webhookUrl,
@@ -228,7 +238,7 @@ export async function createAdminProject(
   });
 
   // Seed default bKash and Nagad wallets
-  await db.insert(merchantWallets).values([
+  const walletsInsert = db.insert(merchantWallets).values([
     {
       id: `wlt_${generateSecureToken(12)}`,
       merchantId,
@@ -259,32 +269,47 @@ export async function createAdminProject(
     | { id: string; email: string; fullName: string; password: string; role: 'MERCHANT_OWNER' }
     | undefined;
 
-  if (input.ownerEmail) {
-    const ownerEmail = input.ownerEmail.toLowerCase();
-    const ownerPassword = input.ownerPassword || generateTempPassword(12);
-    const ownerName = input.ownerName || `${input.storeName} Owner`;
-    const ownerId = `usr_${generateSecureToken(12)}`;
-    const passwordHash = await hashPassword(ownerPassword);
+  try {
+    if (input.ownerEmail) {
+      const ownerEmail = input.ownerEmail.toLowerCase();
+      const ownerPassword = input.ownerPassword || generateTempPassword(12);
+      const ownerName = input.ownerName || `${input.storeName} Owner`;
+      const ownerId = `usr_${generateSecureToken(12)}`;
+      const passwordHash = await hashPassword(ownerPassword);
 
-    await db.insert(merchantUsers).values({
-      id: ownerId,
-      merchantId,
-      email: ownerEmail,
-      fullName: ownerName,
-      passwordHash,
-      role: 'MERCHANT_OWNER',
-      isActive: true,
-      createdAt: now,
-      updatedAt: now,
-    });
+      const userInsert = db.insert(merchantUsers).values({
+        id: ownerId,
+        merchantId,
+        email: ownerEmail,
+        fullName: ownerName,
+        passwordHash,
+        role: 'MERCHANT_OWNER',
+        isActive: true,
+        createdAt: now,
+        updatedAt: now,
+      });
 
-    ownerAccount = {
-      id: ownerId,
-      email: ownerEmail,
-      fullName: ownerName,
-      password: ownerPassword,
-      role: 'MERCHANT_OWNER',
-    };
+      await db.batch([merchantInsert, walletsInsert, userInsert]);
+
+      ownerAccount = {
+        id: ownerId,
+        email: ownerEmail,
+        fullName: ownerName,
+        password: ownerPassword,
+        role: 'MERCHANT_OWNER',
+      };
+    } else {
+      await db.batch([merchantInsert, walletsInsert]);
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes('UNIQUE constraint failed: merchants.id')) {
+      throw new ConflictError(`A project with ID '${merchantId}' already exists`);
+    }
+    if (msg.includes('UNIQUE constraint failed: merchant_users.email')) {
+      throw new ConflictError(`A user with email '${input.ownerEmail?.toLowerCase()}' already exists`);
+    }
+    throw err;
   }
 
   return {

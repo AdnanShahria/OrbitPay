@@ -63,7 +63,24 @@ export function extractApiErrorMessage(json: unknown, fallbackError: string): st
       return obj.error;
     }
     if (obj.error && typeof obj.error === 'object') {
-      const nested = obj.error as { message?: unknown };
+      const nested = obj.error as { message?: unknown; details?: unknown };
+      if (Array.isArray(nested.details) && nested.details.length > 0) {
+        const detailMessages = nested.details
+          .map((item) => {
+            if (item && typeof item === 'object') {
+              const d = item as { path?: unknown; message?: unknown };
+              const msg = typeof d.message === 'string' ? d.message.trim() : '';
+              const path = typeof d.path === 'string' ? d.path.trim() : '';
+              if (msg && path) return `${path}: ${msg}`;
+              if (msg) return msg;
+            }
+            return '';
+          })
+          .filter(Boolean);
+        if (detailMessages.length > 0) {
+          return detailMessages.join(' · ');
+        }
+      }
       if (typeof nested.message === 'string' && nested.message.trim()) {
         return nested.message;
       }
