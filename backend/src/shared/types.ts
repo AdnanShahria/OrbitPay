@@ -2,11 +2,23 @@
 import type { AppDb } from '../db/client';
 import type { MerchantRecord } from '../db/schema';
 
+export interface SendEmailBinding {
+  send(message: {
+    from: string | { email: string; name?: string };
+    to: string | string[];
+    subject: string;
+    text?: string;
+    html?: string;
+    replyTo?: string;
+  }): Promise<{ messageId?: string } | void>;
+}
+
 export interface Env {
   DB: D1Database;
   ASSETS?: Fetcher;
   R2_BUCKET?: R2Bucket;
   KV?: KVNamespace;
+  SEND_EMAIL?: SendEmailBinding;
 
   // Core Platform Secrets
   MASTER_ADMIN_KEY?: string;

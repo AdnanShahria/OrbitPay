@@ -9,6 +9,7 @@
  */
 
 import { spawn, execSync } from 'node:child_process';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -19,6 +20,34 @@ const rootDir = path.resolve(__dirname, '..');
 const isBun = typeof process.versions.bun !== 'undefined';
 const isWindows = process.platform === 'win32';
 const isRealtimeEnabled = process.argv.includes('--realtime') || process.argv.includes('--simulate');
+const shouldOpenBrowser = process.argv.includes('--open');
+
+function getLanIp() {
+  const nets = os.networkInterfaces();
+  for (const ifaceList of Object.values(nets)) {
+    if (!ifaceList) continue;
+    for (const net of ifaceList) {
+      if (net.family === 'IPv4' && !net.internal) {
+        return net.address;
+      }
+    }
+  }
+  return null;
+}
+
+function openBrowser(url) {
+  let child;
+  if (isWindows) {
+    child = spawn('cmd', ['/c', 'start', '', url], { detached: true, stdio: 'ignore' });
+  } else if (process.platform === 'darwin') {
+    child = spawn('open', [url], { detached: true, stdio: 'ignore' });
+  } else {
+    child = spawn('xdg-open', [url], { detached: true, stdio: 'ignore' });
+  }
+  child.unref();
+}
+
+const lanIp = getLanIp();
 
 // ANSI Color Helpers
 const c = {
@@ -48,6 +77,7 @@ ${c.cyan}${c.bold}╔═══════════════════�
 ╠══════════════════════════════════════════════════════════════════════╣${c.reset}
   ${c.yellow}⚡ Runtime:${c.reset}      ${isBun ? 'Bun ' + process.versions.bun : 'Node.js ' + process.version} ${c.dim}(fastest native execution)${c.reset}
   ${c.magenta}📱 Frontend:${c.reset}     http://localhost:3000
+  ${c.magenta}🌐 Mobile (Wi-Fi):${c.reset} ${lanIp ? `http://${lanIp}:3000` : 'Unavailable (check Wi-Fi/LAN)'}
   ${c.cyan}⛅ Backend API:${c.reset}  http://localhost:8787
   ${c.green}📡 Realtime SSE:${c.reset} http://localhost:8787/api/v1/realtime/stream
   ${c.blue}💾 Database:${c.reset}     Cloudflare D1 (orbit-payment-d1)
@@ -121,6 +151,14 @@ children.push(frontendProc);
 frontendProc.stdout.on('data', (d) => log('FRONTEND', c.magenta, d));
 frontendProc.stderr.on('data', (d) => log('FRONTEND', c.red, d));
 frontendProc.on('error', (err) => log('FRONTEND', c.red, `Failed to spawn: ${err.message}`));
+
+if (shouldOpenBrowser) {
+  const openTimer = setTimeout(() => {
+    log('SYSTEM', c.green, 'Opening http://localhost:3000 in your browser...');
+    openBrowser('http://localhost:3000');
+  }, 2500);
+  openTimer.unref();
+}
 
 // 3. Optional: Real-Time Transaction Generator
 if (isRealtimeEnabled) {

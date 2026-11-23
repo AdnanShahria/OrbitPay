@@ -365,8 +365,35 @@ const EMAIL_ADAPTERS: Record<string, ProviderAdapter<NormalizedEmailPayload, Ema
 
   cloudflare: {
     id: 'cloudflare',
-    isConfigured: (env) => Boolean(env.CLOUDFLARE_EMAIL_API_KEY || env.MAILCHANNELS_API_KEY),
+    isConfigured: (env) =>
+      Boolean(env.SEND_EMAIL || env.CLOUDFLARE_EMAIL_API_KEY || env.MAILCHANNELS_API_KEY),
     execute: async (env, payload) => {
+      if (env.SEND_EMAIL) {
+        try {
+          const res = await env.SEND_EMAIL.send({
+            from: { email: payload.fromEmail, name: payload.fromName },
+            to: payload.toList.length === 1 ? payload.toList[0] : payload.toList,
+            subject: payload.subject,
+            ...(payload.text ? { text: payload.text } : {}),
+            ...(payload.html ? { html: payload.html } : {}),
+            ...(payload.replyTo ? { replyTo: payload.replyTo } : {}),
+          });
+          return {
+            ok: true,
+            statusCode: 200,
+            data: {
+              accepted: true,
+              messageId: (res as { messageId?: string } | undefined)?.messageId,
+            },
+          };
+        } catch (err) {
+          return {
+            ok: false,
+            error: err instanceof Error ? err.message : 'Cloudflare Email Service send failed',
+          };
+        }
+      }
+
       const apiKey = env.CLOUDFLARE_EMAIL_API_KEY || env.MAILCHANNELS_API_KEY;
       const content: Array<{ type: string; value: string }> = [];
       if (payload.text) content.push({ type: 'text/plain', value: payload.text });
