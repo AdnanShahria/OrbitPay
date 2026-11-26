@@ -2,6 +2,8 @@ import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { eq } from 'drizzle-orm';
 import type { AppContextEnv } from '../../shared/types';
+import { timingSafeEqual } from '../../shared/crypto';
+import { ForbiddenError } from '../../shared/errors';
 import { realtimeHub, type RealtimeEvent } from './realtime.service';
 import { ingestDeviceSmsBatch } from '../device/device.service';
 import { merchants } from '../../db/schema';
@@ -66,6 +68,14 @@ router.get('/stream', async (c) => {
  * Ingests into D1 sms_ledger, executes auto-reconciliation loop, and broadcasts live SSE event.
  */
 router.post('/simulate', async (c) => {
+  if (c.env.ENVIRONMENT === 'production') {
+    const expectedKey = c.env.MASTER_ADMIN_KEY?.trim();
+    const adminKey = c.req.header('x-admin-key')?.trim();
+    if (!expectedKey || !adminKey || !timingSafeEqual(adminKey, expectedKey)) {
+      throw new ForbiddenError('Simulation endpoint is disabled in production');
+    }
+  }
+
   const db = c.get('db');
   const body = await c.req.json().catch(() => ({}));
 
@@ -116,7 +126,7 @@ router.post('/simulate', async (c) => {
     merchant = merchantList[0];
   }
 
-  let ingestResult = { ingestedCount: 0, autoVerifiedCount: 0 };
+  let ingestResult = { ingestedCount: 0, autoVerifiedCount: 0, flaggedCount: 0 };
   if (merchant) {
     ingestResult = await ingestDeviceSmsBatch(
       db,
@@ -129,9 +139,11 @@ router.post('/simulate', async (c) => {
           trxId,
           rawSms,
           receivedAt: Date.now(),
+          smsSender: 'SIMULATOR',
+          source: 'SMS',
         },
       ],
-      c.env.FCM_SERVER_KEY
+      c.env
     );
   }
 

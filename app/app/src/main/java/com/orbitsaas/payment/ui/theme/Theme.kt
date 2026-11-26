@@ -5,11 +5,46 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
+
+val LocalOrbitDarkTheme = staticCompositionLocalOf { false }
+
+object OrbitSemanticColors {
+    val statusGreen: Color
+        @Composable
+        get() = if (LocalOrbitDarkTheme.current) StatusGreenDark else StatusGreenLight
+
+    val statusAmber: Color
+        @Composable
+        get() = if (LocalOrbitDarkTheme.current) StatusAmberDark else StatusAmberLight
+
+    val statusRed: Color
+        @Composable
+        get() = if (LocalOrbitDarkTheme.current) StatusRedDark else StatusRedLight
+
+    val statusGray: Color
+        @Composable
+        get() = if (LocalOrbitDarkTheme.current) StatusGrayDark else StatusGrayLight
+
+    @Composable
+    fun providerColor(provider: String): Color {
+        val isDark = LocalOrbitDarkTheme.current
+        return when (provider.uppercase()) {
+            "BKASH" -> if (isDark) ColorBkashDark else ColorBkashLight
+            "NAGAD" -> if (isDark) ColorNagadDark else ColorNagadLight
+            "ROCKET" -> if (isDark) ColorRocketDark else ColorRocketLight
+            "UPAY" -> if (isDark) ColorUpayDark else ColorUpayLight
+            "CELLFIN" -> if (isDark) ColorCellfinDark else ColorCellfinLight
+            else -> MaterialTheme.colorScheme.primary
+        }
+    }
+}
 
 private val DarkColorScheme = darkColorScheme(
     primary = DarkPrimary,
@@ -26,8 +61,8 @@ private val DarkColorScheme = darkColorScheme(
     onSurfaceVariant = TextSecondaryDark,
     outline = DarkBorder,
     outlineVariant = TextMutedDark,
-    error = StatusRed,
-    onError = Color.White
+    error = StatusRedDark,
+    onError = DarkBg
 )
 
 private val LightColorScheme = lightColorScheme(
@@ -45,7 +80,7 @@ private val LightColorScheme = lightColorScheme(
     onSurfaceVariant = TextSecondaryLight,
     outline = LightBorder,
     outlineVariant = TextMutedLight,
-    error = StatusRed,
+    error = StatusRedLight,
     onError = Color.White
 )
 
@@ -70,9 +105,11 @@ fun OrbitPaymentTheme(
         }
     }
 
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = Typography,
-        content = content
-    )
+    CompositionLocalProvider(LocalOrbitDarkTheme provides darkTheme) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography = Typography,
+            content = content
+        )
+    }
 }

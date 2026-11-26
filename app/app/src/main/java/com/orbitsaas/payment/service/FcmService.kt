@@ -15,19 +15,20 @@ import com.orbitsaas.payment.data.local.PreferencesManager
 import com.orbitsaas.payment.ui.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 /**
- * Handles Firebase Cloud Messaging push payloads sent from ORBIT Central Hub.
+ * Handles Firebase Cloud Messaging data-only and notification payloads sent from ORBIT Central Hub.
  * Triggers instant two-way status updates for MFS payment verification and store order alerts.
  */
 class FcmService : FirebaseMessagingService() {
 
-    private val serviceScope = CoroutineScope(Dispatchers.IO)
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onNewToken(token: String) {
         super.onNewToken(token)
-        Log.i(TAG, "New FCM Token received: $token")
+        Log.i(TAG, "New FCM Token received.")
         val prefs = PreferencesManager(applicationContext)
         prefs.fcmToken = token
 
@@ -40,7 +41,9 @@ class FcmService : FirebaseMessagingService() {
         Log.d(TAG, "FCM Message received from: ${remoteMessage.from}")
 
         val data = remoteMessage.data
-        val eventType = data["event"] ?: data["eventType"] ?: data["type"] ?: remoteMessage.notification?.title
+        val eventType = data["event"] ?: data["eventType"] ?: data["type"]
+        val notifTitle = remoteMessage.notification?.title ?: data["title"]?.takeIf { it.isNotBlank() }
+        val notifBody = remoteMessage.notification?.body ?: data["body"]?.takeIf { it.isNotBlank() }
 
         when {
             eventType == "order.created" || eventType == "order.action_required" -> {
@@ -50,22 +53,26 @@ class FcmService : FirebaseMessagingService() {
                 val customerName = data["customerName"] ?: ""
 
                 val prefix = if (eventType == "order.action_required") {
-                    "Action Required • $paymentMethod Order"
+                    getString(R.string.core_notif_action_required_prefix, paymentMethod)
                 } else {
-                    "New $paymentMethod Order"
+                    getString(R.string.core_notif_new_order_prefix, paymentMethod)
                 }
 
-                val title = remoteMessage.notification?.title ?: buildString {
+                val title = notifTitle ?: buildString {
                     append(prefix)
                     if (orderId.isNotBlank()) append(" #$orderId")
                     if (amount.isNotBlank()) append(" • ৳$amount")
                 }
 
-                val body = remoteMessage.notification?.body ?: buildString {
-                    append("Tap to review and update order")
+                val body = notifBody ?: buildString {
+                    append(getString(R.string.core_notif_order_tap_review))
                     if (orderId.isNotBlank()) append(" #$orderId")
-                    if (customerName.isNotBlank()) append(" from $customerName")
+                    if (customerName.isNotBlank()) append(" ($customerName)")
                     append(".")
+                }
+
+                if (orderId.isNotBlank()) {
+                    PreferencesManager(applicationContext).markOrderSeen(orderId)
                 }
 
                 showOrderNotification(
@@ -91,12 +98,33 @@ class FcmService : FirebaseMessagingService() {
                             )
                             Log.i(TAG, "Marked transaction $trxId as VERIFIED in Room DB ($updatedRows rows updated)")
 
-                            showVerifiedNotification(trxId, orderId, amount, provider)
+                            showVerifiedNotification(
+                                trxId = trxId,
+                                orderId = orderId,
+                                amount = amount,
+                                provider = provider,
+                                titleOverride = notifTitle,
+                                bodyOverride = notifBody
+                            )
                         } catch (e: Exception) {
                             Log.e(TAG, "Error updating verified transaction: ${e.message}", e)
                         }
                     }
+                } else if (!notifTitle.isNullOrBlank() || !notifBody.isNullOrBlank()) {
+                    showOrderNotification(
+                        notificationKey = System.currentTimeMillis().toString(),
+                        title = notifTitle ?: getString(R.string.app_name),
+                        body = notifBody.orEmpty()
+                    )
                 }
+            }
+
+            !notifTitle.isNullOrBlank() || !notifBody.isNullOrBlank() -> {
+                showOrderNotification(
+                    notificationKey = data["id"] ?: System.currentTimeMillis().toString(),
+                    title = notifTitle ?: getString(R.string.app_name),
+                    body = notifBody.orEmpty()
+                )
             }
         }
     }
@@ -124,11 +152,22 @@ class FcmService : FirebaseMessagingService() {
             .setContentIntent(pendingIntent)
             .build()
 
-        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.notify(requestCode, notification)
+        try {
+            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.notify(requestCode, notification)
+        } catch (se: SecurityException) {
+            Log.w(TAG, "Notification permission missing: ${se.message}")
+        }
     }
 
-    private fun showVerifiedNotification(trxId: String, orderId: String, amount: String, provider: String) {
+    private fun showVerifiedNotification(
+        trxId: String,
+        orderId: String,
+        amount: String,
+        provider: String,
+        titleOverride: String? = null,
+        bodyOverride: String? = null
+    ) {
         val openAppIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
@@ -140,21 +179,32 @@ class FcmService : FirebaseMessagingService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
+        val title = titleOverride ?: getString(R.string.core_notif_verified_title, provider)
+        val summary = bodyOverride ?: "TrxID: $trxId • Order: $orderId ${if (amount.isNotBlank()) "• ৳$amount" else ""}".trim()
+        val expanded = bodyOverride ?: getString(
+            R.string.core_notif_verified_body,
+            orderId.ifBlank { "-" },
+            provider,
+            trxId,
+            amount.ifBlank { "0" }
+        )
+
         val notification = NotificationCompat.Builder(this, OrbitApplication.ORBIT_ALERT_CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_orbit)
-            .setContentTitle("Payment Verified! • $provider")
-            .setContentText("TrxID: $trxId • Order: $orderId ${if (amount.isNotBlank()) "• ৳$amount" else ""}")
-            .setStyle(
-                NotificationCompat.BigTextStyle()
-                    .bigText("Order #$orderId has been successfully matched with $provider transaction $trxId ($amount BDT). Invoice dispatched to buyer.")
-            )
+            .setContentTitle(title)
+            .setContentText(summary)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(expanded))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
             .build()
 
-        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.notify(trxId.hashCode(), notification)
+        try {
+            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.notify(trxId.hashCode(), notification)
+        } catch (se: SecurityException) {
+            Log.w(TAG, "Notification permission missing: ${se.message}")
+        }
     }
 
     companion object {

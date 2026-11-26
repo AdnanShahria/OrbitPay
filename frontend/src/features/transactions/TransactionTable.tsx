@@ -24,7 +24,35 @@ import {
   RiFileCopyLine,
   RiCheckLine,
   RiFilter3Line,
+  RiErrorWarningLine,
 } from '@remixicon/react';
+
+const TRUST_FLAG_META: Record<string, { label: string; description: string }> = {
+  LEGACY_UNVERIFIED_SENDER: {
+    label: 'Unverified sender',
+    description:
+      'LEGACY_UNVERIFIED_SENDER: SMS arrived without an originating sender address and is excluded from auto-verification.',
+  },
+  UNTRUSTED_SENDER: {
+    label: 'Suspicious sender',
+    description:
+      'UNTRUSTED_SENDER: Originating sender is a personal phone number or untrusted app package.',
+  },
+  PARSE_MISMATCH: {
+    label: 'Parse mismatch',
+    description:
+      'PARSE_MISMATCH: Server re-parse of the raw SMS did not match the reported TrxID or amount.',
+  },
+};
+
+function getTrustFlagMeta(flag: string): { label: string; description: string } {
+  return (
+    TRUST_FLAG_META[flag] ?? {
+      label: 'Flagged',
+      description: `${flag}: Transaction failed server trust checks and is excluded from auto-verification.`,
+    }
+  );
+}
 
 export function TransactionTable() {
   const [selectedStatus, setSelectedStatus] = useState<TransactionStatus | 'ALL'>('ALL');
@@ -199,23 +227,43 @@ export function TransactionTable() {
 
                     {/* Status Badge */}
                     <TableCell>
-                      {tx.status === 'VERIFIED' && (
-                        <Chip variant="bold" color="lime" className="gap-1.5">
-                          <StatusDot color="green" />
-                          <span>Verified</span>
-                        </Chip>
-                      )}
-                      {tx.status === 'UNCLAIMED' && (
-                        <Chip variant="bold" color="yellow" className="gap-1.5">
-                          <StatusDot color="yellow" />
-                          <span>Unclaimed</span>
-                        </Chip>
-                      )}
-                      {tx.status === 'MANUAL_VERIFIED' && (
-                        <Chip variant="bold" color="cyan">
-                          Manual verified
-                        </Chip>
-                      )}
+                      {(() => {
+                        const trustFlag = tx.trustFlag;
+                        const flagMeta = trustFlag ? getTrustFlagMeta(trustFlag) : null;
+
+                        return (
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {tx.status === 'VERIFIED' && (
+                              <Chip variant="bold" color="lime" className="gap-1.5">
+                                <StatusDot color="green" />
+                                <span>Verified</span>
+                              </Chip>
+                            )}
+                            {tx.status === 'UNCLAIMED' && (
+                              <Chip variant="bold" color="yellow" className="gap-1.5">
+                                <StatusDot color="yellow" />
+                                <span>Unclaimed</span>
+                              </Chip>
+                            )}
+                            {tx.status === 'MANUAL_VERIFIED' && (
+                              <Chip variant="bold" color="cyan">
+                                Manual verified
+                              </Chip>
+                            )}
+                            {flagMeta && (
+                              <Chip
+                                variant="caption"
+                                color="rose"
+                                title={flagMeta.description}
+                                className="gap-1 cursor-help"
+                              >
+                                <RiErrorWarningLine className="size-3.5 shrink-0" aria-hidden />
+                                <span>{flagMeta.label}</span>
+                              </Chip>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </TableCell>
 
                     {/* Order Reference */}

@@ -48,7 +48,13 @@ data class SmsEntity(
     val receivedAt: Long = System.currentTimeMillis(),
 
     @ColumnInfo(name = "syncedAt")
-    val syncedAt: Long? = null
+    val syncedAt: Long? = null,
+
+    @ColumnInfo(name = "smsSender", defaultValue = "")
+    val smsSender: String = "",
+
+    @ColumnInfo(name = "source", defaultValue = "SMS")
+    val source: String = SOURCE_SMS
 ) {
     companion object {
         const val STATUS_PENDING_UPLOAD = "PENDING_UPLOAD"
@@ -60,5 +66,9 @@ data class SmsEntity(
         const val PROVIDER_ROCKET = "ROCKET"
         const val PROVIDER_UPAY = "UPAY"
         const val PROVIDER_CELLFIN = "CELLFIN"
+
+        const val SOURCE_SMS = "SMS"
+        const val SOURCE_NOTIFICATION = "NOTIFICATION"
+        const val SOURCE_INBOX_SCAN = "INBOX_SCAN"
     }
 }

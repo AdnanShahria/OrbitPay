@@ -14,8 +14,13 @@ import androidx.work.WorkManager
 import com.orbitsaas.payment.data.local.OrbitDatabase
 import com.orbitsaas.payment.data.local.PreferencesManager
 import com.orbitsaas.payment.data.remote.OrbitApiClient
+import com.orbitsaas.payment.service.FcmTokenRegistrar
 import com.orbitsaas.payment.service.StickyForegroundService
 import com.orbitsaas.payment.service.SyncWorker
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 
 class OrbitApplication : Application() {
@@ -24,12 +29,18 @@ class OrbitApplication : Application() {
     val preferencesManager: PreferencesManager by lazy { PreferencesManager(this) }
     val apiClient: OrbitApiClient by lazy { OrbitApiClient(preferencesManager) }
 
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     override fun onCreate() {
         super.onCreate()
         instance = this
 
         createNotificationChannels()
         setupPeriodicSyncWorker()
+
+        appScope.launch {
+            FcmTokenRegistrar.refreshToken(this@OrbitApplication)
+        }
 
         // Auto-start sticky foreground service if merchant has configured the device
         if (preferencesManager.isForegroundServiceEnabled && preferencesManager.isConfigured()) {

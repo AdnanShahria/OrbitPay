@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Message
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -42,6 +43,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -53,9 +55,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.orbitsaas.payment.R
+import com.orbitsaas.payment.ui.theme.OrbitSemanticColors
+
+private const val TOTAL_ONBOARDING_STEPS = 5
 
 @Composable
 fun OnboardingScreen(
@@ -68,7 +75,6 @@ fun OnboardingScreen(
     val permissionsLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) {
-        // Proceed to next step
         if (currentStep == 1) currentStep = 2
     }
 
@@ -79,7 +85,7 @@ fun OnboardingScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(20.dp)
+                .padding(24.dp)
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
@@ -91,13 +97,17 @@ fun OnboardingScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Merchant setup wizard",
+                        text = stringResource(R.string.onboarding_title),
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onBackground
                     )
                     Text(
-                        text = "Step $currentStep of 4",
+                        text = stringResource(
+                            R.string.onboarding_step_counter,
+                            currentStep,
+                            TOTAL_ONBOARDING_STEPS
+                        ),
                         style = MaterialTheme.typography.labelMedium.copy(
                             fontFeatureSettings = "tnum"
                         ),
@@ -110,7 +120,7 @@ fun OnboardingScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    for (i in 1..4) {
+                    for (i in 1..TOTAL_ONBOARDING_STEPS) {
                         Box(
                             modifier = Modifier
                                 .weight(1f)
@@ -171,6 +181,7 @@ fun OnboardingScreen(
                             context.startActivity(intent)
                         }
                     )
+                    5 -> StepSpoofProtectionAndReadSms()
                 }
             }
 
@@ -187,14 +198,14 @@ fun OnboardingScreen(
                         modifier = Modifier
                             .weight(1f)
                             .heightIn(min = 48.dp),
-                        shape = RoundedCornerShape(14.dp),
+                        shape = RoundedCornerShape(12.dp),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
                         colors = ButtonDefaults.outlinedButtonColors(
                             contentColor = MaterialTheme.colorScheme.onSurface
                         )
                     ) {
                         Text(
-                            text = "Back",
+                            text = stringResource(R.string.action_back),
                             style = MaterialTheme.typography.labelLarge
                         )
                     }
@@ -202,7 +213,7 @@ fun OnboardingScreen(
 
                 Button(
                     onClick = {
-                        if (currentStep < 4) {
+                        if (currentStep < TOTAL_ONBOARDING_STEPS) {
                             currentStep++
                         } else {
                             onComplete()
@@ -211,20 +222,30 @@ fun OnboardingScreen(
                     modifier = Modifier
                         .weight(1.5f)
                         .heightIn(min = 48.dp),
-                    shape = RoundedCornerShape(14.dp),
+                    shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.primary,
                         contentColor = MaterialTheme.colorScheme.onPrimary
                     )
                 ) {
                     Text(
-                        text = if (currentStep == 4) "Finish & launch" else "Next step",
+                        text = stringResource(
+                            if (currentStep == TOTAL_ONBOARDING_STEPS) {
+                                R.string.onboarding_finish_launch
+                            } else {
+                                R.string.onboarding_next_step
+                            }
+                        ),
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.SemiBold
                     )
-                    Spacer(modifier = Modifier.size(6.dp))
+                    Spacer(modifier = Modifier.size(8.dp))
                     Icon(
-                        imageVector = if (currentStep == 4) Icons.Default.Check else Icons.Default.ChevronRight,
+                        imageVector = if (currentStep == TOTAL_ONBOARDING_STEPS) {
+                            Icons.Default.Check
+                        } else {
+                            Icons.Default.ChevronRight
+                        },
                         contentDescription = null,
                         modifier = Modifier.size(16.dp)
                     )
@@ -238,23 +259,23 @@ fun OnboardingScreen(
 fun StepSmsPermissions(onRequestPermissions: () -> Unit) {
     StepCard(
         icon = Icons.Default.Message,
-        title = "1. Grant SMS permissions",
-        subtitle = "Required to capture incoming bKash & Nagad messages",
-        description = "ORBIT Pay listens for official telecom transaction SMS from 16247, 16167, and banking shortcodes. Only TrxID, amount, and sender phone number are extracted."
+        title = stringResource(R.string.onboarding_step1_title),
+        subtitle = stringResource(R.string.onboarding_step1_subtitle),
+        description = stringResource(R.string.onboarding_step1_desc)
     ) {
         Button(
             onClick = onRequestPermissions,
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = 48.dp),
-            shape = RoundedCornerShape(14.dp),
+            shape = RoundedCornerShape(12.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary
             )
         ) {
             Text(
-                text = "Grant SMS & notification permissions",
+                text = stringResource(R.string.onboarding_step1_action),
                 style = MaterialTheme.typography.labelLarge
             )
         }
@@ -265,23 +286,23 @@ fun StepSmsPermissions(onRequestPermissions: () -> Unit) {
 fun StepNotificationAccess(onOpenSettings: () -> Unit) {
     StepCard(
         icon = Icons.Default.Notifications,
-        title = "2. Notification listener access",
-        subtitle = "Sub-second push ingestion fallback",
-        description = "During high-traffic flash sales, telecom SMS can lag by up to 2 minutes. Notification listener allows ORBIT Pay to verify payments directly from bKash or Nagad app notifications."
+        title = stringResource(R.string.onboarding_step2_title),
+        subtitle = stringResource(R.string.onboarding_step2_subtitle),
+        description = stringResource(R.string.onboarding_step2_desc)
     ) {
         Button(
             onClick = onOpenSettings,
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = 48.dp),
-            shape = RoundedCornerShape(14.dp),
+            shape = RoundedCornerShape(12.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary
             )
         ) {
             Text(
-                text = "Open notification access settings",
+                text = stringResource(R.string.onboarding_step2_action),
                 style = MaterialTheme.typography.labelLarge
             )
         }
@@ -292,23 +313,23 @@ fun StepNotificationAccess(onOpenSettings: () -> Unit) {
 fun StepBatteryExemption(onOpenBattery: () -> Unit) {
     StepCard(
         icon = Icons.Default.BatteryAlert,
-        title = "3. Disable battery optimization",
-        subtitle = "Prevent Android OS from putting ORBIT to sleep",
-        description = "Aggressive OS battery savers (MIUI, ColorOS, OneUI) put background apps to sleep. Exempting ORBIT Pay from battery optimization ensures continuous payment verification."
+        title = stringResource(R.string.onboarding_step3_title),
+        subtitle = stringResource(R.string.onboarding_step3_subtitle),
+        description = stringResource(R.string.onboarding_step3_desc)
     ) {
         Button(
             onClick = onOpenBattery,
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = 48.dp),
-            shape = RoundedCornerShape(14.dp),
+            shape = RoundedCornerShape(12.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary
             )
         ) {
             Text(
-                text = "Disable battery optimization",
+                text = stringResource(R.string.onboarding_step3_action),
                 style = MaterialTheme.typography.labelLarge
             )
         }
@@ -319,25 +340,112 @@ fun StepBatteryExemption(onOpenBattery: () -> Unit) {
 fun StepRestrictedSettings(onOpenAppInfo: () -> Unit) {
     StepCard(
         icon = Icons.Default.Security,
-        title = "4. Android 13/14 restricted settings",
-        subtitle = "Unblock sideloaded APK permissions",
-        description = "On Android 13 and 14, sideloaded companion apps may have Notification Access grayed out with 'Restricted setting'.\n\nTo unblock:\n1. Tap 'Open app info' below\n2. Tap the 3 dots in the top-right corner\n3. Tap 'Allow restricted settings'\n4. Verify with device PIN or fingerprint."
+        title = stringResource(R.string.onboarding_step4_title),
+        subtitle = stringResource(R.string.onboarding_step4_subtitle),
+        description = stringResource(R.string.onboarding_step4_desc)
     ) {
         Button(
             onClick = onOpenAppInfo,
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = 48.dp),
-            shape = RoundedCornerShape(14.dp),
+            shape = RoundedCornerShape(12.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary
             )
         ) {
             Text(
-                text = "Open app info (allow restricted settings)",
+                text = stringResource(R.string.onboarding_step4_action),
                 style = MaterialTheme.typography.labelLarge
             )
+        }
+    }
+}
+
+@Composable
+fun StepSpoofProtectionAndReadSms() {
+    val greenFg = OrbitSemanticColors.statusGreen
+    StepCard(
+        icon = Icons.Default.VerifiedUser,
+        title = stringResource(R.string.onboarding_step5_title),
+        subtitle = stringResource(R.string.onboarding_step5_subtitle),
+        description = stringResource(R.string.onboarding_step5_desc)
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp)),
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.VerifiedUser,
+                        contentDescription = null,
+                        tint = greenFg,
+                        modifier = Modifier
+                            .padding(top = 2.dp)
+                            .size(20.dp)
+                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = stringResource(R.string.onboarding_step5_spoof_title),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = stringResource(R.string.onboarding_step5_spoof_desc),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            lineHeight = 20.sp
+                        )
+                    }
+                }
+            }
+
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp)),
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Message,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .padding(top = 2.dp)
+                            .size(20.dp)
+                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = stringResource(R.string.onboarding_step5_readsms_title),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = stringResource(R.string.onboarding_step5_readsms_desc),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            lineHeight = 20.sp
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -350,7 +458,7 @@ fun StepCard(
     description: String,
     action: @Composable () -> Unit
 ) {
-    val cardShape = RoundedCornerShape(20.dp)
+    val cardShape = RoundedCornerShape(16.dp)
 
     Card(
         modifier = Modifier
@@ -361,7 +469,7 @@ fun StepCard(
         shape = cardShape
     ) {
         Column(
-            modifier = Modifier.padding(20.dp),
+            modifier = Modifier.padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Box(
@@ -374,9 +482,9 @@ fun StepCard(
             ) {
                 Icon(
                     imageVector = icon,
-                    contentDescription = null,
+                    contentDescription = stringResource(R.string.cd_onboarding_step_icon),
                     tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(22.dp)
+                    modifier = Modifier.size(24.dp)
                 )
             }
 

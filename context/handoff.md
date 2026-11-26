@@ -68,3 +68,20 @@ As a developer, you don't need to manually hunt through documentation or re-expl
   > `/context history` or `/context activity`
 
 The AI will intelligently parse what you want, pull from or update the corresponding files in `context/`, and record the date, prompt, and action taken in `context/activity_log.md`.
+
+---
+
+## 🔧 Build, Secrets & Firebase Setup Quickstart
+
+1. **Worker Secrets (SMS & OTP + Auth):**
+   - See `.dev.vars.example` and `docs/SMS_AND_PUSH_SETUP.md`.
+   - Configure SMS providers via `wrangler secret put BULKSMSBD_API_KEY`, `BULKSMSBD_SENDER_ID` (or SSL Wireless / Twilio).
+   - Apply D1 migrations including `0003_sms_trust_otp.sql`: `npx wrangler d1 migrations apply orbit-pay --local` (or `--remote`).
+2. **Self-Hosted Instant Push & Optional FCM HTTP v1:**
+   - **Works out-of-the-box for `$0` without Firebase:** `MerchantPushHub` (`PUSH_HUB` SQLite Durable Object in `wrangler.toml`) + `PushWebSocketClient.kt` deliver instant `<1s` WebSocket alerts over `/api/v1/device/ws`, with automatic 60s `/api/v1/device/sync` HTTP polling fallback.
+   - **Optional Firebase Backup:** Download `google-services.json` for `com.orbitsaas.payment` into `app/app/google-services.json` and set `wrangler secret put FCM_SERVICE_ACCOUNT_JSON`.
+3. **Free Email OTP Fallback:**
+   - If no SMS gateway secret is set yet, passing optional `email` to `POST /api/v1/otp/send` automatically delivers the 6-digit OTP via your configured `routeEmail` provider.
+3. **Android Companion Build (`app/`):**
+   - Requires JDK 17 + Android SDK 34 (`app/README.md`).
+   - Run `cd app && .\gradlew.bat assembleDebug testDebugUnitTest`.

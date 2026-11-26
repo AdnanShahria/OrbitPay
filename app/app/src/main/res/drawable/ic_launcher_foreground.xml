@@ -1,0 +1,18 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Outer Orbit ring centered inside 66dp adaptive safe zone -->
+    <path
+        android:fillColor="#2563EB"
+        android:pathData="M54,27A27,27 0,1 0,81 54,27 27,0 0,0 54,27ZM54,73A19,19 0,1 1,73 54,19 19,0 0,1 54,73Z" />
+    <!-- Inner core -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,41A13,13 0,1 0,67 54,13 13,0 0,0 54,41ZM54,60A6,6 0,1 1,60 54,6 6,0 0,1 54,60Z" />
+    <!-- Orbital satellite dot -->
+    <path
+        android:fillColor="#10B981"
+        android:pathData="M73,31A4,4 0,1 0,77 35,4 4,0 0,0 73,31Z" />
+</vector>

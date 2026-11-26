@@ -68,19 +68,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import com.orbitsaas.payment.R
 import com.orbitsaas.payment.data.local.SmsEntity
 import com.orbitsaas.payment.data.remote.MerchantOrderDto
 import com.orbitsaas.payment.ui.theme.ColorBkash
-import com.orbitsaas.payment.ui.theme.ColorCellfin
-import com.orbitsaas.payment.ui.theme.ColorNagad
-import com.orbitsaas.payment.ui.theme.ColorRocket
-import com.orbitsaas.payment.ui.theme.ColorUpay
+import com.orbitsaas.payment.ui.theme.OrbitSemanticColors
 import com.orbitsaas.payment.ui.theme.StatusAmber
 import com.orbitsaas.payment.ui.theme.StatusAmberBg
 import com.orbitsaas.payment.ui.theme.StatusGray
@@ -108,6 +107,7 @@ fun DashboardScreen(
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     var selectedFeedTab by rememberSaveable { mutableIntStateOf(0) }
+    val amberTextColor = OrbitSemanticColors.statusAmber
 
     LaunchedEffect(state.feedbackMessage) {
         state.feedbackMessage?.let { msg ->
@@ -126,7 +126,7 @@ fun DashboardScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Text(
-                                text = state.storeName.ifBlank { "ORBIT Pay" },
+                                text = state.storeName.ifBlank { stringResource(R.string.app_name) },
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onBackground,
@@ -135,22 +135,26 @@ fun DashboardScreen(
                             )
                             if (state.pendingOrderCount > 0) {
                                 Surface(
-                                    shape = RoundedCornerShape(10.dp),
+                                    shape = RoundedCornerShape(8.dp),
                                     color = StatusAmberBg,
                                     modifier = Modifier.border(
                                         width = 1.dp,
                                         color = StatusAmber.copy(alpha = 0.4f),
-                                        shape = RoundedCornerShape(10.dp)
+                                        shape = RoundedCornerShape(8.dp)
                                     )
                                 ) {
                                     Text(
-                                        text = "${state.pendingOrderCount} pending",
+                                        text = pluralStringResource(
+                                            R.plurals.dashboard_pending_orders,
+                                            state.pendingOrderCount,
+                                            state.pendingOrderCount
+                                        ),
                                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                                         style = MaterialTheme.typography.labelMedium.copy(
                                             fontFeatureSettings = "tnum"
                                         ),
                                         fontWeight = FontWeight.SemiBold,
-                                        color = StatusAmber,
+                                        color = amberTextColor,
                                         maxLines = 1
                                     )
                                 }
@@ -159,7 +163,9 @@ fun DashboardScreen(
                         if (state.merchantId.isNotBlank()) {
                             Text(
                                 text = state.merchantId,
-                                style = MaterialTheme.typography.labelMedium,
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontFeatureSettings = "tnum"
+                                ),
                                 fontFamily = FontFamily.Monospace,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
@@ -175,7 +181,9 @@ fun DashboardScreen(
                     ) {
                         Icon(
                             imageVector = if (state.isDarkTheme) Icons.Default.LightMode else Icons.Default.DarkMode,
-                            contentDescription = if (state.isDarkTheme) "Switch to White theme" else "Switch to Black theme",
+                            contentDescription = stringResource(
+                                if (state.isDarkTheme) R.string.cd_switch_light_theme else R.string.cd_switch_dark_theme
+                            ),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
@@ -193,7 +201,7 @@ fun DashboardScreen(
                         } else {
                             Icon(
                                 imageVector = Icons.Default.Refresh,
-                                contentDescription = "Sync now",
+                                contentDescription = stringResource(R.string.action_sync_now),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
@@ -204,7 +212,7 @@ fun DashboardScreen(
                     ) {
                         Icon(
                             imageVector = Icons.Default.Settings,
-                            contentDescription = "Settings",
+                            contentDescription = stringResource(R.string.cd_settings),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
@@ -230,17 +238,17 @@ fun DashboardScreen(
                     )
                 } else {
                     Row(
-                        modifier = Modifier.padding(horizontal = 18.dp),
+                        modifier = Modifier.padding(horizontal = 16.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Sync,
-                            contentDescription = "Sync now",
+                            contentDescription = null,
                             modifier = Modifier.size(18.dp)
                         )
                         Text(
-                            text = "Sync now",
+                            text = stringResource(R.string.action_sync_now),
                             style = MaterialTheme.typography.labelLarge,
                             fontWeight = FontWeight.SemiBold
                         )
@@ -256,7 +264,7 @@ fun DashboardScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .padding(horizontal = 16.dp),
-            contentPadding = PaddingValues(top = 4.dp, bottom = 96.dp),
+            contentPadding = PaddingValues(top = 8.dp, bottom = 96.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // 1. Connection Status Banner / Pill
@@ -353,14 +361,10 @@ fun FeedSegmentedToggle(
                 .padding(4.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            val ordersLabel = if (pendingOrderCount > 0) {
-                "Orders & Alerts ($pendingOrderCount)"
-            } else {
-                "Orders & Alerts ($ordersCount)"
-            }
+            val displayOrderCount = if (pendingOrderCount > 0) pendingOrderCount else ordersCount
             val tabs = listOf(
-                ordersLabel,
-                "Live MFS Feed ($transactionsCount)"
+                stringResource(R.string.dashboard_tab_orders_alerts, displayOrderCount),
+                stringResource(R.string.dashboard_tab_live_mfs_feed, transactionsCount)
             )
 
             tabs.forEachIndexed { index, title ->
@@ -368,6 +372,7 @@ fun FeedSegmentedToggle(
                 Surface(
                     modifier = Modifier
                         .weight(1f)
+                        .heightIn(min = 48.dp)
                         .clip(pillShape)
                         .clickable { onSelectTab(index) },
                     shape = pillShape,
@@ -377,24 +382,29 @@ fun FeedSegmentedToggle(
                         Color.Transparent
                     }
                 ) {
-                    Text(
-                        text = title,
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 10.dp, vertical = 10.dp),
-                        style = MaterialTheme.typography.labelLarge.copy(
-                            fontFeatureSettings = "tnum"
-                        ),
-                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
-                        color = if (isSelected) {
-                            MaterialTheme.colorScheme.onPrimary
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                        textAlign = TextAlign.Center,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                            .heightIn(min = 48.dp)
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = title,
+                            style = MaterialTheme.typography.labelLarge.copy(
+                                fontFeatureSettings = "tnum"
+                            ),
+                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                            color = if (isSelected) {
+                                MaterialTheme.colorScheme.onPrimary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
         }
@@ -408,7 +418,7 @@ fun MerchantOrderCard(
     isActionInProgress: Boolean,
     onActionClick: (String) -> Unit
 ) {
-    val cardShape = RoundedCornerShape(20.dp)
+    val cardShape = RoundedCornerShape(16.dp)
     val currencyFormat = remember {
         NumberFormat.getNumberInstance(Locale.US).apply {
             minimumFractionDigits = 2
@@ -416,27 +426,60 @@ fun MerchantOrderCard(
         }
     }
 
+    val greenFg = OrbitSemanticColors.statusGreen
+    val amberFg = OrbitSemanticColors.statusAmber
+    val redFg = OrbitSemanticColors.statusRed
+    val bkashFg = OrbitSemanticColors.providerColor("BKASH")
+
     val normalizedMethod = order.paymentMethod.uppercase()
     val normalizedOrderStatus = order.orderStatus.uppercase()
     val normalizedPaymentStatus = order.paymentStatus.uppercase()
 
+    val methodLabel = when (normalizedMethod) {
+        "COD" -> stringResource(R.string.payment_method_cod)
+        "ORBIT_MFS" -> stringResource(R.string.payment_method_orbit_mfs)
+        "CARD" -> stringResource(R.string.payment_method_card)
+        else -> normalizedMethod
+    }
+
     val (methodBg, methodFg) = when (normalizedMethod) {
-        "COD" -> StatusAmberBg to StatusAmber
-        "ORBIT_MFS" -> ColorBkash.copy(alpha = 0.14f) to ColorBkash
-        "CARD" -> StatusGreenBg to StatusGreen
+        "COD" -> StatusAmberBg to amberFg
+        "ORBIT_MFS" -> ColorBkash.copy(alpha = 0.14f) to bkashFg
+        "CARD" -> StatusGreenBg to greenFg
         else -> StatusGrayBg to MaterialTheme.colorScheme.onSurfaceVariant
     }
 
+    val localizedOrderStatus = when (normalizedOrderStatus) {
+        "PENDING" -> stringResource(R.string.order_status_pending)
+        "CONFIRMED" -> stringResource(R.string.order_status_confirmed)
+        "READY_TO_SHIP" -> stringResource(R.string.order_status_ready_to_ship)
+        "SHIPPED" -> stringResource(R.string.order_status_shipped)
+        "DELIVERED" -> stringResource(R.string.order_status_delivered)
+        "COMPLETED" -> stringResource(R.string.order_status_completed)
+        "CANCELLED" -> stringResource(R.string.order_status_cancelled)
+        "REJECTED" -> stringResource(R.string.order_status_rejected)
+        else -> normalizedOrderStatus.replace("_", " ")
+    }
+
     val (orderStatusBg, orderStatusFg) = when (normalizedOrderStatus) {
-        "CONFIRMED", "DELIVERED", "COMPLETED" -> StatusGreenBg to StatusGreen
+        "CONFIRMED", "DELIVERED", "COMPLETED" -> StatusGreenBg to greenFg
         "READY_TO_SHIP", "SHIPPED" -> MaterialTheme.colorScheme.surfaceVariant to MaterialTheme.colorScheme.onSurface
-        "CANCELLED", "REJECTED" -> StatusRedBg to StatusRed
-        else -> StatusAmberBg to StatusAmber
+        "CANCELLED", "REJECTED" -> StatusRedBg to redFg
+        else -> StatusAmberBg to amberFg
+    }
+
+    val localizedPaymentStatus = when (normalizedPaymentStatus) {
+        "PENDING" -> stringResource(R.string.pay_status_pending)
+        "PAID" -> stringResource(R.string.pay_status_paid)
+        "VERIFIED" -> stringResource(R.string.pay_status_verified)
+        "FAILED" -> stringResource(R.string.pay_status_failed)
+        "REFUNDED" -> stringResource(R.string.pay_status_refunded)
+        else -> normalizedPaymentStatus.replace("_", " ")
     }
 
     val (payStatusBg, payStatusFg) = when (normalizedPaymentStatus) {
-        "PAID", "VERIFIED" -> StatusGreenBg to StatusGreen
-        "FAILED", "REFUNDED" -> StatusRedBg to StatusRed
+        "PAID", "VERIFIED" -> StatusGreenBg to greenFg
+        "FAILED", "REFUNDED" -> StatusRedBg to redFg
         else -> StatusGrayBg to MaterialTheme.colorScheme.onSurfaceVariant
     }
 
@@ -485,8 +528,8 @@ fun MerchantOrderCard(
                         )
                     ) {
                         Text(
-                            text = normalizedMethod,
-                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                            text = methodLabel,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Bold,
                             color = methodFg,
@@ -497,7 +540,10 @@ fun MerchantOrderCard(
 
                 Column(horizontalAlignment = Alignment.End) {
                     Text(
-                        text = "৳ ${currencyFormat.format(order.baseAmount)}",
+                        text = stringResource(
+                            R.string.currency_bdt_amount,
+                            currencyFormat.format(order.baseAmount)
+                        ),
                         style = MaterialTheme.typography.titleMedium.copy(
                             fontFeatureSettings = "tnum"
                         ),
@@ -506,11 +552,14 @@ fun MerchantOrderCard(
                     )
                     if (order.paidAmount > 0.0 && order.paidAmount < order.baseAmount) {
                         Text(
-                            text = "Paid ৳ ${currencyFormat.format(order.paidAmount)}",
+                            text = stringResource(
+                                R.string.order_paid_amount,
+                                currencyFormat.format(order.paidAmount)
+                            ),
                             style = MaterialTheme.typography.labelMedium.copy(
                                 fontFeatureSettings = "tnum"
                             ),
-                            color = StatusGreen
+                            color = greenFg
                         )
                     }
                 }
@@ -532,8 +581,8 @@ fun MerchantOrderCard(
                     )
                 ) {
                     Text(
-                        text = "Order: ${normalizedOrderStatus.replace("_", " ")}",
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        text = stringResource(R.string.order_status_label, localizedOrderStatus),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = orderStatusFg
@@ -550,8 +599,8 @@ fun MerchantOrderCard(
                     )
                 ) {
                     Text(
-                        text = "Pay: ${normalizedPaymentStatus.replace("_", " ")}",
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        text = stringResource(R.string.payment_status_label, localizedPaymentStatus),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Medium,
                         color = payStatusFg
@@ -569,17 +618,19 @@ fun MerchantOrderCard(
                 if (customerLabel.isNotBlank()) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Phone,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(14.dp)
+                            modifier = Modifier.size(16.dp)
                         )
                         Text(
                             text = customerLabel,
-                            style = MaterialTheme.typography.bodyMedium,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontFeatureSettings = "tnum"
+                            ),
                             color = MaterialTheme.colorScheme.onSurface,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -590,7 +641,7 @@ fun MerchantOrderCard(
                 if (!order.itemsSummary.isNullOrBlank()) {
                     Row(
                         verticalAlignment = Alignment.Top,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.ShoppingBag,
@@ -598,7 +649,7 @@ fun MerchantOrderCard(
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier
                                 .padding(top = 2.dp)
-                                .size(14.dp)
+                                .size(16.dp)
                         )
                         Text(
                             text = order.itemsSummary,
@@ -611,7 +662,7 @@ fun MerchantOrderCard(
                 }
             }
 
-            // 1-Tap Bi-directional Action Buttons
+            // 1-Tap Bi-directional Action Buttons (>= 48dp touch targets)
             val isTerminal = normalizedOrderStatus in setOf("CANCELLED", "DELIVERED", "COMPLETED")
             if (!isTerminal) {
                 FlowRow(
@@ -626,8 +677,9 @@ fun MerchantOrderCard(
                         Button(
                             onClick = { onActionClick("CONFIRM") },
                             enabled = !isActionInProgress,
+                            modifier = Modifier.heightIn(min = 48.dp),
                             shape = btnShape,
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = MaterialTheme.colorScheme.primary,
                                 contentColor = MaterialTheme.colorScheme.onPrimary
@@ -635,15 +687,18 @@ fun MerchantOrderCard(
                         ) {
                             if (isActionInProgress) {
                                 CircularProgressIndicator(
-                                    modifier = Modifier.size(14.dp),
+                                    modifier = Modifier.size(16.dp),
                                     strokeWidth = 2.dp,
                                     color = MaterialTheme.colorScheme.onPrimary
                                 )
                             } else {
-                                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(15.dp))
+                                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
                             }
-                            Spacer(modifier = Modifier.size(5.dp))
-                            Text("Confirm", style = MaterialTheme.typography.labelLarge)
+                            Spacer(modifier = Modifier.size(8.dp))
+                            Text(
+                                text = stringResource(R.string.order_action_confirm),
+                                style = MaterialTheme.typography.labelLarge
+                            )
                         }
                     }
 
@@ -653,29 +708,37 @@ fun MerchantOrderCard(
                             Button(
                                 onClick = { onActionClick("READY_TO_SHIP") },
                                 enabled = !isActionInProgress,
+                                modifier = Modifier.heightIn(min = 48.dp),
                                 shape = btnShape,
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = MaterialTheme.colorScheme.primary,
                                     contentColor = MaterialTheme.colorScheme.onPrimary
                                 )
                             ) {
-                                Icon(Icons.Default.Inventory2, contentDescription = null, modifier = Modifier.size(15.dp))
-                                Spacer(modifier = Modifier.size(5.dp))
-                                Text("Ready to Ship", style = MaterialTheme.typography.labelLarge)
+                                Icon(Icons.Default.Inventory2, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.size(8.dp))
+                                Text(
+                                    text = stringResource(R.string.order_action_ready_to_ship),
+                                    style = MaterialTheme.typography.labelLarge
+                                )
                             }
                         } else {
                             OutlinedButton(
                                 onClick = { onActionClick("READY_TO_SHIP") },
                                 enabled = !isActionInProgress,
+                                modifier = Modifier.heightIn(min = 48.dp),
                                 shape = btnShape,
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
                                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
                                 colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
                             ) {
-                                Icon(Icons.Default.Inventory2, contentDescription = null, modifier = Modifier.size(15.dp))
-                                Spacer(modifier = Modifier.size(5.dp))
-                                Text("Ready to Ship", style = MaterialTheme.typography.labelLarge)
+                                Icon(Icons.Default.Inventory2, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.size(8.dp))
+                                Text(
+                                    text = stringResource(R.string.order_action_ready_to_ship),
+                                    style = MaterialTheme.typography.labelLarge
+                                )
                             }
                         }
                     }
@@ -686,29 +749,37 @@ fun MerchantOrderCard(
                             Button(
                                 onClick = { onActionClick("SHIP") },
                                 enabled = !isActionInProgress,
+                                modifier = Modifier.heightIn(min = 48.dp),
                                 shape = btnShape,
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = MaterialTheme.colorScheme.primary,
                                     contentColor = MaterialTheme.colorScheme.onPrimary
                                 )
                             ) {
-                                Icon(Icons.Default.LocalShipping, contentDescription = null, modifier = Modifier.size(15.dp))
-                                Spacer(modifier = Modifier.size(5.dp))
-                                Text("Mark Shipped", style = MaterialTheme.typography.labelLarge)
+                                Icon(Icons.Default.LocalShipping, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.size(8.dp))
+                                Text(
+                                    text = stringResource(R.string.order_action_mark_shipped),
+                                    style = MaterialTheme.typography.labelLarge
+                                )
                             }
                         } else {
                             OutlinedButton(
                                 onClick = { onActionClick("SHIP") },
                                 enabled = !isActionInProgress,
+                                modifier = Modifier.heightIn(min = 48.dp),
                                 shape = btnShape,
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
                                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
                                 colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
                             ) {
-                                Icon(Icons.Default.LocalShipping, contentDescription = null, modifier = Modifier.size(15.dp))
-                                Spacer(modifier = Modifier.size(5.dp))
-                                Text("Mark Shipped", style = MaterialTheme.typography.labelLarge)
+                                Icon(Icons.Default.LocalShipping, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.size(8.dp))
+                                Text(
+                                    text = stringResource(R.string.order_action_mark_shipped),
+                                    style = MaterialTheme.typography.labelLarge
+                                )
                             }
                         }
                     }
@@ -717,16 +788,20 @@ fun MerchantOrderCard(
                         Button(
                             onClick = { onActionClick("MARK_PAID") },
                             enabled = !isActionInProgress,
+                            modifier = Modifier.heightIn(min = 48.dp),
                             shape = btnShape,
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = MaterialTheme.colorScheme.primary,
                                 contentColor = MaterialTheme.colorScheme.onPrimary
                             )
                         ) {
-                            Icon(Icons.Default.Payments, contentDescription = null, modifier = Modifier.size(15.dp))
-                            Spacer(modifier = Modifier.size(5.dp))
-                            Text("Mark Paid", style = MaterialTheme.typography.labelLarge)
+                            Icon(Icons.Default.Payments, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.size(8.dp))
+                            Text(
+                                text = stringResource(R.string.order_action_mark_paid),
+                                style = MaterialTheme.typography.labelLarge
+                            )
                         }
                     }
 
@@ -734,14 +809,18 @@ fun MerchantOrderCard(
                         OutlinedButton(
                             onClick = { onActionClick("CANCEL") },
                             enabled = !isActionInProgress,
+                            modifier = Modifier.heightIn(min = 48.dp),
                             shape = btnShape,
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
                             border = BorderStroke(1.dp, StatusRed.copy(alpha = 0.45f)),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = StatusRed)
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = redFg)
                         ) {
-                            Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(15.dp))
-                            Spacer(modifier = Modifier.size(5.dp))
-                            Text("Cancel", style = MaterialTheme.typography.labelLarge)
+                            Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.size(8.dp))
+                            Text(
+                                text = stringResource(R.string.order_action_cancel),
+                                style = MaterialTheme.typography.labelLarge
+                            )
                         }
                     }
                 }
@@ -752,7 +831,7 @@ fun MerchantOrderCard(
 
 @Composable
 fun OrdersLoadingCard() {
-    val cardShape = RoundedCornerShape(20.dp)
+    val cardShape = RoundedCornerShape(16.dp)
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -775,7 +854,7 @@ fun OrdersLoadingCard() {
             )
             Spacer(modifier = Modifier.size(12.dp))
             Text(
-                text = "Loading store orders...",
+                text = stringResource(R.string.dashboard_loading_orders),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -785,7 +864,7 @@ fun OrdersLoadingCard() {
 
 @Composable
 fun EmptyOrdersStateCard(onRefresh: () -> Unit) {
-    val cardShape = RoundedCornerShape(20.dp)
+    val cardShape = RoundedCornerShape(16.dp)
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -797,24 +876,24 @@ fun EmptyOrdersStateCard(onRefresh: () -> Unit) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(28.dp),
+                .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Icon(
                 imageVector = Icons.Default.ReceiptLong,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f),
+                contentDescription = stringResource(R.string.cd_empty_orders),
+                tint = MaterialTheme.colorScheme.outlineVariant,
                 modifier = Modifier.size(36.dp)
             )
             Text(
-                text = "No store orders queued",
+                text = stringResource(R.string.dashboard_empty_orders_title),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface
             )
             Text(
-                text = "Incoming COD and MFS orders from your storefront will appear here for 1-tap confirmation and dispatch.",
+                text = stringResource(R.string.dashboard_empty_orders_desc),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 8.dp),
@@ -822,13 +901,17 @@ fun EmptyOrdersStateCard(onRefresh: () -> Unit) {
             )
             OutlinedButton(
                 onClick = onRefresh,
+                modifier = Modifier.heightIn(min = 48.dp),
                 shape = RoundedCornerShape(12.dp),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
             ) {
                 Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(modifier = Modifier.size(6.dp))
-                Text("Refresh orders", style = MaterialTheme.typography.labelLarge)
+                Spacer(modifier = Modifier.size(8.dp))
+                Text(
+                    text = stringResource(R.string.action_refresh_orders),
+                    style = MaterialTheme.typography.labelLarge
+                )
             }
         }
     }
@@ -842,21 +925,23 @@ fun ConnectionStatusPill(
 ) {
     val pillBg = if (isOnline) StatusGreenBg else StatusAmberBg
     val pillBorder = if (isOnline) StatusGreen else StatusAmber
-    val textColor = if (isOnline) StatusGreen else StatusAmber
+    val dotColor = if (isOnline) StatusGreen else StatusAmber
+    val textColor = if (isOnline) OrbitSemanticColors.statusGreen else OrbitSemanticColors.statusAmber
 
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .border(1.dp, pillBorder.copy(alpha = 0.35f), RoundedCornerShape(20.dp)),
+            .border(1.dp, pillBorder.copy(alpha = 0.35f), RoundedCornerShape(16.dp)),
         color = pillBg,
-        shape = RoundedCornerShape(20.dp)
+        shape = RoundedCornerShape(16.dp)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Row(
+                modifier = Modifier.weight(1f),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
@@ -864,21 +949,25 @@ fun ConnectionStatusPill(
                     modifier = Modifier
                         .size(10.dp)
                         .clip(CircleShape)
-                        .background(if (isOnline) StatusGreen else StatusAmber)
+                        .background(dotColor)
                 )
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
                         text = when {
-                            isSyncing -> "Syncing with ORBIT Hub..."
-                            isOnline -> "Online & syncing"
-                            else -> "Offline · Local queue active"
+                            isSyncing -> stringResource(R.string.status_syncing_hub)
+                            isOnline -> stringResource(R.string.status_online_syncing)
+                            else -> stringResource(R.string.status_offline_queue)
                         },
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = textColor
                     )
                     Text(
-                        text = if (pendingCount > 0) "$pendingCount pending upload" else "All MFS messages synchronized",
+                        text = if (pendingCount > 0) {
+                            pluralStringResource(R.plurals.status_pending_uploads, pendingCount, pendingCount)
+                        } else {
+                            stringResource(R.string.status_all_synced)
+                        },
                         style = MaterialTheme.typography.labelMedium.copy(
                             fontFeatureSettings = "tnum"
                         ),
@@ -889,7 +978,9 @@ fun ConnectionStatusPill(
 
             Icon(
                 imageVector = if (isOnline) Icons.Default.Wifi else Icons.Default.WifiOff,
-                contentDescription = null,
+                contentDescription = stringResource(
+                    if (isOnline) R.string.cd_status_online else R.string.cd_status_offline
+                ),
                 tint = textColor,
                 modifier = Modifier.size(18.dp)
             )
@@ -912,33 +1003,36 @@ fun MetricCardsSection(
 
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         // Card 1: Total Verified Volume
         MetricCard(
             modifier = Modifier.weight(1.3f),
-            label = "Total verified",
-            value = "৳ ${currencyFormat.format(totalVolume)}",
-            badgeText = "Store volume",
-            badgeColor = StatusGreen
+            label = stringResource(R.string.metric_total_verified),
+            value = stringResource(R.string.currency_bdt_amount, currencyFormat.format(totalVolume)),
+            badgeText = stringResource(R.string.metric_store_volume),
+            badgeFgColor = OrbitSemanticColors.statusGreen,
+            badgeBgColor = StatusGreenBg
         )
 
         // Card 2: Verified Orders
         MetricCard(
             modifier = Modifier.weight(1f),
-            label = "Verified",
+            label = stringResource(R.string.metric_verified),
             value = verifiedOrders.toString(),
-            badgeText = "Orders",
-            badgeColor = MaterialTheme.colorScheme.primary
+            badgeText = stringResource(R.string.metric_orders),
+            badgeFgColor = MaterialTheme.colorScheme.primary,
+            badgeBgColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
         )
 
         // Card 3: Unclaimed SMS
         MetricCard(
             modifier = Modifier.weight(1f),
-            label = "Unclaimed",
+            label = stringResource(R.string.metric_unclaimed),
             value = unclaimedCount.toString(),
-            badgeText = "Personal/Queue",
-            badgeColor = StatusGray
+            badgeText = stringResource(R.string.metric_personal_queue),
+            badgeFgColor = OrbitSemanticColors.statusGray,
+            badgeBgColor = StatusGrayBg
         )
     }
 }
@@ -949,9 +1043,10 @@ fun MetricCard(
     label: String,
     value: String,
     badgeText: String,
-    badgeColor: Color
+    badgeFgColor: Color,
+    badgeBgColor: Color = badgeFgColor.copy(alpha = 0.12f)
 ) {
-    val cardShape = RoundedCornerShape(20.dp)
+    val cardShape = RoundedCornerShape(16.dp)
 
     Card(
         modifier = modifier.border(1.dp, MaterialTheme.colorScheme.outline, cardShape),
@@ -961,7 +1056,7 @@ fun MetricCard(
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Text(
                 text = label,
@@ -981,14 +1076,14 @@ fun MetricCard(
                 overflow = TextOverflow.Ellipsis
             )
             Surface(
-                shape = RoundedCornerShape(6.dp),
-                color = badgeColor.copy(alpha = 0.12f)
+                shape = RoundedCornerShape(8.dp),
+                color = badgeBgColor
             ) {
                 Text(
                     text = badgeText,
-                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                    style = MaterialTheme.typography.labelMedium.copy(fontSize = 10.sp),
-                    color = badgeColor,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = badgeFgColor,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -999,18 +1094,13 @@ fun MetricCard(
 
 @Composable
 fun TransactionItemCard(sms: SmsEntity) {
-    val providerColor = when (sms.provider.uppercase()) {
-        "BKASH" -> ColorBkash
-        "NAGAD" -> ColorNagad
-        "ROCKET" -> ColorRocket
-        "UPAY" -> ColorUpay
-        "CELLFIN" -> ColorCellfin
-        else -> MaterialTheme.colorScheme.primary
-    }
+    val providerColor = OrbitSemanticColors.providerColor(sms.provider)
+    val greenFg = OrbitSemanticColors.statusGreen
+    val amberFg = OrbitSemanticColors.statusAmber
 
     val timeFormatter = remember { SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault()) }
     val formattedTime = remember(sms.receivedAt) { timeFormatter.format(Date(sms.receivedAt)) }
-    val cardShape = RoundedCornerShape(20.dp)
+    val cardShape = RoundedCornerShape(16.dp)
 
     Card(
         modifier = Modifier
@@ -1022,7 +1112,7 @@ fun TransactionItemCard(sms: SmsEntity) {
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             // Top row: Provider Chip, TrxID, and Amount
             Row(
@@ -1031,6 +1121,7 @@ fun TransactionItemCard(sms: SmsEntity) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(
+                    modifier = Modifier.weight(1f),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
@@ -1045,7 +1136,7 @@ fun TransactionItemCard(sms: SmsEntity) {
                     ) {
                         Text(
                             text = sms.provider,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Bold,
                             color = providerColor
@@ -1059,17 +1150,22 @@ fun TransactionItemCard(sms: SmsEntity) {
                         ),
                         fontWeight = FontWeight.SemiBold,
                         fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.onSurface
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
 
                 Text(
-                    text = "৳ ${String.format(Locale.US, "%.2f", sms.amount)}",
+                    text = stringResource(
+                        R.string.currency_bdt_amount,
+                        String.format(Locale.US, "%.2f", sms.amount)
+                    ),
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontFeatureSettings = "tnum"
                     ),
                     fontWeight = FontWeight.Bold,
-                    color = StatusGreen
+                    color = greenFg
                 )
             }
 
@@ -1080,7 +1176,7 @@ fun TransactionItemCard(sms: SmsEntity) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "From: ${sms.senderNumber}",
+                    text = stringResource(R.string.tx_from_sender, sms.senderNumber),
                     style = MaterialTheme.typography.bodyMedium.copy(
                         fontFeatureSettings = "tnum"
                     ),
@@ -1091,7 +1187,7 @@ fun TransactionItemCard(sms: SmsEntity) {
                     style = MaterialTheme.typography.labelMedium.copy(
                         fontFeatureSettings = "tnum"
                     ),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f)
+                    color = MaterialTheme.colorScheme.outlineVariant
                 )
             }
 
@@ -1120,18 +1216,20 @@ fun TransactionItemCard(sms: SmsEntity) {
                                 Icon(
                                     imageVector = Icons.Default.CheckCircle,
                                     contentDescription = null,
-                                    tint = StatusGreen,
+                                    tint = greenFg,
                                     modifier = Modifier.size(14.dp)
                                 )
                                 Text(
                                     text = if (sms.externalOrderId != null) {
-                                        "Verified (${sms.externalOrderId})"
+                                        stringResource(R.string.tx_status_verified_order, sms.externalOrderId)
                                     } else {
-                                        "Verified"
+                                        stringResource(R.string.tx_status_verified)
                                     },
-                                    style = MaterialTheme.typography.labelMedium,
+                                    style = MaterialTheme.typography.labelMedium.copy(
+                                        fontFeatureSettings = "tnum"
+                                    ),
                                     fontWeight = FontWeight.SemiBold,
-                                    color = StatusGreen
+                                    color = greenFg
                                 )
                             }
                         }
@@ -1147,11 +1245,11 @@ fun TransactionItemCard(sms: SmsEntity) {
                             )
                         ) {
                             Text(
-                                text = "Pending upload",
+                                text = stringResource(R.string.tx_status_pending_upload),
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.SemiBold,
-                                color = StatusAmber
+                                color = amberFg
                             )
                         }
                     }
@@ -1166,7 +1264,7 @@ fun TransactionItemCard(sms: SmsEntity) {
                             )
                         ) {
                             Text(
-                                text = "Unclaimed",
+                                text = stringResource(R.string.tx_status_unclaimed),
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.Medium,
@@ -1182,7 +1280,7 @@ fun TransactionItemCard(sms: SmsEntity) {
 
 @Composable
 fun EmptyStateCard() {
-    val cardShape = RoundedCornerShape(20.dp)
+    val cardShape = RoundedCornerShape(16.dp)
 
     Card(
         modifier = Modifier
@@ -1195,24 +1293,24 @@ fun EmptyStateCard() {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(28.dp),
+                .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Icon(
                 imageVector = Icons.Default.Info,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f),
+                contentDescription = stringResource(R.string.cd_empty_transactions),
+                tint = MaterialTheme.colorScheme.outlineVariant,
                 modifier = Modifier.size(36.dp)
             )
             Text(
-                text = "No MFS transactions yet",
+                text = stringResource(R.string.dashboard_empty_tx_title),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface
             )
             Text(
-                text = "When incoming bKash or Nagad payments arrive on this phone, they will be captured and verified automatically in real time.",
+                text = stringResource(R.string.dashboard_empty_tx_desc),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 12.dp),

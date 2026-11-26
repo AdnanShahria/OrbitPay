@@ -530,6 +530,63 @@ This file maintains the chronological audit trail of all developer prompts, time
 
 ---
 
+### Session: 2026-11-25 18:45:00 +06:00 — Mobile App Completion, SMS Anti-Spoofing, OTP & FCM HTTP v1 (`/spin-subagents`)
+
+- **Date / Timestamp:** `2026-11-25 18:45:00 +06:00`
+- **User Prompt:**
+  > *"have you created the mobile app? with all the possible functional features and proper ui and other things? also, have you fully confiqured the sms verification things ? and other things ? /spin-subagents"*
+- **Intent Analysis:** Audit the existing Kotlin Android app and SMS verification pipeline, fix build/security/functional gaps, harden both payment-SMS capture and server reconciliation against spoofing, add missed-SMS inbox rescan, full mobile History/Verify/Diagnostics screens, Bangla+English localization, Cloudflare-native FCM HTTP v1 push with polling fallback, rate-limited OTP SMS send/verify APIs, and an `/admin` SMS & Push management panel using `/spin-subagents`.
+- **Actions Taken:**
+  1. **Spec & Contracts (`.spec/mobile-sms-hardening/`):** Created `spec.md`, `tasks.md`, `contracts.md`, and `sms-samples.json` (15-case parser & anti-spoof corpus).
+  2. **Backend Ingest & Anti-Spoofing (`B1`):** Added `sms_ledger.{sms_sender,source,trust_flag}` and `otp_codes` (`backend/src/db/schema.ts`, `0003_sms_trust_otp.sql`), hardened `backend/src/shared/parsers/mfs.ts`, created `backend/src/shared/sms-trust.ts` (`evaluateSmsTrust`), excluded flagged rows from auto-reconcile (`device.service.ts`) and checkout instant match (`checkout.service.ts`), locked `/realtime/simulate` in production, and added mobile endpoints (`/api/v1/device/{transactions,queue,manual-match,sync}`).
+  3. **Backend Messaging (`B2`):** Replaced legacy FCM API with Cloudflare Workers Web Crypto RS256 FCM HTTP v1 (`backend/src/router/fcm.ts`, `sms.ts`, `webhook.dispatcher.ts`), built rate-limited 6-digit OTP API (`/api/v1/otp/{send,verify}`), added `/api/v1/admin/messaging/{status,test-sms,test-push}`, and added `.dev.vars.example`.
+  4. **Android Core (`A1`):** Fixed Gradle wrapper (`8.9`), optional `google-services.json` plugin, release signing/minify, HTTPS `network_security_config`, adaptive launcher icon, `locales_config.xml`, `SenderTrust.kt`, `MfsParser.kt` (`ParseOutcome`), Room v2 (`MIGRATION_1_2`, `BlockedMessageEntity`), `InboxScanner.kt`, `FcmTokenRegistrar.kt`, 60s/300s `syncSince` polling fallback in `StickyForegroundService.kt`, updated `MfsParserTest.kt`, and `app/README.md`.
+  5. **Android Feature UI & Localization (`A2`, `A3`):** Switched `MainActivity.kt` to `AppCompatActivity` with 5-tab `NavigationBar`, built `HistoryScreen.kt`, `VerifyScreen.kt`, `DiagnosticsScreen.kt`, `LocaleHelper.kt`, Bangla+English string parity (`values/`, `values-bn/`), added Spoof Protection onboarding step + Settings language/extra-senders controls, and applied Apple HIG polish.
+  6. **Web Admin & Docs (`F1`):** Added `SmsPushPanel.tsx` tab in `AdminDashboard.tsx`, `trustFlag` warning chip in `TransactionTable.tsx`, OTP API section in `ECOMMERCE_INTEGRATION.md`, and `docs/SMS_AND_PUSH_SETUP.md`.
+  7. **QA Convergence & Context Update:** Verified contracts, Room v2 SQL parity, Kotlin/TS symbol consistency, and EN/BN resource key parity; fixed `MainViewModel.kt`, `VerifyViewModel.kt`, `DevicePayloads.kt`, `OrbitApiClient.kt`, `realtime.service.ts`, `worker.ts` (hourly OTP cleanup), and `useTransactions.ts`.
+- **Files Modified / Created:**
+  - `.spec/mobile-sms-hardening/{spec.md,tasks.md,contracts.md,sms-samples.json}`
+  - `.dev.vars.example`, `ECOMMERCE_INTEGRATION.md`, `docs/SMS_AND_PUSH_SETUP.md`
+  - `backend/drizzle/{0003_sms_trust_otp.sql,meta/_journal.json}`
+  - `backend/src/{index.ts,worker.ts,db/schema.ts,shared/types.ts,shared/parsers/mfs.ts,shared/sms-trust.ts}`
+  - `backend/src/router/{fcm.ts,sms.ts}`
+  - `backend/src/features/{device/*,transactions/transactions.service.ts,checkout/checkout.service.ts,realtime/realtime.routes.ts,realtime/realtime.service.ts,webhooks/webhook.dispatcher.ts,otp/*,admin/messaging.routes.ts}`
+  - `frontend/src/features/{admin/AdminDashboard.tsx,admin/SmsPushPanel.tsx,admin/useAdmin.ts,transactions/TransactionTable.tsx,transactions/useTransactions.ts}`
+  - `app/{README.md,gradle/wrapper/gradle-wrapper.properties,app/build.gradle.kts,app/proguard-rules.pro}`
+  - `app/app/src/{main/AndroidManifest.xml,main/res/**,debug/res/xml/network_security_config.xml,test/java/com/orbitsaas/payment/MfsParserTest.kt}`
+  - `app/app/src/main/java/com/orbitsaas/payment/{OrbitApplication.kt,data/**,interceptors/**,service/**,ui/**}`
+  - `context/{architecture.md,database.md,component.md,utils.feature edition.md,handoff.md,activity_log.md}`
+- **Status / Next Steps:** Static QA convergence passed across all tracks. Live builds (`npm run build`, `gradlew.bat assembleDebug testDebugUnitTest`, `wrangler d1 migrations apply`) pending user fixing the Windows `bash` PreToolUse hook.
+
+---
+
+### Session: 2026-11-25 19:50:00 +06:00 — Self-Hosted Cloudflare Durable Objects Push Hub, 3-Tier Fallback & Email OTP Fallback (`/spin-subagents`)
+
+- **Date / Timestamp:** `2026-11-25 19:50:00 +06:00`
+- **User Prompt:**
+  > *"than, created any firebase/related projects, or whatever? or can't we create spmething like it on our end? free?? mnd made everything working? with proper fallbacks? ... than build it ? /spin-subagents"*
+- **Intent Analysis:** Build a 100% free, zero-Firebase instant push notification system inside the single Cloudflare Worker using SQLite-backed Durable Objects + WebSocket Hibernation (`MerchantPushHub`), integrate an OkHttp WebSocket client + adaptive 60s/300s `/sync` polling fallback in Android, add free `routeEmail` OTP fallback, and expose 3-tier status/testing in Android Diagnostics and `/admin`.
+- **Actions Taken:**
+  1. **Spec & Contracts (`.spec/self-hosted-push-hub/`):** Created `spec.md`, `contracts.md`, and `tasks.md`.
+  2. **Backend Push Hub & Email OTP (`S1`):** Added `PUSH_HUB` Durable Object + SQLite migration `v1` in `wrangler.toml`, added `PUSH_HUB?: DurableObjectNamespace` in `backend/src/shared/types.ts`, created `MerchantPushHub` (`backend/src/durable/merchant-push-hub.ts`) with WebSocket Hibernation and `"ping"`/`"pong"` auto-response, exported it in `backend/src/worker.ts`, created `backend/src/router/push-hub.ts`, bypassed Hono CORS header mutation for `Upgrade: websocket` in `backend/src/index.ts`, added `GET /api/v1/device/ws`, updated `webhook.dispatcher.ts` (`sendPushToMerchantDevicesDetailed` Tier 1 DO WebSocket + Tier 2 optional FCM v1), added Email OTP fallback (`routeEmail`) in `otp.schema.ts` + `otp.service.ts`, and extended `/api/v1/admin/messaging/{status,test-push}`.
+  3. **Android WebSocket Client & Fallback (`S2`):** Added `okhttp:4.12.0` + ProGuard rules, created `PushWebSocketClient.kt` (45s `"ping"` keepalive, Room/notification handlers, `markOrderSeen` deduplication, HTTP 401 handling, exponential backoff), integrated it with `StickyForegroundService.kt` (adaptive 60s/300s polling + catch-up `/sync` on connect + dynamic notification status + `reconnectWebSocket`), updated `strings_core.xml` (EN/BN), and updated `app/README.md`.
+  4. **Android Diagnostics UI (`S3`):** Updated `DiagnosticsViewModel.kt` and `DiagnosticsScreen.kt` with live Self-Hosted WebSocket Push status + Reconnect button, Optional Backup (FCM) clarity, `Last instant push` telemetry, and 1:1 EN/BN strings (`strings_screens.xml`).
+  5. **Web Admin & Docs (`S4`):** Extended `useAdmin.ts` and `SmsPushPanel.tsx` for 3-tier Push Hub status (`wsDelivered`, `fcmDelivered`, `activeSockets`) and Email OTP fallback readiness; updated `ECOMMERCE_INTEGRATION.md` and `docs/SMS_AND_PUSH_SETUP.md`.
+  6. **QA Convergence & Context Update:** Verified Cloudflare DO types, CORS bypass, 5 push callers, OTP invariants, Kotlin symbol alignment, 1:1 EN/BN string parity, and BoardUI compliance; updated `context/{architecture,component,utils.feature edition,handoff,activity_log}.md`.
+- **Files Modified / Created:**
+  - `.spec/self-hosted-push-hub/{spec.md,contracts.md,tasks.md}`
+  - `wrangler.toml`, `ECOMMERCE_INTEGRATION.md`, `docs/SMS_AND_PUSH_SETUP.md`
+  - `backend/src/{worker.ts,index.ts,shared/types.ts,durable/merchant-push-hub.ts,router/push-hub.ts}`
+  - `backend/src/features/{device/device.routes.ts,webhooks/webhook.dispatcher.ts,otp/otp.schema.ts,otp/otp.service.ts,admin/messaging.routes.ts}`
+  - `frontend/src/features/admin/{useAdmin.ts,SmsPushPanel.tsx}`
+  - `app/{README.md,app/build.gradle.kts,app/proguard-rules.pro}`
+  - `app/app/src/main/java/com/orbitsaas/payment/{service/PushWebSocketClient.kt,service/StickyForegroundService.kt,ui/viewmodel/DiagnosticsViewModel.kt,ui/diagnostics/DiagnosticsScreen.kt}`
+  - `app/app/src/main/res/{values/strings_core.xml,values-bn/strings_core.xml,values/strings_screens.xml,values-bn/strings_screens.xml}`
+  - `context/{architecture.md,component.md,utils.feature edition.md,handoff.md,activity_log.md}`
+- **Status / Next Steps:** Static QA convergence passed across all tracks. Live builds pending user fixing the Windows `bash` PreToolUse hook.
+
+---
+
 ## ✍️ Log Entry Template (For Future Prompts)
 
 Whenever you prompt with `/context update` or execute any major feature:

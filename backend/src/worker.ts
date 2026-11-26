@@ -5,6 +5,7 @@ import {
   authSessions,
   checkoutSessions,
   merchantWallets,
+  otpCodes,
   routerKvStore,
   routerProviderLogs,
   verificationQueue,
@@ -12,6 +13,7 @@ import {
 import { processWebhookRetries } from './features/webhooks/webhook.dispatcher';
 import type { Env } from './shared/types';
 
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -40,6 +42,7 @@ async function runMinuteJobs(db: AppDb, now: Date): Promise<void> {
 }
 
 async function runHourlyCleanup(db: AppDb, now: Date): Promise<void> {
+  const otpCutoff = new Date(now.getTime() - ONE_DAY_MS);
   const sessionCutoff = new Date(now.getTime() - SEVEN_DAYS_MS);
   const logCutoff = new Date(now.getTime() - THIRTY_DAYS_MS);
 
@@ -47,6 +50,7 @@ async function runHourlyCleanup(db: AppDb, now: Date): Promise<void> {
     db
       .delete(routerKvStore)
       .where(and(isNotNull(routerKvStore.expiresAt), lte(routerKvStore.expiresAt, now))),
+    db.delete(otpCodes).where(lte(otpCodes.expiresAt, otpCutoff)),
     db.delete(authSessions).where(lte(authSessions.expiresAt, sessionCutoff)),
     db.delete(routerProviderLogs).where(lte(routerProviderLogs.createdAt, logCutoff)),
   ]);
@@ -102,4 +106,5 @@ const worker: ExportedHandler<Env> = {
   },
 };
 
+export { MerchantPushHub } from './durable/merchant-push-hub';
 export default worker;

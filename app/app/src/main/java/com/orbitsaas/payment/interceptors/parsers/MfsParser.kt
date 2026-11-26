@@ -1,120 +1,202 @@
 package com.orbitsaas.payment.interceptors.parsers
 
 import com.orbitsaas.payment.data.local.SmsEntity
+import com.orbitsaas.payment.interceptors.SenderTrust
 import java.util.regex.Pattern
 
 /**
- * High-performance deterministic regex extraction engine for Bangladeshi MFS providers:
- * - bKash (Personal Send Money & PRA Payment)
- * - Nagad (Personal & Merchant)
- * - Rocket (DBBL 12-digit wallet)
+ * Deterministic regex extraction and anti-spoofing parser for Bangladeshi MFS providers:
+ * - bKash (Personal Send Money, PRA Payment, Cash In)
+ * - Nagad (Standard & Key-Value Multiline)
+ * - Rocket (DBBL 16216 A/C format & Legacy 12-digit wallet)
  * - Upay (UCB MFS)
  * - Cellfin (Islami Bank Bangladesh PLC)
  */
 object MfsParser {
 
+    private const val AMT = """([0-9][0-9,]*(?:\.[0-9]{1,2})?)"""
+    private const val TK = """(?:Tk\.?|BDT)"""
+
+    private val OUTGOING_OR_OTP_REGEX = Pattern.compile(
+        """(?:\b(?:verification code|otp|one[- ]time password|security code|pin reset|login code)\b|\b(?:you have sent|send money|cash out|mobile recharge|pay bill)\b|\bpaid\s+$TK|\bpayment\s+(?:of\s+)?$TK\s*$AMT\s+to\b)""",
+        Pattern.CASE_INSENSITIVE or Pattern.DOTALL
+    )
+
     // 1. bKash Patterns
     private val BKASH_PERSONAL_REGEX = Pattern.compile(
-        """You have received Tk\s+([0-9,.]+)\s+from\s+([0-9+]+).*?TrxID\s+([A-Za-z0-9]+)""",
+        """You have received\s+(?:payment\s+)?$TK\s*$AMT\.?\s+from\s+([0-9+]+).*?TrxID:?\s*([A-Za-z0-9]+)""",
         Pattern.CASE_INSENSITIVE or Pattern.DOTALL
     )
 
     private val BKASH_PRA_REGEX = Pattern.compile(
-        """Payment received Tk\s+([0-9,.]+)\s+from\s+([0-9+]+).*?TrxID\s+([A-Za-z0-9]+)""",
+        """Payment received\s+$TK\s*$AMT\.?\s+from\s+([0-9+]+).*?TrxID:?\s*([A-Za-z0-9]+)""",
+        Pattern.CASE_INSENSITIVE or Pattern.DOTALL
+    )
+
+    private val BKASH_CASHIN_REGEX = Pattern.compile(
+        """Cash In\s+$TK\s*$AMT\.?\s+from\s+([0-9+]+).*?TrxID:?\s*([A-Za-z0-9]+)""",
         Pattern.CASE_INSENSITIVE or Pattern.DOTALL
     )
 
     private val BKASH_FALLBACK_REGEX = Pattern.compile(
-        """(?:received|Payment)\s+(?:Tk|BDT)?\s*([0-9,.]+)\s+from\s+([0-9+]+).*?TrxID:?\s*([A-Za-z0-9]+)""",
+        """(?:received|Payment)\s+(?:$TK\s*)?$AMT\.?\s+from\s+([0-9+]+).*?TrxID:?\s*([A-Za-z0-9]+)""",
         Pattern.CASE_INSENSITIVE or Pattern.DOTALL
     )
 
     // 2. Nagad Patterns
     private val NAGAD_STANDARD_REGEX = Pattern.compile(
-        """(?:received|credited)\s+(?:BDT|Tk)\s*([0-9,.]+)\s+from\s+([0-9+]+).*?TxnID:?\s*([A-Za-z0-9]+)""",
-        Pattern.CASE_INSENSITIVE or Pattern.DOTALL
-    )
-
-    private val NAGAD_ALT_REGEX = Pattern.compile(
-        """(?:Tk|BDT)\s*([0-9,.]+).*?from\s+([0-9+]+).*?TxnID:?\s*([A-Za-z0-9]+)""",
+        """(?:received|credited)\s+$TK\s*$AMT\.?\s+from\s+([0-9+]+).*?TxnID:?\s*([A-Za-z0-9]+)""",
         Pattern.CASE_INSENSITIVE or Pattern.DOTALL
     )
 
     private val NAGAD_KEYVALUE_REGEX = Pattern.compile(
-        """Amount:\s*(?:Tk|BDT)?\s*([0-9,.]+).*?Sender:\s*([0-9+]+).*?TxnID:\s*([A-Za-z0-9]+)""",
+        """Amount:\s*(?:$TK\s*)?$AMT\.?.*?Sender:\s*([0-9+]+).*?TxnID:?\s*([A-Za-z0-9]+)""",
         Pattern.CASE_INSENSITIVE or Pattern.DOTALL
     )
 
-    // 3. Rocket Patterns (Supports 12-digit DBBL numbers)
+    private val NAGAD_ALT_REGEX = Pattern.compile(
+        """$TK\s*$AMT\.?.*?from\s+([0-9+]+).*?TxnID:?\s*([A-Za-z0-9]+)""",
+        Pattern.CASE_INSENSITIVE or Pattern.DOTALL
+    )
+
+    // 3. Rocket Patterns (Supports 16216 A/C:01912345678X & legacy 12-digit DBBL numbers)
+    private val ROCKET_AC_REGEX = Pattern.compile(
+        """$TK\s*$AMT\.?\s*received\s+from\s+(?:A/C:?\s*)?([0-9+A-Za-z]{11,14}).*?(?:TxnId|TxnID|TrxID):?\s*([A-Za-z0-9]+)""",
+        Pattern.CASE_INSENSITIVE or Pattern.DOTALL
+    )
+
     private val ROCKET_STANDARD_REGEX = Pattern.compile(
-        """(?:You have received|Payment)\s+Tk\s*([0-9,.]+)\s+from\s+([0-9+]{11,13}).*?TrxID:?\s*([A-Za-z0-9]+)""",
+        """(?:You have received|Payment(?:\s+received)?)\s+$TK\s*$AMT\.?\s+from\s+(?:A/C:?\s*)?([0-9+A-Za-z]{11,14}).*?(?:TrxID|TxnID|TxnId):?\s*([A-Za-z0-9]+)""",
         Pattern.CASE_INSENSITIVE or Pattern.DOTALL
     )
 
     // 4. Upay Patterns
     private val UPAY_STANDARD_REGEX = Pattern.compile(
-        """(?:You have received|Received)\s+Tk\s*([0-9,.]+)\s+from\s+([0-9+]+).*?TrxID:?\s*([A-Za-z0-9]+)""",
+        """(?:You have received|Received)\s+$TK\s*$AMT\.?\s+from\s+([0-9+]+).*?(?:TrxID|TxnID):?\s*([A-Za-z0-9]+)""",
         Pattern.CASE_INSENSITIVE or Pattern.DOTALL
     )
 
     // 5. Cellfin Patterns
     private val CELLFIN_STANDARD_REGEX = Pattern.compile(
-        """(?:received|credited)\s+Tk\s*([0-9,.]+)\s+from\s+([0-9+]+).*?TrxID:?\s*([A-Za-z0-9]+)""",
+        """(?:You have received|received|credited)\s+$TK\s*$AMT\.?\s+from\s+([0-9+]+).*?(?:TrxID|TxnID):?\s*([A-Za-z0-9]+)""",
         Pattern.CASE_INSENSITIVE or Pattern.DOTALL
     )
 
+    private val PROVIDER_PATTERNS: List<Pair<String, List<Pattern>>> = listOf(
+        SmsEntity.PROVIDER_BKASH to listOf(
+            BKASH_PERSONAL_REGEX,
+            BKASH_PRA_REGEX,
+            BKASH_CASHIN_REGEX,
+            BKASH_FALLBACK_REGEX
+        ),
+        SmsEntity.PROVIDER_NAGAD to listOf(
+            NAGAD_STANDARD_REGEX,
+            NAGAD_KEYVALUE_REGEX,
+            NAGAD_ALT_REGEX
+        ),
+        SmsEntity.PROVIDER_ROCKET to listOf(
+            ROCKET_AC_REGEX,
+            ROCKET_STANDARD_REGEX
+        ),
+        SmsEntity.PROVIDER_UPAY to listOf(
+            UPAY_STANDARD_REGEX
+        ),
+        SmsEntity.PROVIDER_CELLFIN to listOf(
+            CELLFIN_STANDARD_REGEX
+        )
+    )
+
     /**
-     * Parses an incoming SMS text or Push Notification payload.
-     *
-     * @param rawText The raw text message.
-     * @param sender The sender address, shortcode, or app package name.
-     * @return [ParsedTransaction] or null if the message does not match an incoming payment.
+     * Parses an incoming SMS, notification, or inbox-scan payload and enforces sender trust
+     * and provider consistency.
      */
-    fun parse(rawText: String, sender: String? = null): ParsedTransaction? {
+    fun parse(
+        rawText: String,
+        sender: String?,
+        source: String = SmsEntity.SOURCE_SMS,
+        extraTrustedSenders: String = ""
+    ): ParseOutcome {
         val cleanText = rawText.trim()
-        val normalizedSender = sender?.trim()?.lowercase() ?: ""
+        if (cleanText.isEmpty()) return ParseOutcome.NotPayment
 
-        // Check provider hint from sender shortcode or package name
-        val providerHint = resolveProviderHint(normalizedSender, cleanText)
-
-        // 1. Try matching bKash
-        if (providerHint == null || providerHint == SmsEntity.PROVIDER_BKASH) {
-            parseWithPattern(cleanText, BKASH_PERSONAL_REGEX, SmsEntity.PROVIDER_BKASH)?.let { return it }
-            parseWithPattern(cleanText, BKASH_PRA_REGEX, SmsEntity.PROVIDER_BKASH)?.let { return it }
-            parseWithPattern(cleanText, BKASH_FALLBACK_REGEX, SmsEntity.PROVIDER_BKASH)?.let { return it }
+        if (OUTGOING_OR_OTP_REGEX.matcher(cleanText).find()) {
+            return ParseOutcome.NotPayment
         }
 
-        // 2. Try matching Nagad
-        if (providerHint == null || providerHint == SmsEntity.PROVIDER_NAGAD) {
-            parseWithPattern(cleanText, NAGAD_STANDARD_REGEX, SmsEntity.PROVIDER_NAGAD)?.let { return it }
-            parseWithPattern(cleanText, NAGAD_ALT_REGEX, SmsEntity.PROVIDER_NAGAD)?.let { return it }
-            parseWithPattern(cleanText, NAGAD_KEYVALUE_REGEX, SmsEntity.PROVIDER_NAGAD)?.let { return it }
+        val cleanSender = sender?.trim().orEmpty()
+        val trust = SenderTrust.evaluate(cleanSender, source, extraTrustedSenders)
+
+        if (trust.trusted && trust.provider != null) {
+            val matchedSameProvider = parseForProvider(cleanText, trust.provider, cleanSender, source)
+            if (matchedSameProvider != null) {
+                return ParseOutcome.Accepted(matchedSameProvider)
+            }
+
+            // Detect cross-provider spoofing (e.g., Nagad-formatted text from bKash sender)
+            val matchedOther = parseAnyProvider(cleanText, cleanSender, source, excludeProvider = trust.provider)
+            if (matchedOther != null) {
+                return ParseOutcome.Rejected(
+                    reason = "Provider mismatch: sender $cleanSender expects ${trust.provider}, parsed ${matchedOther.provider}",
+                    provider = matchedOther.provider
+                )
+            }
+            return ParseOutcome.NotPayment
         }
 
-        // 3. Try matching Rocket
-        if (providerHint == null || providerHint == SmsEntity.PROVIDER_ROCKET) {
-            parseWithPattern(cleanText, ROCKET_STANDARD_REGEX, SmsEntity.PROVIDER_ROCKET)?.let { return it }
+        // Untrusted or missing sender: only flag as Rejected if message actually parses as a payment
+        val parsedAny = parseAnyProvider(cleanText, cleanSender, source)
+        if (parsedAny != null) {
+            return ParseOutcome.Rejected(
+                reason = trust.reason ?: "Untrusted sender: ${cleanSender.ifBlank { "unknown" }}",
+                provider = parsedAny.provider
+            )
         }
 
-        // 4. Try matching Upay
-        if (providerHint == null || providerHint == SmsEntity.PROVIDER_UPAY) {
-            parseWithPattern(cleanText, UPAY_STANDARD_REGEX, SmsEntity.PROVIDER_UPAY)?.let { return it }
-        }
+        return ParseOutcome.NotPayment
+    }
 
-        // 5. Try matching Cellfin
-        if (providerHint == null || providerHint == SmsEntity.PROVIDER_CELLFIN) {
-            parseWithPattern(cleanText, CELLFIN_STANDARD_REGEX, SmsEntity.PROVIDER_CELLFIN)?.let { return it }
-        }
+    fun parseOrNull(
+        rawText: String,
+        sender: String? = null,
+        source: String = SmsEntity.SOURCE_SMS,
+        extraTrustedSenders: String = ""
+    ): ParsedTransaction? {
+        return (parse(rawText, sender, source, extraTrustedSenders) as? ParseOutcome.Accepted)?.transaction
+    }
 
-        // Final exhaustive fallback if hint was restrictive
-        if (providerHint != null) {
-            return parse(rawText, null)
+    private fun parseAnyProvider(
+        text: String,
+        smsSender: String,
+        source: String,
+        excludeProvider: String? = null
+    ): ParsedTransaction? {
+        for ((provider, _) in PROVIDER_PATTERNS) {
+            if (provider == excludeProvider) continue
+            parseForProvider(text, provider, smsSender, source)?.let { return it }
         }
-
         return null
     }
 
-    private fun parseWithPattern(text: String, pattern: Pattern, provider: String): ParsedTransaction? {
+    private fun parseForProvider(
+        text: String,
+        provider: String,
+        smsSender: String,
+        source: String
+    ): ParsedTransaction? {
+        val patterns = PROVIDER_PATTERNS.firstOrNull { it.first == provider }?.second ?: return null
+        for (pattern in patterns) {
+            parseWithPattern(text, pattern, provider, smsSender, source)?.let { return it }
+        }
+        return null
+    }
+
+    private fun parseWithPattern(
+        text: String,
+        pattern: Pattern,
+        provider: String,
+        smsSender: String,
+        source: String
+    ): ParsedTransaction? {
         val matcher = pattern.matcher(text)
         if (matcher.find()) {
             val amountStr = matcher.group(1)?.replace(",", "") ?: return null
@@ -122,7 +204,9 @@ object MfsParser {
             val trxIdStr = matcher.group(3) ?: return null
 
             val amount = amountStr.toDoubleOrNull() ?: return null
-            val normalizedSender = sanitizePhoneNumber(senderStr)
+            if (amount <= 0.0) return null
+
+            val normalizedSender = sanitizePhoneNumber(senderStr, provider)
             val normalizedTrxId = trxIdStr.trim().uppercase()
 
             if (normalizedTrxId.length < 5) return null
@@ -132,41 +216,24 @@ object MfsParser {
                 trxId = normalizedTrxId,
                 amount = amount,
                 senderNumber = normalizedSender,
-                rawText = text
+                rawText = text,
+                smsSender = smsSender,
+                source = source
             )
         }
         return null
     }
 
     /**
-     * Identifies provider from sender shortcode, package name, or text markers.
-     */
-    private fun resolveProviderHint(sender: String, text: String): String? {
-        val lowerText = text.lowercase()
-
-        return when {
-            sender.contains("bkash") || sender == "16247" || sender.contains("com.bkash.customerapp") -> SmsEntity.PROVIDER_BKASH
-            sender.contains("nagad") || sender == "16167" || sender.contains("com.konasl.nagad") -> SmsEntity.PROVIDER_NAGAD
-            sender.contains("rocket") || sender == "16216" || sender.contains("dbbl") || sender.contains("com.dbbl.mbb.rocket") -> SmsEntity.PROVIDER_ROCKET
-            sender.contains("upay") || sender == "16268" || sender.contains("bd.com.upay.customer") -> SmsEntity.PROVIDER_UPAY
-            sender.contains("cellfin") || sender == "16259" || sender.contains("ibbl") || sender.contains("com.ibbl.cellfin") -> SmsEntity.PROVIDER_CELLFIN
-            lowerText.contains("bkash") && lowerText.contains("trxid") -> SmsEntity.PROVIDER_BKASH
-            (lowerText.contains("nagad") || lowerText.contains("txnid")) && lowerText.contains("bdt") -> SmsEntity.PROVIDER_NAGAD
-            lowerText.contains("rocket") -> SmsEntity.PROVIDER_ROCKET
-            lowerText.contains("upay") -> SmsEntity.PROVIDER_UPAY
-            lowerText.contains("cellfin") -> SmsEntity.PROVIDER_CELLFIN
-            else -> null
-        }
-    }
-
-    /**
      * Sanitizes Bangladeshi mobile numbers:
+     * - Strips trailing check letters (e.g. Rocket A/C:01912345678X -> 01912345678).
      * - Strips +88 / 88 international dial code.
      * - Strips non-digit formatting characters (spaces, dashes, parentheses).
-     * - Preserves 11-digit numbers (or 12-digit for DBBL Rocket).
+     * - For ROCKET, normalizes 12-digit check-digit numbers to 11 digits.
      */
-    fun sanitizePhoneNumber(rawNumber: String): String {
-        var cleaned = rawNumber.replace(Regex("[^0-9+]"), "")
+    fun sanitizePhoneNumber(rawNumber: String, provider: String? = null): String {
+        val withoutTrailingLetters = rawNumber.trim().replace(Regex("[A-Za-z]+$"), "")
+        var cleaned = withoutTrailingLetters.replace(Regex("[^0-9+]"), "")
 
         if (cleaned.startsWith("+880")) {
             cleaned = cleaned.substring(3)
@@ -180,6 +247,10 @@ object MfsParser {
 
         if (!cleaned.startsWith("0") && cleaned.length in 10..11) {
             cleaned = "0$cleaned"
+        }
+
+        if (provider == SmsEntity.PROVIDER_ROCKET && cleaned.length == 12 && cleaned.startsWith("01")) {
+            cleaned = cleaned.substring(0, 11)
         }
 
         return cleaned

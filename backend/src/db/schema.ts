@@ -9,6 +9,9 @@ export type AccountType = (typeof ACCOUNT_TYPES)[number];
 export const LEDGER_STATUSES = ['UNCLAIMED', 'VERIFIED', 'MANUAL_VERIFIED'] as const;
 export type LedgerStatus = (typeof LEDGER_STATUSES)[number];
 
+export const SMS_SOURCES = ['SMS', 'NOTIFICATION', 'INBOX_SCAN'] as const;
+export type SmsSource = (typeof SMS_SOURCES)[number];
+
 export const MATCH_TYPES = ['EXACT_UNIQUE', 'BASE_AMOUNT_FALLBACK', 'OVERPAID', 'MANUAL_VERIFIED'] as const;
 export type MatchType = (typeof MATCH_TYPES)[number];
 
@@ -91,6 +94,9 @@ export const smsLedger = sqliteTable('sms_ledger', {
   externalOrderId: text('external_order_id'),
   smsReceivedAt: integer('sms_received_at', { mode: 'timestamp' }).notNull(),
   verifiedAt: integer('verified_at', { mode: 'timestamp' }),
+  smsSender: text('sms_sender'),
+  source: text('source', { enum: ['SMS', 'NOTIFICATION', 'INBOX_SCAN'] }).default('SMS').notNull(),
+  trustFlag: text('trust_flag'),
 }, (table) => ({
   uniqueMerchantTrx: uniqueIndex('unique_merchant_trx').on(table.merchantId, table.trxId),
   statusLookupIdx: index('idx_ledger_status').on(table.merchantId, table.status),
@@ -309,3 +315,22 @@ export type NewMerchantDevice = typeof merchantDevices.$inferInsert;
 
 export type MerchantOrderRecord = typeof merchantOrders.$inferSelect;
 export type NewMerchantOrder = typeof merchantOrders.$inferInsert;
+
+// 14. OTP Verification Codes
+export const otpCodes = sqliteTable('otp_codes', {
+  id: text('id').primaryKey(),
+  merchantId: text('merchant_id').references(() => merchants.id),
+  purpose: text('purpose').notNull(),
+  phone: text('phone').notNull(),
+  codeHash: text('code_hash').notNull(),
+  attempts: integer('attempts').notNull().default(0),
+  provider: text('provider'),
+  expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+  consumedAt: integer('consumed_at', { mode: 'timestamp' }),
+  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()).notNull(),
+}, (t) => ({
+  phoneIdx: index('idx_otp_phone').on(t.phone, t.purpose, t.createdAt),
+}));
+
+export type OtpCodeRecord = typeof otpCodes.$inferSelect;
+export type NewOtpCode = typeof otpCodes.$inferInsert;

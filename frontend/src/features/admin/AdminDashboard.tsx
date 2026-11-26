@@ -4,6 +4,7 @@ import {
   RiBarChartBoxLine,
   RiFlashlightLine,
   RiLockLine,
+  RiMessage2Line,
   RiRadioButtonLine,
   RiShieldCheckLine,
   RiStore2Line,
@@ -23,6 +24,7 @@ import { AdminOverviewCards } from './AdminOverviewCards';
 import { GlobalQueueTable } from './GlobalQueueTable';
 import { GlobalWebhookTable } from './GlobalWebhookTable';
 import { ProjectManagerTable } from './ProjectManagerTable';
+import { SmsPushPanel } from './SmsPushPanel';
 import {
   useAdminAuth,
   useAdminOverview,
@@ -31,7 +33,7 @@ import {
   useAdminWebhooks,
 } from './useAdmin';
 
-export type AdminTab = 'projects' | 'telemetry' | 'webhooks' | 'queue';
+export type AdminTab = 'projects' | 'telemetry' | 'webhooks' | 'queue' | 'messaging';
 
 interface AdminDashboardProps {
   onExit: () => void;
@@ -188,6 +190,9 @@ function AdminDashboardContent({
             <Tab id="queue" icon={RiTimeLine} count={queue?.length}>
               Verification Queue
             </Tab>
+            <Tab id="messaging" icon={RiMessage2Line}>
+              SMS &amp; Push
+            </Tab>
           </TabList>
 
           <TabPanel id="projects">
@@ -207,6 +212,10 @@ function AdminDashboardContent({
 
           <TabPanel id="queue">
             <GlobalQueueTable queue={queue} isLoading={queueLoading} />
+          </TabPanel>
+
+          <TabPanel id="messaging">
+            <SmsPushPanel />
           </TabPanel>
         </Tabs>
       </main>

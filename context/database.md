@@ -10,9 +10,9 @@
 |---|---|
 | **Document** | Database Schemas, Entities, Indexes & Data Dictionary |
 | **Status** | Active / Production Specification |
-| **Last Updated** | 2026-11-23 00:05:00 +06:00 |
-| **Last Prompt / Trigger** | Unique positive 2-decimal poisha checkout, admin-provisioned JWT/Session auth, and bi-directional e-commerce order sync |
-| **Actions Taken** | Added `checkout_sessions`, `merchant_users`, `auth_sessions`, `merchant_devices`, and `merchant_orders` tables plus `sms_ledger.match_type` and `verification_queue.{base_amount,unique_amount,submitted_amount}` columns (`backend/drizzle/0002_auth_unique_orders.sql`). |
+| **Last Updated** | 2026-11-25 18:45:00 +06:00 |
+| **Last Prompt / Trigger** | Mobile app completion, anti-spoofing SMS/push verification, OTP API, FCM HTTP v1 & polling fallback (`/spin-subagents`) |
+| **Actions Taken** | Added `sms_ledger.{sms_sender,source,trust_flag}`, `otp_codes` table (`backend/drizzle/0003_sms_trust_otp.sql`), and upgraded Android Room DB to `version = 2` with `MIGRATION_1_2` and `blocked_messages` (`BlockedMessageEntity`, `BlockedMessageDao`). |
 
 ---
 
@@ -216,60 +216,33 @@ export const routerProviderLogs = sqliteTable("router_provider_logs", {
   callerId: text("caller_id"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 });
+
+// 9. SMS Ledger Anti-Spoofing Columns (0003_sms_trust_otp.sql)
+// Added to sms_ledger:
+//   smsSender: text('sms_sender')
+//   source: text('source', { enum: ['SMS', 'NOTIFICATION', 'INBOX_SCAN'] }).default('SMS').notNull()
+//   trustFlag: text('trust_flag') // LEGACY_UNVERIFIED_SENDER | UNTRUSTED_SENDER | PARSE_MISMATCH
+
+// 10. OTP Codes Table (0003_sms_trust_otp.sql)
+export const otpCodes = sqliteTable("otp_codes", {
+  id: text("id").primaryKey(),
+  merchantId: text("merchant_id").references(() => merchants.id),
+  purpose: text("purpose").notNull(),
+  phone: text("phone").notNull(),
+  codeHash: text("code_hash").notNull(),
+  attempts: integer("attempts").notNull().default(0),
+  provider: text("provider"),
+  expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+  consumedAt: integer("consumed_at", { mode: "timestamp" }),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
+});
 ```
 
 ---
 
-## 3. Companion Android Local Database (`app/data/local/`)
+## 3. Companion Android Local Database (`app/app/src/main/java/com/orbitsaas/payment/data/local/`)
 
-Powered by **Android Jetpack Room DB** (SQLite):
+Powered by **Android Jetpack Room DB v2** (SQLite) with non-destructive `MIGRATION_1_2`:
 
-```kotlin
-// app/data/local/SmsEntity.kt
-package com.orbitsaas.payment.data.local
-
-import androidx.room.Entity
-import androidx.room.Index
-import androidx.room.PrimaryKey
-
-@Entity(
-    tableName = "local_sms",
-    indices = [Index(value = ["trxId"], unique = true)]
-)
-data class SmsEntity(
-    @PrimaryKey val id: String,
-    val provider: String, // "BKASH", "NAGAD", "ROCKET", "UPAY", "CELLFIN"
-    val trxId: String,
-    val amount: Double,
-    val senderNumber: String,
-    val rawSms: String,
-    val receivedAt: Long,
-    val uploadStatus: String // "PENDING_UPLOAD", "UPLOADED"
-)
-```
-
-```kotlin
-// app/data/local/SmsDao.kt
-package com.orbitsaas.payment.data.local
-
-import androidx.room.Dao
-import androidx.room.Insert
-import androidx.room.OnConflictStrategy
-import androidx.room.Query
-import kotlinx.coroutines.flow.Flow
-
-@Dao
-interface SmsDao {
-    @Insert(onConflict = OnConflictStrategy.IGNORE)
-    suspend fun insertSms(sms: SmsEntity): Long
-
-    @Query("SELECT * FROM local_sms WHERE uploadStatus = 'PENDING_UPLOAD' ORDER BY receivedAt ASC")
-    suspend fun getPendingUploads(): List<SmsEntity>
-
-    @Query("UPDATE local_sms SET uploadStatus = 'UPLOADED' WHERE id IN (:ids)")
-    suspend fun markAsUploaded(ids: List<String>)
-
-    @Query("SELECT * FROM local_sms ORDER BY receivedAt DESC LIMIT 50")
-    fun getRecentSmsFlow(): Flow<List<SmsEntity>>
-}
-```
+- **`local_sms` (`SmsEntity.kt`, `SmsDao.kt`):** Stores captured SMS/Notification/Inbox-Scan records (`smsSender`, `source`, `trxId` unique index, `status`, `externalOrderId`, `receivedAt`, `syncedAt`). Exposes `searchFlow(query, status, provider)`, `unclaimedFlow()`, `findById`, `markVerifiedBatch`.
+- **`blocked_messages` (`BlockedMessageEntity.kt`, `BlockedMessageDao.kt`):** Stores rejected/spoofed messages (`id`, `sender`, `body` truncated to 500 chars, `reason`, `source`, `receivedAt` indexed) for Diagnostics review.

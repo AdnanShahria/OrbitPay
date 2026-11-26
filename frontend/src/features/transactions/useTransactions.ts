@@ -17,6 +17,9 @@ export interface Transaction {
   externalOrderId?: string | null;
   smsReceivedAt: string;
   verifiedAt?: string | null;
+  smsSender?: string | null;
+  source?: 'SMS' | 'NOTIFICATION' | 'INBOX_SCAN';
+  trustFlag?: string | null;
 }
 
 export interface PendingQueueItem {

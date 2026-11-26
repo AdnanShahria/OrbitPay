@@ -7,122 +7,160 @@ export interface ParsedMfsResult {
   senderNumber: string;
 }
 
+const AMOUNT = '([0-9][0-9,]*(?:\\.[0-9]{1,2})?)';
+const CURRENCY = '(?:Tk\\.?|BDT)';
+const TRX_ID = '(?:TrxID|TxnID):?\\s*([A-Za-z0-9]+)';
+
 export const PROVIDER_PARSERS = {
-  // 1. bKash Personal (Send Money)
-  // "You have received Tk 500.00 from 01711111111. Ref . Fee Tk 0.00. Balance Tk 1,250.00. TrxID 9GB7XQ21 at 18/11/2026 14:30"
-  BKASH_PERSONAL: /You have received Tk\s+([0-9,.]+)\s+from\s+(01[3-9]\d{8}).*?TrxID\s+([A-Za-z0-9]+)/i,
+  // 1. bKash (Personal Send Money, PRA Payment, Cash In)
+  BKASH_RECEIVED: new RegExp(
+    `(?:You have received(?:\\s+payment)?|Payment received)\\s+${CURRENCY}\\s*${AMOUNT}\\.?\\s+from\\s+(01[3-9]\\d{8})(?!\\d)[\\s\\S]*?${TRX_ID}`,
+    'i'
+  ),
+  BKASH_CASH_IN: new RegExp(
+    `Cash\\s+In\\s+${CURRENCY}\\s*${AMOUNT}\\.?\\s+from\\s+(01[3-9]\\d{8})(?!\\d)[\\s\\S]*?${TRX_ID}`,
+    'i'
+  ),
 
-  // 2. bKash Personal Retail (PRA Payment)
-  // "Payment received Tk 500.00 from 01711111111. TrxID 9GB7XQ21 at 18/11/2026 14:30. Balance Tk 5,200.00."
-  BKASH_PRA: /Payment received Tk\s+([0-9,.]+)\s+from\s+(01[3-9]\d{8}).*?TrxID\s+([A-Za-z0-9]+)/i,
+  // 2. Nagad (Standard & Key-Value Multiline)
+  NAGAD_STANDARD: new RegExp(
+    `received\\s+BDT\\s*${AMOUNT}\\.?\\s+from\\s+(01[3-9]\\d{8})(?!\\d)[\\s\\S]*?${TRX_ID}`,
+    'i'
+  ),
+  NAGAD_KV: new RegExp(
+    `Amount:\\s*${CURRENCY}\\s*${AMOUNT}\\.?[\\s\\S]*?Sender:\\s*(01[3-9]\\d{8})(?!\\d)[\\s\\S]*?${TRX_ID}`,
+    'i'
+  ),
 
-  // 3. Nagad Personal & Merchant
-  // "You have received BDT 500.00 from 01811111111. Fee: BDT 0.00. Balance: BDT 2,100.00. TxnID: 7XYZABC9 18/11/2026 14:35"
-  NAGAD_STANDARD: /received BDT\s+([0-9,.]+)\s+from\s+(01[3-9]\d{8}).*?TxnID:\s*([A-Za-z0-9]+)/i,
-  NAGAD_ALT: /Amount:\s*Tk\s*([0-9,.]+).*?Sender:\s*(01[3-9]\d{8}).*?TxnID:\s*([A-Za-z0-9]+)/i,
+  // 3. DBBL Rocket (16216 A/C format with check char, legacy 12-digit format, merchant)
+  ROCKET_AC: new RegExp(
+    `${CURRENCY}\\s*${AMOUNT}\\.?\\s+received\\s+from\\s+A\\/C[:\\s]+(01[3-9]\\d{8})[A-Za-z0-9]?[\\s\\S]*?${TRX_ID}`,
+    'i'
+  ),
+  ROCKET_RECEIVED_AC: new RegExp(
+    `received\\s+${CURRENCY}\\s*${AMOUNT}\\.?\\s+from\\s+A\\/C[:\\s]+(01[3-9]\\d{8})[A-Za-z0-9]?[\\s\\S]*?${TRX_ID}`,
+    'i'
+  ),
+  ROCKET_LEGACY_12DIGIT: new RegExp(
+    `received\\s+${CURRENCY}\\s*${AMOUNT}\\.?\\s+from\\s+(01[3-9]\\d{8})[A-Za-z0-9](?!\\d)[\\s\\S]*?${TRX_ID}`,
+    'i'
+  ),
+  ROCKET_STANDARD: new RegExp(
+    `(?:You have received|Payment)\\s+${CURRENCY}\\s*${AMOUNT}\\.?\\s+from\\s+(?:A\\/C[:\\s]+)?(01[3-9]\\d{8})[A-Za-z0-9]?[\\s\\S]*?${TRX_ID}`,
+    'i'
+  ),
 
-  // 4. DBBL Rocket (Supports 12-digit format with check digit)
-  // "You have received Tk 500.00 from 019111111112. Fee Tk 0.00. Balance Tk 3,443.15. TrxID ADB3DB1GHF at 18/11/2026 19:17"
-  ROCKET_STANDARD: /You have received Tk\s+([0-9,.]+)\s+from\s+(01[3-9]\d{8,9}).*?TrxID\s+([A-Za-z0-9]+)/i,
-  ROCKET_MERCHANT: /Payment Tk\s+([0-9,.]+)\s+from\s+(01[3-9]\d{8,9}).*?TrxID:\s*([A-Za-z0-9]+)/i,
+  // 4. Upay (UCB MFS)
+  UPAY_STANDARD: new RegExp(
+    `You have received\\s+${CURRENCY}\\s*${AMOUNT}\\.?\\s+from\\s+(01[3-9]\\d{8})(?!\\d)[\\s\\S]*?${TRX_ID}`,
+    'i'
+  ),
 
-  // 5. Upay (UCB MFS)
-  // "You have received Tk 500.00 from 01611111111. Fee Tk 0.00. Balance Tk 1,500.00. TrxID UP87912ABC at 18/11/2026 15:10"
-  UPAY_STANDARD: /You have received Tk\s+([0-9,.]+)\s+from\s+(01[3-9]\d{8}).*?TrxID\s+([A-Za-z0-9]+)/i,
-
-  // 6. Cellfin (Islami Bank Bangladesh PLC)
-  // "You have received Tk 1,200.00 from 01712345678. Balance Tk 4,500.00. TrxID CF9812481"
-  CELLFIN_STANDARD: /(?:received|credited)\s+Tk\s*([0-9,.]+)\s+from\s+(01[3-9]\d{8}).*?TrxID\s+([A-Za-z0-9]+)/i,
+  // 5. Cellfin (Islami Bank Bangladesh PLC)
+  CELLFIN_STANDARD: new RegExp(
+    `(?:received|credited)\\s+${CURRENCY}\\s*${AMOUNT}\\.?\\s+from\\s+(01[3-9]\\d{8})(?!\\d)[\\s\\S]*?${TRX_ID}`,
+    'i'
+  ),
 };
+
+// Reject outgoing transfers and OTP verification messages
+const REJECT_PATTERNS = [
+  /^\s*(?:send\s+money|cash\s+out|mobile\s+recharge|bill\s+pay|payment\s+of|you\s+have\s+sent|sent\s+(?:tk\.?|bdt)|transferred\s+(?:tk\.?|bdt))/i,
+  /\b(?:send\s+money|cash\s+out)\s+(?:tk\.?|bdt)\s*[0-9]/i,
+  /\b(?:verification\s+code|one[- ]time\s+password|otp\s+is|pin\s+is|do\s+not\s+share\s+this\s+code)\b/i,
+];
 
 export function parseAmount(amountStr: string): number {
   return parseFloat(amountStr.replace(/,/g, '').trim());
 }
 
+function resolveProviderFromShortcode(senderShortcode?: string): MfsProvider | null {
+  const sc = (senderShortcode || '').trim().toLowerCase();
+  if (!sc) return null;
+  if (sc === 'bkash' || sc === '16247' || sc.includes('bkash')) return 'BKASH';
+  if (sc === 'nagad' || sc === '16167' || sc.includes('nagad')) return 'NAGAD';
+  if (sc === 'rocket' || sc === '16216' || sc.includes('rocket') || sc.includes('dbbl')) return 'ROCKET';
+  if (sc === 'upay' || sc === '16268' || sc.includes('upay')) return 'UPAY';
+  if (sc === 'cellfin' || sc === 'ibbl' || sc === '16259' || sc.includes('cellfin')) return 'CELLFIN';
+  return null;
+}
+
+function buildResult(provider: MfsProvider, match: RegExpMatchArray): ParsedMfsResult | null {
+  const amount = parseAmount(match[1]);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return null;
+  }
+  const rawSender = match[2].trim();
+  const senderNumber = provider === 'ROCKET' ? rawSender.slice(0, 11) : rawSender;
+  const trxId = match[3].trim().toUpperCase();
+  if (!trxId) return null;
+
+  return {
+    provider,
+    amount,
+    senderNumber,
+    trxId,
+  };
+}
+
 export function parseMfsSms(rawText: string, senderShortcode?: string): ParsedMfsResult | null {
-  const shortcode = (senderShortcode || '').trim().toLowerCase();
+  if (!rawText || typeof rawText !== 'string') {
+    return null;
+  }
 
-  // Try bKash
-  if (!shortcode || shortcode.includes('16247') || shortcode.includes('bkash')) {
-    const match = rawText.match(PROVIDER_PARSERS.BKASH_PERSONAL) || rawText.match(PROVIDER_PARSERS.BKASH_PRA);
-    if (match) {
-      return {
-        provider: 'BKASH',
-        amount: parseAmount(match[1]),
-        senderNumber: match[2].trim(),
-        trxId: match[3].trim().toUpperCase(),
-      };
+  for (const rejectPattern of REJECT_PATTERNS) {
+    if (rejectPattern.test(rawText)) {
+      return null;
     }
   }
 
-  // Try Nagad
-  if (!shortcode || shortcode.includes('16167') || shortcode.includes('nagad')) {
-    const match = rawText.match(PROVIDER_PARSERS.NAGAD_STANDARD) || rawText.match(PROVIDER_PARSERS.NAGAD_ALT);
-    if (match) {
-      return {
-        provider: 'NAGAD',
-        amount: parseAmount(match[1]),
-        senderNumber: match[2].trim(),
-        trxId: match[3].trim().toUpperCase(),
-      };
-    }
+  const knownProvider = resolveProviderFromShortcode(senderShortcode);
+
+  // If a known provider shortcode was explicitly supplied, enforce provider consistency
+  if (knownProvider === 'BKASH') {
+    const m = rawText.match(PROVIDER_PARSERS.BKASH_RECEIVED) || rawText.match(PROVIDER_PARSERS.BKASH_CASH_IN);
+    return m ? buildResult('BKASH', m) : null;
+  }
+  if (knownProvider === 'NAGAD') {
+    const m = rawText.match(PROVIDER_PARSERS.NAGAD_KV) || rawText.match(PROVIDER_PARSERS.NAGAD_STANDARD);
+    return m ? buildResult('NAGAD', m) : null;
+  }
+  if (knownProvider === 'ROCKET') {
+    const m =
+      rawText.match(PROVIDER_PARSERS.ROCKET_AC) ||
+      rawText.match(PROVIDER_PARSERS.ROCKET_RECEIVED_AC) ||
+      rawText.match(PROVIDER_PARSERS.ROCKET_LEGACY_12DIGIT) ||
+      rawText.match(PROVIDER_PARSERS.ROCKET_STANDARD);
+    return m ? buildResult('ROCKET', m) : null;
+  }
+  if (knownProvider === 'UPAY') {
+    const m = rawText.match(PROVIDER_PARSERS.UPAY_STANDARD);
+    return m ? buildResult('UPAY', m) : null;
+  }
+  if (knownProvider === 'CELLFIN') {
+    const m = rawText.match(PROVIDER_PARSERS.CELLFIN_STANDARD);
+    return m ? buildResult('CELLFIN', m) : null;
   }
 
-  // Try Rocket
-  if (!shortcode || shortcode.includes('16216') || shortcode.includes('dbbl') || shortcode.includes('rocket')) {
-    const match = rawText.match(PROVIDER_PARSERS.ROCKET_STANDARD) || rawText.match(PROVIDER_PARSERS.ROCKET_MERCHANT);
-    if (match) {
-      return {
-        provider: 'ROCKET',
-        amount: parseAmount(match[1]),
-        senderNumber: match[2].trim(),
-        trxId: match[3].trim().toUpperCase(),
-      };
-    }
-  }
+  // Un-gated scan across all provider formats (used by server re-parse and SIMULATOR)
+  const orderedParsers: Array<[MfsProvider, RegExp]> = [
+    ['BKASH', PROVIDER_PARSERS.BKASH_CASH_IN],
+    ['NAGAD', PROVIDER_PARSERS.NAGAD_KV],
+    ['NAGAD', PROVIDER_PARSERS.NAGAD_STANDARD],
+    ['ROCKET', PROVIDER_PARSERS.ROCKET_AC],
+    ['ROCKET', PROVIDER_PARSERS.ROCKET_RECEIVED_AC],
+    ['ROCKET', PROVIDER_PARSERS.ROCKET_LEGACY_12DIGIT],
+    ['BKASH', PROVIDER_PARSERS.BKASH_RECEIVED],
+    ['UPAY', PROVIDER_PARSERS.UPAY_STANDARD],
+    ['CELLFIN', PROVIDER_PARSERS.CELLFIN_STANDARD],
+    ['ROCKET', PROVIDER_PARSERS.ROCKET_STANDARD],
+  ];
 
-  // Try Upay
-  if (!shortcode || shortcode.includes('16268') || shortcode.includes('upay')) {
-    const match = rawText.match(PROVIDER_PARSERS.UPAY_STANDARD);
-    if (match) {
-      return {
-        provider: 'UPAY',
-        amount: parseAmount(match[1]),
-        senderNumber: match[2].trim(),
-        trxId: match[3].trim().toUpperCase(),
-      };
-    }
-  }
-
-  // Try Cellfin
-  if (!shortcode || shortcode.includes('16259') || shortcode.includes('cellfin') || shortcode.includes('ibbl')) {
-    const match = rawText.match(PROVIDER_PARSERS.CELLFIN_STANDARD);
-    if (match) {
-      return {
-        provider: 'CELLFIN',
-        amount: parseAmount(match[1]),
-        senderNumber: match[2].trim(),
-        trxId: match[3].trim().toUpperCase(),
-      };
-    }
-  }
-
-  // Fallback scan across all regexes if sender shortcode was generic
-  for (const [key, regex] of Object.entries(PROVIDER_PARSERS)) {
+  for (const [provider, regex] of orderedParsers) {
     const match = rawText.match(regex);
     if (match) {
-      let provider: MfsProvider = 'BKASH';
-      if (key.startsWith('NAGAD')) provider = 'NAGAD';
-      else if (key.startsWith('ROCKET')) provider = 'ROCKET';
-      else if (key.startsWith('UPAY')) provider = 'UPAY';
-      else if (key.startsWith('CELLFIN')) provider = 'CELLFIN';
-
-      return {
-        provider,
-        amount: parseAmount(match[1]),
-        senderNumber: match[2].trim(),
-        trxId: match[3].trim().toUpperCase(),
-      };
+      const result = buildResult(provider, match);
+      if (result) return result;
     }
   }
 

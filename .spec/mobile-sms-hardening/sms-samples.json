@@ -1,0 +1,122 @@
+[
+  {
+    "name": "bKash Personal Send Money",
+    "provider": "BKASH",
+    "sender": "bKash",
+    "source": "SMS",
+    "text": "You have received Tk 1,000.00 from 01712345678. Ref 123. Fee Tk 0.00. Balance Tk 5,000.00. TrxID BK12AB34CD at 25/11/2026 18:00",
+    "expect": { "trxId": "BK12AB34CD", "amount": 1000.0, "senderNumber": "01712345678" }
+  },
+  {
+    "name": "bKash PRA Payment",
+    "provider": "BKASH",
+    "sender": "bKash",
+    "source": "SMS",
+    "text": "You have received payment Tk 500.00 from 01712345678. Fee Tk 0.00. Balance Tk 2,000.00. TrxID BK99ZZ11QQ at 25/11/2026 18:00",
+    "expect": { "trxId": "BK99ZZ11QQ", "amount": 500.0, "senderNumber": "01712345678" }
+  },
+  {
+    "name": "bKash Cash In",
+    "provider": "BKASH",
+    "sender": "bKash",
+    "source": "SMS",
+    "text": "Cash In Tk 500.00 from 01712345678 successful. Fee Tk 0.00. Balance Tk 2,500.00. TrxID BKCASH1234 at 25/11/2026 18:00",
+    "expect": { "trxId": "BKCASH1234", "amount": 500.0, "senderNumber": "01712345678" }
+  },
+  {
+    "name": "Nagad Key-Value Multiline",
+    "provider": "NAGAD",
+    "sender": "NAGAD",
+    "source": "SMS",
+    "text": "Money Received.\nAmount: Tk 500\nSender: 01812345678\nRef: N/A\nTxnID: 71A2B3C4\nBalance: Tk 1,500.00\n25/11/2026 18:00",
+    "expect": { "trxId": "71A2B3C4", "amount": 500.0, "senderNumber": "01812345678" }
+  },
+  {
+    "name": "Nagad Standard",
+    "provider": "NAGAD",
+    "sender": "NAGAD",
+    "source": "SMS",
+    "text": "You have received BDT 500.00 from 01812345678. Fee: BDT 0.00. Balance: BDT 2,100.00. TxnID: 7XYZABC9 25/11/2026 14:35",
+    "expect": { "trxId": "7XYZABC9", "amount": 500.0, "senderNumber": "01812345678" }
+  },
+  {
+    "name": "Rocket Real 16216 Format",
+    "provider": "ROCKET",
+    "sender": "16216",
+    "source": "SMS",
+    "text": "Tk500.00 received from A/C:01912345678X Fee:Tk0.00, Your A/C Balance: Tk1,500.00 TxnId:1234567890 Date:25-NOV-26 06:00:00 pm.",
+    "expect": { "trxId": "1234567890", "amount": 500.0, "senderNumber": "01912345678" }
+  },
+  {
+    "name": "Rocket Legacy Format",
+    "provider": "ROCKET",
+    "sender": "Rocket",
+    "source": "SMS",
+    "text": "You have received Tk 500.00 from 019111111112. Fee Tk 0.00. Balance Tk 3,443.15. TrxID ADB3DB1GHF at 18/11/2026 19:17",
+    "expect": { "trxId": "ADB3DB1GHF", "amount": 500.0, "senderNumber": "01911111111" }
+  },
+  {
+    "name": "Upay Standard",
+    "provider": "UPAY",
+    "sender": "upay",
+    "source": "SMS",
+    "text": "You have received Tk. 500.00 from 01612345678. Balance Tk. 1,500.00. TrxID UP87912ABC at 25/11/2026 15:10",
+    "expect": { "trxId": "UP87912ABC", "amount": 500.0, "senderNumber": "01612345678" }
+  },
+  {
+    "name": "Cellfin Standard",
+    "provider": "CELLFIN",
+    "sender": "CellFin",
+    "source": "SMS",
+    "text": "You have received Tk 1,200.00 from 01712345678. Balance Tk 4,500.00. TrxID CF9812481",
+    "expect": { "trxId": "CF9812481", "amount": 1200.0, "senderNumber": "01712345678" }
+  },
+  {
+    "name": "Amount Trailing Period",
+    "provider": "BKASH",
+    "sender": "bKash",
+    "source": "SMS",
+    "text": "You have received Tk 500. from 01712345678. TrxID BKDOT12345 at 25/11/2026",
+    "expect": { "trxId": "BKDOT12345", "amount": 500.0, "senderNumber": "01712345678" }
+  },
+  {
+    "name": "Spoof Personal Number With +88",
+    "provider": "BKASH",
+    "sender": "+8801712345678",
+    "source": "SMS",
+    "text": "You have received Tk 1,000.00 from 01712345678. Ref 123. Fee Tk 0.00. Balance Tk 5,000.00. TrxID BK12AB34CD at 25/11/2026 18:00",
+    "expect": null
+  },
+  {
+    "name": "Spoof Personal Number Without +88",
+    "provider": "BKASH",
+    "sender": "01712345678",
+    "source": "SMS",
+    "text": "You have received Tk 1,000.00 from 01712345678. Ref 123. Fee Tk 0.00. Balance Tk 5,000.00. TrxID BK12AB34CD at 25/11/2026 18:00",
+    "expect": null
+  },
+  {
+    "name": "Spoof Provider Mismatch",
+    "provider": "NAGAD",
+    "sender": "bKash",
+    "source": "SMS",
+    "text": "You have received BDT 500.00 from 01812345678. Fee: BDT 0.00. Balance: BDT 2,100.00. TxnID: 7XYZABC9 25/11/2026 14:35",
+    "expect": null
+  },
+  {
+    "name": "Outgoing Send Money Rejected",
+    "provider": "BKASH",
+    "sender": "bKash",
+    "source": "SMS",
+    "text": "Send Money Tk 500.00 to 01712345678 successful. Fee Tk 0.00. Balance Tk 1,000.00. TrxID BKOUT12345 at 25/11/2026 18:00",
+    "expect": null
+  },
+  {
+    "name": "bKash OTP SMS Rejected",
+    "provider": "BKASH",
+    "sender": "bKash",
+    "source": "SMS",
+    "text": "Your bKash verification code is 123456. Please do not share this code with anyone.",
+    "expect": null
+  }
+]

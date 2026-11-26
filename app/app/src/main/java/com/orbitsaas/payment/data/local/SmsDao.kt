@@ -42,11 +42,36 @@ interface SmsDao {
         verifiedAt: Long = System.currentTimeMillis()
     ): Int
 
+    @Query("UPDATE local_sms SET status = 'VERIFIED', externalOrderId = :orderId, syncedAt = :verifiedAt WHERE trxId IN (:trxIds)")
+    suspend fun markVerifiedBatch(
+        trxIds: List<String>,
+        orderId: String,
+        verifiedAt: Long = System.currentTimeMillis()
+    ): Int
+
     @Query("SELECT * FROM local_sms ORDER BY receivedAt DESC LIMIT :limit")
     fun getRecentTransactions(limit: Int = 50): Flow<List<SmsEntity>>
 
     @Query("SELECT * FROM local_sms ORDER BY receivedAt DESC")
     fun getAllTransactionsFlow(): Flow<List<SmsEntity>>
+
+    @Query("""
+        SELECT * FROM local_sms
+        WHERE (:status IS NULL OR :status = '' OR status = :status)
+          AND (:provider IS NULL OR :provider = '' OR provider = :provider)
+          AND (:query = '' OR trxId LIKE '%' || :query || '%'
+               OR senderNumber LIKE '%' || :query || '%'
+               OR COALESCE(externalOrderId, '') LIKE '%' || :query || '%'
+               OR rawSms LIKE '%' || :query || '%')
+        ORDER BY receivedAt DESC
+    """)
+    fun searchFlow(query: String, status: String?, provider: String?): Flow<List<SmsEntity>>
+
+    @Query("SELECT * FROM local_sms WHERE status != 'VERIFIED' ORDER BY receivedAt DESC")
+    fun unclaimedFlow(): Flow<List<SmsEntity>>
+
+    @Query("SELECT * FROM local_sms WHERE id = :id LIMIT 1")
+    suspend fun findById(id: Long): SmsEntity?
 
     @Query("SELECT * FROM local_sms WHERE trxId = :trxId LIMIT 1")
     suspend fun findByTrxId(trxId: String): SmsEntity?

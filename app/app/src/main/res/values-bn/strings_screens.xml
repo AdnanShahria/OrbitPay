@@ -1,0 +1,171 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Bottom Navigation -->
+    <string name="nav_home">হোম</string>
+    <string name="nav_history">ইতিহাস</string>
+    <string name="nav_verify">যাচাই</string>
+    <string name="nav_diagnostics">ডায়াগনস্টিকস</string>
+    <string name="nav_settings">সেটিংস</string>
+
+    <!-- Shared Labels & Time -->
+    <string name="common_refresh">রিফ্রেশ</string>
+    <string name="common_retry">আবার চেষ্টা করুন</string>
+    <string name="common_cancel">বাতিল</string>
+    <string name="common_close">বন্ধ করুন</string>
+    <string name="common_clear">মুছুন</string>
+    <string name="common_all">সব</string>
+    <string name="common_never">কখনো নয়</string>
+    <string name="common_just_now">এইমাত্র</string>
+    <string name="common_minutes_ago">%1$d মি. আগে</string>
+    <string name="common_hours_ago">%1$d ঘ. আগে</string>
+    <string name="common_days_ago">%1$d দিন আগে</string>
+    <string name="common_amount_bdt">৳ %1$s</string>
+
+    <!-- Providers -->
+    <string name="provider_bkash">বিকাশ</string>
+    <string name="provider_nagad">নগদ</string>
+    <string name="provider_rocket">রকেট</string>
+    <string name="provider_upay">উপায়</string>
+    <string name="provider_cellfin">সেলফিন</string>
+
+    <!-- Status Badges -->
+    <string name="status_verified">যাচাইকৃত</string>
+    <string name="status_manual_verified">ম্যানুয়াল</string>
+    <string name="status_unclaimed">অদাবিকৃত</string>
+    <string name="status_uploaded">আপলোডকৃত</string>
+    <string name="status_pending_upload">অপেক্ষমাণ</string>
+
+    <!-- Trust Flags -->
+    <string name="trust_badge_flagged">সতর্কতা</string>
+    <string name="trust_flag_legacy_unverified">ইনজেশনের সময় প্রেরকের ঠিকানা অনুপস্থিত বা অযাচাইকৃত ছিল।</string>
+    <string name="trust_flag_untrusted_sender">প্রেরক নম্বর বা অ্যাপ প্যাকেজ বিশ্বস্ত MFS তালিকায় নেই।</string>
+    <string name="trust_flag_parse_mismatch">সার্ভারে পুনরায় পার্স করার সময় TrxID বা টাকার পরিমাণ মেলেনি।</string>
+    <string name="trust_flag_generic">অ্যান্টি-স্পুফিং পরীক্ষায় লেনদেনটি ফ্ল্যাগ করা হয়েছে (%1$s)।</string>
+
+    <!-- History Screen -->
+    <string name="history_title">লেনদেনের ইতিহাস</string>
+    <string name="history_tab_phone">এই ফোনে</string>
+    <string name="history_tab_server">সার্ভার</string>
+    <string name="history_search_hint">TrxID, প্রেরক বা অর্ডার আইডি খুঁজুন</string>
+    <string name="history_empty_phone_title">ফোনে কোনো মিল পাওয়া যায়নি</string>
+    <string name="history_empty_phone_desc">এই ডিভাইসে সংরক্ষিত MFS এসএমএস এবং নোটিফিকেশন এখানে দেখা যাবে।</string>
+    <string name="history_empty_server_title">সার্ভারে কোনো লেনদেন নেই</string>
+    <string name="history_empty_server_desc">ORBIT Hub-এ বর্তমান সার্চ বা ফিল্টারের সাথে কোনো রেকর্ড মেলেনি।</string>
+    <string name="history_load_more">আরও লোড করুন</string>
+    <string name="history_loading_server">লেনদেন লোড হচ্ছে…</string>
+    <string name="history_error_prefix">লেনদেন লোড করা যায়নি: %1$s</string>
+    <string name="history_copied_trx">TrxID %1$s ক্লিপবোর্ডে কপি হয়েছে</string>
+    <string name="history_copy_trx">TrxID কপি করুন</string>
+
+    <!-- History Detail Bottom Sheet -->
+    <string name="history_detail_title">লেনদেনের বিবরণ</string>
+    <string name="history_detail_trx_id">ট্রানজেকশন আইডি</string>
+    <string name="history_detail_sender">গ্রাহকের নম্বর</string>
+    <string name="history_detail_sms_sender">মূল প্রেরক</string>
+    <string name="history_detail_source">সংগ্রহের উৎস</string>
+    <string name="history_detail_status">অবস্থা</string>
+    <string name="history_detail_match_type">ম্যাচের ধরন</string>
+    <string name="history_detail_order_id">অর্ডার আইডি</string>
+    <string name="history_detail_received_at">প্রাপ্তির সময়</string>
+    <string name="history_detail_verified_at">যাচাইয়ের সময়</string>
+    <string name="history_detail_raw_sms">মূল বার্তা</string>
+    <string name="history_detail_unknown">পাওয়া যায়নি</string>
+
+    <!-- Verify Screen -->
+    <string name="verify_title">ম্যানুয়াল যাচাই</string>
+    <string name="verify_subtitle">অপেক্ষমাণ অর্ডারের সাথে যুক্ত করতে একটি অদাবিকৃত এসএমএসে ট্যাপ করুন</string>
+    <string name="verify_loading_unclaimed">অদাবিকৃত পেমেন্ট লোড হচ্ছে…</string>
+    <string name="verify_empty_title">সব পেমেন্ট সমন্বিত হয়েছে</string>
+    <string name="verify_empty_desc">এই মুহূর্তে ম্যানুয়াল ম্যাচিংয়ের জন্য কোনো অদাবিকৃত MFS লেনদেন নেই।</string>
+    <string name="verify_error_load">অদাবিকৃত পেমেন্ট লোড ব্যর্থ হয়েছে: %1$s</string>
+    <string name="verify_sheet_title">অদাবিকৃত এসএমএস ম্যাচ করুন</string>
+    <string name="verify_candidates_header">সম্ভাব্য অর্ডার তালিকা</string>
+    <string name="verify_loading_candidates">সম্ভাব্য অর্ডার খোঁজা হচ্ছে…</string>
+    <string name="verify_candidates_empty">অপেক্ষমাণ কিউতে কোনো অর্ডার পাওয়া যায়নি। নিচের অর্ডার আইডি বক্স ব্যবহার করুন।</string>
+    <string name="verify_candidates_error">কিউ লোড করা যায়নি: %1$s</string>
+    <string name="verify_candidate_score">স্কোর %1$d</string>
+    <string name="verify_reason_provider">একই মাধ্যম</string>
+    <string name="verify_reason_trx_exact">হুবহু TrxID</string>
+    <string name="verify_reason_trx_near">TrxID ~%1$d অক্ষর ভিন্ন</string>
+    <string name="verify_reason_amount">টাকা ±৳১</string>
+    <string name="verify_reason_sender">একই প্রেরক</string>
+    <string name="verify_candidate_expected">প্রত্যাশিত %1$s</string>
+    <string name="verify_candidate_submitted_trx">জমাকৃত: %1$s</string>
+    <string name="verify_manual_section_title">অর্ডার আইডি দিয়ে ম্যাচ করুন</string>
+    <string name="verify_manual_order_label">অর্ডার আইডি (External Order ID)</string>
+    <string name="verify_manual_email_label">গ্রাহকের ইমেইল (ঐচ্ছিক)</string>
+    <string name="verify_manual_match_button">অর্ডার ম্যাচ করুন</string>
+    <string name="verify_confirm_title">ম্যানুয়াল ম্যাচ নিশ্চিত করুন</string>
+    <string name="verify_confirm_body">%1$s (%2$s, TrxID %3$s) কি অর্ডার #%4$s-এর সাথে যুক্ত করবেন?</string>
+    <string name="verify_confirm_trust_warning">নিরাপত্তা সতর্কতা: এই এসএমএসটি ফ্ল্যাগ করা হয়েছে (%1$s)। নিশ্চিত করার আগে আপনার অফিশিয়াল MFS অ্যাপে টাকা জমা হয়েছে কিনা যাচাই করুন।</string>
+    <string name="verify_confirm_button">ম্যাচ নিশ্চিত করুন</string>
+    <string name="verify_match_success">TrxID %1$s অর্ডার #%2$s-এর সাথে যুক্ত হয়েছে</string>
+    <string name="verify_match_failed">ম্যানুয়াল ম্যাচ ব্যর্থ হয়েছে: %1$s</string>
+
+    <!-- Diagnostics Screen -->
+    <string name="diag_title">সিস্টেম ডায়াগনস্টিকস</string>
+    <string name="diag_checklist_title">ক্যাপচার ও সিঙ্ক স্বাস্থ্য</string>
+    <string name="diag_check_sms_perms">এসএমএস ক্যাপচার অনুমতি</string>
+    <string name="diag_check_sms_perms_ok">RECEIVE_SMS ও READ_SMS অনুমোদিত</string>
+    <string name="diag_check_sms_perms_missing">MFS এসএমএস পড়তে ও ধরতে এই অনুমতি প্রয়োজন</string>
+    <string name="diag_check_notifications">নোটিফিকেশন অনুমতি</string>
+    <string name="diag_check_notifications_ok">সতর্কতা নোটিফিকেশন চালু আছে</string>
+    <string name="diag_check_notifications_missing">অ্যালার্ট পেতে নোটিফিকেশন অনুমতি দিন</string>
+    <string name="diag_check_listener">নোটিফিকেশন লিসেনার</string>
+    <string name="diag_check_listener_ok">অফিশিয়াল MFS অ্যাপ পুশ পর্যবেক্ষণ করছে</string>
+    <string name="diag_check_listener_missing">পুশ ফলব্যাকের জন্য নোটিফিকেশন অ্যাক্সেস চালু করুন</string>
+    <string name="diag_check_battery">ব্যাটারি অপ্টিমাইজেশন</string>
+    <string name="diag_check_battery_ok">ব্যাকগ্রাউন্ড সীমাবদ্ধতা মুক্ত</string>
+    <string name="diag_check_battery_missing">অ্যাপ ঘুমিয়ে পড়া রোধ করতে ব্যাটারি ছাড় দিন</string>
+    <string name="diag_check_fg_service">ফোরগ্রাউন্ড সিঙ্ক সার্ভিস</string>
+    <string name="diag_check_fg_running">নোটিফিকেশন শেডে সক্রিয় আছে</string>
+    <string name="diag_check_fg_stopped">বর্তমানে বন্ধ আছে</string>
+    <string name="diag_check_ws">সেল্ফ-হোস্টেড ইনস্ট্যান্ট পুশ (WebSocket)</string>
+    <string name="diag_check_ws_connected">সংযুক্ত · সাব-সেকেন্ড ক্লাউডফ্লেয়ার হাব সক্রিয়</string>
+    <string name="diag_check_ws_connecting">সেল্ফ-হোস্টেড পুশ হাবের সাথে সংযোগ হচ্ছে…</string>
+    <string name="diag_check_ws_disconnected">সংযোগ বিচ্ছিন্ন · পোলিং ফলব্যাক চালু আছে</string>
+    <string name="diag_check_ws_unauthorized">অনুমোদন ব্যর্থ · পুনরায় সাইন ইন বা রিকানেক্ট করুন</string>
+    <string name="diag_check_fcm">ঐচ্ছিক ব্যাকআপ (FCM)</string>
+    <string name="diag_check_fcm_active">FCM v1 সক্রিয় · ব্যাকআপ টোকেন নিবন্ধিত</string>
+    <string name="diag_check_fcm_missing_token">ফায়ারবেস প্রস্তুত · ব্যাকআপ টোকেন এখনো নিবন্ধিত নয়</string>
+    <string name="diag_check_fcm_unavailable">যুক্ত নেই (ঐচ্ছিক) · সেল্ফ-হোস্টেড WebSocket ও পোলিং অ্যালার্ট পরিচালনা করছে</string>
+    <string name="diag_action_grant">অনুমতি দিন</string>
+    <string name="diag_action_enable">চালু করুন</string>
+    <string name="diag_action_exempt">ছাড় দিন</string>
+    <string name="diag_action_start">শুরু করুন</string>
+    <string name="diag_action_reconnect">রিকানেক্ট</string>
+    <string name="diag_action_refresh_token">রিফ্রেশ</string>
+    <string name="diag_telemetry_title">সিঙ্ক টেলিমেট্রি ও পুনরুদ্ধার</string>
+    <string name="diag_last_heartbeat">সর্বশেষ হার্টবিট</string>
+    <string name="diag_last_sync">সর্বশেষ সার্ভার সিঙ্ক</string>
+    <string name="diag_last_push">সর্বশেষ ইনস্ট্যান্ট পুশ</string>
+    <string name="diag_last_inbox_scan">সর্বশেষ ইনবক্স স্ক্যান</string>
+    <string name="diag_pending_uploads">আপলোডের অপেক্ষায়</string>
+    <string name="diag_rescan_button">ইনবক্স পুনরায় স্ক্যান করুন (৭২ ঘণ্টা)</string>
+    <string name="diag_rescan_running">এসএমএস ইনবক্স স্ক্যান হচ্ছে…</string>
+    <string name="diag_rescan_result">%1$dটি বার্তা স্ক্যান · %2$dটি সংগৃহীত · %3$dটি ব্লকড</string>
+    <string name="diag_rescan_permission_needed">ইনবক্স স্ক্যান করতে প্রথমে READ_SMS অনুমতি দিন।</string>
+    <string name="diag_ws_reconnecting">ইনস্ট্যান্ট পুশ WebSocket পুনরায় সংযোগ করা হচ্ছে…</string>
+    <string name="diag_ws_not_logged_in">প্রথমে সাইন ইন করুন অথবা ডিভাইস ক্রেডেনশিয়াল সেট করুন।</string>
+    <string name="diag_fcm_refreshed">FCM রেজিস্ট্রেশন টোকেন রিফ্রেশ হয়েছে।</string>
+    <string name="diag_fcm_refresh_failed">এই মুহূর্তে FCM টোকেন আনা যায়নি।</string>
+
+    <!-- Diagnostics Blocked Messages -->
+    <string name="diag_blocked_title">ব্লক করা বার্তা (%1$d)</string>
+    <string name="diag_blocked_subtitle">SenderTrust দ্বারা প্রত্যাখ্যাত ভুয়া বা অমিল বার্তা</string>
+    <string name="diag_blocked_empty">কোনো ব্লক বা ভুয়া বার্তা রেকর্ড হয়নি।</string>
+    <string name="diag_blocked_expand">ব্লক করা বার্তা দেখুন</string>
+    <string name="diag_blocked_collapse">ব্লক করা বার্তা লুকান</string>
+
+    <!-- Diagnostics Parser Self-Test -->
+    <string name="diag_parser_title">পার্সার সেল্ফ-টেস্ট</string>
+    <string name="diag_parser_subtitle">লাইভ অ্যান্টি-স্পুফ নিয়মে এসএমএস ও প্রেরক পরীক্ষা করুন</string>
+    <string name="diag_parser_sender_label">প্রেরক বা প্যাকেজ (যেমন bKash, NAGAD, 16216)</string>
+    <string name="diag_parser_sms_label">এসএমএস টেক্সট</string>
+    <string name="diag_parser_result_accepted">গৃহীত · %1$s</string>
+    <string name="diag_parser_result_accepted_details">TrxID: %1$s · পরিমাণ: ৳ %2$s · প্রেরক: %3$s</string>
+    <string name="diag_parser_result_rejected">প্রত্যাখ্যাত · %1$s</string>
+    <string name="diag_parser_result_rejected_provider">মাধ্যম: %1$s</string>
+    <string name="diag_parser_result_not_payment">পেমেন্ট নয় · এটি প্রযোজ্য MFS ক্রেডিট এসএমএস নয়</string>
+    <string name="diag_parser_hint_enter">লাইভ ফলাফল দেখতে উপরে একটি নমুনা এসএমএস লিখুন।</string>
+</resources>

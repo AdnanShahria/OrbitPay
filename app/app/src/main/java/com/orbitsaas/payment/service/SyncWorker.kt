@@ -1,8 +1,14 @@
 package com.orbitsaas.payment.service
 
+import android.Manifest
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.os.BatteryManager
 import android.util.Log
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
@@ -10,18 +16,18 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import com.orbitsaas.payment.OrbitApplication
 import com.orbitsaas.payment.data.local.OrbitDatabase
 import com.orbitsaas.payment.data.local.PreferencesManager
 import com.orbitsaas.payment.data.remote.IngestSmsItem
 import com.orbitsaas.payment.data.remote.OrbitApiClient
 import com.orbitsaas.payment.data.remote.UnauthorizedException
+import com.orbitsaas.payment.interceptors.InboxScanner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * Robust background sync worker for ingesting offline MFS transactions
- * to the ORBIT SaaS Central Hub.
+ * Robust background sync worker for recovering missed inbox SMS, ingesting offline MFS
+ * transactions to the ORBIT SaaS Central Hub, and reporting device capability telemetry.
  */
 class SyncWorker(
     appContext: Context,
@@ -39,6 +45,9 @@ class SyncWorker(
         }
 
         try {
+            // Recover any missed MFS SMS from device Inbox before uploading pending queue
+            InboxScanner.scan(applicationContext)
+
             val pendingUploads = database.smsDao().getPendingUploads()
             Log.d(TAG, "Pending SMS uploads to ingest: ${pendingUploads.size}")
 
@@ -50,7 +59,9 @@ class SyncWorker(
                         amount = entity.amount,
                         senderNumber = entity.senderNumber,
                         rawSms = entity.rawSms,
-                        receivedAt = entity.receivedAt
+                        receivedAt = entity.receivedAt,
+                        smsSender = entity.smsSender.ifBlank { null },
+                        source = entity.source
                     )
                 }
 
@@ -59,7 +70,10 @@ class SyncWorker(
                     val response = result.getOrThrow()
                     val uploadedIds = pendingUploads.map { it.id }
                     database.smsDao().markUploaded(uploadedIds)
-                    Log.i(TAG, "Successfully ingested ${ingestItems.size} transactions. Auto-verified: ${response.autoVerifiedCount}")
+                    Log.i(
+                        TAG,
+                        "Successfully ingested ${ingestItems.size} transactions. Auto-verified: ${response.autoVerifiedCount}, Flagged: ${response.flaggedCount}"
+                    )
                 } else {
                     val err = result.exceptionOrNull()
                     if (err is UnauthorizedException) {
@@ -100,15 +114,35 @@ class SyncWorker(
     }
 
     private suspend fun sendDeviceHeartbeat() = run {
-        val batteryStatus = applicationContext.registerReceiver(null, android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED))
+        val batteryStatus = applicationContext.registerReceiver(
+            null,
+            IntentFilter(Intent.ACTION_BATTERY_CHANGED)
+        )
         val level = batteryStatus?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
         val scale = batteryStatus?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
         val batteryPct = if (level >= 0 && scale > 0) (level * 100 / scale) else 100
 
         val status = batteryStatus?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
-        val isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL
+        val isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
+            status == BatteryManager.BATTERY_STATUS_FULL
 
-        apiClient.sendHeartbeat(batteryPct, isCharging)
+        val fcmEnabled = FcmTokenRegistrar.isFirebaseAvailable(applicationContext) &&
+            preferencesManager.fcmToken.isNotBlank()
+        val smsPermission = ContextCompat.checkSelfPermission(
+            applicationContext,
+            Manifest.permission.RECEIVE_SMS
+        ) == PackageManager.PERMISSION_GRANTED
+        val listenerEnabled = NotificationManagerCompat
+            .getEnabledListenerPackages(applicationContext)
+            .contains(applicationContext.packageName)
+
+        apiClient.sendHeartbeat(
+            batteryLevel = batteryPct,
+            isCharging = isCharging,
+            fcmEnabled = fcmEnabled,
+            smsPermission = smsPermission,
+            listenerEnabled = listenerEnabled
+        )
     }
 
     companion object {

@@ -10,9 +10,9 @@
 |---|---|
 | **Document** | UI Components, Design System & Screen Inventory |
 | **Status** | Active / Production Implemented |
-| **Last Updated** | 2026-11-23 00:05:00 +06:00 |
-| **Last Prompt / Trigger** | Unique poisha 3-field checkout, admin-provisioned merchant login, Orders & COD Sync UI, Integration Guide, and Android Login/Orders screens |
-| **Actions Taken** | Added `MerchantLoginScreen.tsx`, `OrdersManager.tsx`, `IntegrationGuide.tsx`, `ProjectUsersModal.tsx`, 3-field `CheckoutStepper.tsx` + genuine `PollingStatus.tsx`, and Android `LoginScreen.kt` + `DashboardScreen.kt` Orders & Alerts feed. |
+| **Last Updated** | 2026-11-25 19:50:00 +06:00 |
+| **Last Prompt / Trigger** | Self-Hosted Cloudflare Push Hub UI, Android WebSocket Diagnostics & Web Admin 3-Tier Messaging Panel (`/spin-subagents`) |
+| **Actions Taken** | Updated Android `DiagnosticsScreen.kt` + `DiagnosticsViewModel.kt` with live `WsPushState` status & Reconnect action, and updated Web Admin `SmsPushPanel.tsx` with 3-tier Push Hub status (`wsDelivered`, `fcmDelivered`, `activeSockets`) and Email OTP fallback readiness. |
 
 ---
 
@@ -101,10 +101,25 @@ Every feature directly mirrors its backend counterpart in `backend/src/features/
 
 ---
 
-## 4. Android Companion UI (`app/src/main/java/com/orbitsaas/payment/ui/`)
+### 2.5 Feature: Admin Command Center (`frontend/src/features/admin/`)
+
+| Component | Purpose & Description |
+|---|---|
+| `AdminDashboard.tsx` | Hidden `/admin` hub with tabs for Projects, Global Queue, Webhooks, and SMS & Push. |
+| `SmsPushPanel.tsx` | BoardUI panel showing 3-tier Instant Push status (Self-Hosted DO WebSocket, Optional FCM v1, 60s Polling), SMS & Email OTP fallback capabilities, 24h OTP stats, Test SMS form, and Test Push breakdown (`wsDelivered`/`fcmDelivered`/`activeSockets`). |
+
+---
+
+## 4. Android Companion UI (`app/app/src/main/java/com/orbitsaas/payment/ui/`)
 
 | Screen / Component | Purpose & Description |
 |---|---|
-| `DashboardScreen.kt` | Main overview: Online/Offline sync pill, today's verified volume, and real-time transaction feed. |
-| `OnboardingScreen.kt` | Step-by-step interactive guide for bypassing Android 13/14 Restricted Settings and battery optimization. |
-| `SettingsScreen.kt` | Camera QR scanner to pair phone with ORBIT Hub and manual device API key entry. |
+| `MainActivity.kt` | Extends `AppCompatActivity`; hosts Onboarding, Login, and logged-in 5-tab Material 3 `NavigationBar` (Home, History, Verify, Diagnostics, Settings). |
+| `DashboardScreen.kt` | Main overview: Online/Offline sync pill, today's verified volume, live SMS feed, and Orders & Alerts actions. |
+| `HistoryScreen.kt` | Dual-tab ("On this phone" Room vs "Server" paged) transaction ledger with search, status/provider chips, `trustFlag` warning badges, and detail bottom sheet. |
+| `VerifyScreen.kt` | Mobile Typo Rescue: lists `UNCLAIMED` server SMS, ranks pending `verification_queue` candidates by provider/TrxID Levenshtein distance/amount/sender, and supports manual Order ID matching. |
+| `DiagnosticsScreen.kt` | Live checklist (SMS/Notification permissions, Listener, Battery, Foreground Service, Self-Hosted WebSocket Push with Reconnect, Optional Backup FCM), 72h inbox rescan, blocked message log, telemetry (`Last instant push`), and live `MfsParser` self-test. |
+| `OnboardingScreen.kt` | 5-step interactive guide covering SMS permissions, Notification Access, Battery Optimization, Android 13/14 Restricted Settings, and SMS Spoof Protection / `READ_SMS` rationale. |
+| `SettingsScreen.kt` | Server URL, Merchant/Device credentials, Foreground Service toggle, Language selector (`System` / `English` / `বাংলা` via `LocaleHelper`), and Extra Trusted Senders input. |
+| `LoginScreen.kt` | Merchant user email/password sign-in with automatic Android device pairing and FCM/inbox rescan kickoff. |
+| `OrbitComponents.kt` | Shared HIG-polished MFS provider dots, BDT tabular formatters, relative timestamps, status pills, and trust warning badges. |

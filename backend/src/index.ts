@@ -8,35 +8,43 @@ import walletsRoutes from './features/wallets/wallets.routes';
 import transactionsRoutes from './features/transactions/transactions.routes';
 import merchantsRoutes from './features/merchants/merchants.routes';
 import realtimeRoutes from './features/realtime/realtime.routes';
+import adminMessagingRoutes from './features/admin/messaging.routes';
 import adminRoutes from './features/admin/admin.routes';
 import authRoutes from './features/auth/auth.routes';
 import ordersRoutes from './features/orders/orders.routes';
+import otpRoutes from './features/otp/otp.routes';
 import { routerRoutes } from './router';
 import { processWebhookRetries } from './features/webhooks/webhook.dispatcher';
 
 const app = new Hono<AppContextEnv>();
 
 // 1. Cross-Origin Resource Sharing (CORS) Configuration
-// Allows client storefronts, payment widgets, and companion apps to communicate seamlessly
-app.use(
-  '*',
-  cors({
-    origin: (origin) => origin || '*',
-    allowHeaders: [
-      'Content-Type',
-      'Authorization',
-      'X-Merchant-Secret',
-      'X-Merchant-Id',
-      'X-Device-Key',
-      'X-Admin-Key',
-      'X-Orbit-Signature',
-    ],
-    allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    exposeHeaders: ['Content-Length', 'X-Orbit-Signature'],
-    maxAge: 86400,
-    credentials: true,
-  })
-);
+// Allows client storefronts, payment widgets, and companion apps to communicate seamlessly.
+// Skips header mutation on WebSocket upgrades so immutable 101 Responses from Durable Objects pass through untouched.
+const corsMiddleware = cors({
+  origin: (origin) => origin || '*',
+  allowHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Merchant-Secret',
+    'X-Merchant-Id',
+    'X-Device-Key',
+    'X-Admin-Key',
+    'X-Orbit-Signature',
+  ],
+  allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  exposeHeaders: ['Content-Length', 'X-Orbit-Signature'],
+  maxAge: 86400,
+  credentials: true,
+});
+
+app.use('*', async (c, next) => {
+  if (c.req.header('upgrade')?.toLowerCase() === 'websocket') {
+    await next();
+    return;
+  }
+  return corsMiddleware(c, next);
+});
 
 // 2. Attach Drizzle D1 Database Client
 app.use('*', dbMiddleware);
@@ -73,6 +81,8 @@ app.route('/api/v1/wallets', walletsRoutes);
 app.route('/api/v1/transactions', transactionsRoutes);
 app.route('/api/v1/merchants', merchantsRoutes);
 app.route('/api/v1/realtime', realtimeRoutes);
+app.route('/api/v1/otp', otpRoutes);
+app.route('/api/v1/admin/messaging', adminMessagingRoutes);
 app.route('/api/v1/admin', adminRoutes);
 app.route('/api/v1/router', routerRoutes);
 

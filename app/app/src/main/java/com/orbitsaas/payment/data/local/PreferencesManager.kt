@@ -34,6 +34,12 @@ class PreferencesManager(context: Context) {
     private val _isForegroundServiceEnabledFlow = MutableStateFlow(isForegroundServiceEnabled)
     val isForegroundServiceEnabledFlow: StateFlow<Boolean> = _isForegroundServiceEnabledFlow.asStateFlow()
 
+    private val _extraTrustedSendersFlow = MutableStateFlow(extraTrustedSenders)
+    val extraTrustedSendersFlow: StateFlow<String> = _extraTrustedSendersFlow.asStateFlow()
+
+    private val _appLanguageFlow = MutableStateFlow(appLanguage)
+    val appLanguageFlow: StateFlow<String> = _appLanguageFlow.asStateFlow()
+
     var serverUrl: String
         get() = prefs.getString(KEY_SERVER_URL, DEFAULT_SERVER_URL) ?: DEFAULT_SERVER_URL
         set(value) {
@@ -120,6 +126,73 @@ class PreferencesManager(context: Context) {
             _isDarkThemeFlow.value = value
         }
 
+    var extraTrustedSenders: String
+        get() = prefs.getString(KEY_EXTRA_TRUSTED_SENDERS, "") ?: ""
+        set(value) {
+            val sanitized = value.trim()
+            prefs.edit().putString(KEY_EXTRA_TRUSTED_SENDERS, sanitized).apply()
+            _extraTrustedSendersFlow.value = sanitized
+        }
+
+    var lastInboxScanAt: Long
+        get() = prefs.getLong(KEY_LAST_INBOX_SCAN_AT, 0L)
+        set(value) {
+            prefs.edit().putLong(KEY_LAST_INBOX_SCAN_AT, value).apply()
+        }
+
+    var lastSyncAt: Long
+        get() = prefs.getLong(KEY_LAST_SYNC_AT, 0L)
+        set(value) {
+            prefs.edit().putLong(KEY_LAST_SYNC_AT, value).apply()
+        }
+
+    var seenOrderIds: Set<String>
+        get() {
+            val raw = prefs.getString(KEY_SEEN_ORDER_IDS, "") ?: ""
+            if (raw.isBlank()) return emptySet()
+            return raw.split("\n")
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .toCollection(LinkedHashSet())
+        }
+        set(value) {
+            val capped = value
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .takeLast(MAX_SEEN_ORDER_IDS)
+            prefs.edit().putString(KEY_SEEN_ORDER_IDS, capped.joinToString("\n")).apply()
+        }
+
+    /**
+     * Records [orderId] in the bounded seen-order ring buffer (max 200).
+     * Returns true if [orderId] was NOT previously seen.
+     */
+    fun markOrderSeen(orderId: String): Boolean {
+        val trimmed = orderId.trim()
+        if (trimmed.isEmpty()) return false
+        val current = seenOrderIds.toMutableList()
+        if (current.contains(trimmed)) return false
+        current.add(trimmed)
+        val capped = if (current.size > MAX_SEEN_ORDER_IDS) {
+            current.takeLast(MAX_SEEN_ORDER_IDS)
+        } else {
+            current
+        }
+        prefs.edit().putString(KEY_SEEN_ORDER_IDS, capped.joinToString("\n")).apply()
+        return true
+    }
+
+    var appLanguage: String
+        get() {
+            val stored = prefs.getString(KEY_APP_LANGUAGE, LANG_SYSTEM) ?: LANG_SYSTEM
+            return if (stored in VALID_LANGUAGES) stored else LANG_SYSTEM
+        }
+        set(value) {
+            val normalized = value.trim().lowercase().let { if (it in VALID_LANGUAGES) it else LANG_SYSTEM }
+            prefs.edit().putString(KEY_APP_LANGUAGE, normalized).apply()
+            _appLanguageFlow.value = normalized
+        }
+
     fun isConfigured(): Boolean {
         return merchantId.isNotBlank() && deviceKey.isNotBlank()
     }
@@ -136,6 +209,9 @@ class PreferencesManager(context: Context) {
             .remove(KEY_STORE_NAME)
             .remove(KEY_MERCHANT_ID)
             .remove(KEY_DEVICE_KEY)
+            .remove(KEY_LAST_INBOX_SCAN_AT)
+            .remove(KEY_LAST_SYNC_AT)
+            .remove(KEY_SEEN_ORDER_IDS)
             .apply()
         _authTokenFlow.value = ""
         _userEmailFlow.value = ""
@@ -147,6 +223,12 @@ class PreferencesManager(context: Context) {
     companion object {
         private const val PREFS_NAME = "orbit_payment_preferences"
         private const val DEFAULT_SERVER_URL = "https://payment.orbitsaas.cloud"
+        private const val MAX_SEEN_ORDER_IDS = 200
+
+        const val LANG_SYSTEM = "system"
+        const val LANG_EN = "en"
+        const val LANG_BN = "bn"
+        private val VALID_LANGUAGES = setOf(LANG_SYSTEM, LANG_EN, LANG_BN)
 
         fun normalizeServerUrl(raw: String): String {
             val trimmed = raw.trim().removeSuffix("/")
@@ -172,5 +254,10 @@ class PreferencesManager(context: Context) {
         private const val KEY_FG_SERVICE_ENABLED = "fg_service_enabled"
         private const val KEY_LAST_HEARTBEAT = "last_heartbeat"
         private const val KEY_IS_DARK_THEME = "is_dark_theme"
+        private const val KEY_EXTRA_TRUSTED_SENDERS = "extra_trusted_senders"
+        private const val KEY_LAST_INBOX_SCAN_AT = "last_inbox_scan_at"
+        private const val KEY_LAST_SYNC_AT = "last_sync_at"
+        private const val KEY_SEEN_ORDER_IDS = "seen_order_ids"
+        private const val KEY_APP_LANGUAGE = "app_language"
     }
 }

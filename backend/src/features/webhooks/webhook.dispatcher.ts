@@ -1,4 +1,4 @@
-import { eq, and, lte, isNotNull } from 'drizzle-orm';
+import { eq, and, lte, isNotNull, inArray } from 'drizzle-orm';
 import type { AppDb } from '../../db/client';
 import {
   webhookDeliveries,
@@ -6,6 +6,7 @@ import {
   merchantDevices,
   type MerchantRecord,
 } from '../../db/schema';
+import { pushToMerchantWebSockets } from '../../router/push-hub';
 import { routeSmsOrPush } from '../../router/sms';
 import { generateSecureToken } from '../../shared/crypto';
 import type { Env } from '../../shared/types';
@@ -208,25 +209,28 @@ export async function processWebhookRetries(
   return { processed: pendingDeliveries.length, succeeded, failed };
 }
 
-/**
- * Sends a push notification to the merchant's Android companion app via the unified SMS/Push router.
- * Delegates provider selection and fallback to `backend/src/router/sms.ts`.
- */
-export async function sendFcmPush(
+function normalizePushEnv(fcmServerKeyOrEnv: string | Env | undefined): Env | null {
+  if (!fcmServerKeyOrEnv) {
+    return null;
+  }
+  if (typeof fcmServerKeyOrEnv === 'string') {
+    // Legacy callers passing raw FCM_SERVER_KEY string have no FCM v1 service account JSON
+    return { FCM_SERVER_KEY: fcmServerKeyOrEnv } as Env;
+  }
+  return fcmServerKeyOrEnv;
+}
+
+async function sendFcmPushDetailed(
   fcmServerKeyOrEnv: string | Env | undefined,
   fcmToken: string | null | undefined,
   title: string,
   body: string,
   data?: Record<string, string>
-): Promise<boolean> {
-  if (!fcmServerKeyOrEnv || !fcmToken) {
-    return false;
+): Promise<{ ok: boolean; unregistered: boolean }> {
+  const env = normalizePushEnv(fcmServerKeyOrEnv);
+  if (!env || !fcmToken) {
+    return { ok: false, unregistered: false };
   }
-
-  const env =
-    typeof fcmServerKeyOrEnv === 'string'
-      ? ({ FCM_SERVER_KEY: fcmServerKeyOrEnv } as Env)
-      : fcmServerKeyOrEnv;
 
   const res = await routeSmsOrPush(env, {
     fcmToken,
@@ -236,22 +240,55 @@ export async function sendFcmPush(
     preferredProvider: 'fcm',
   });
 
-  return res.success;
+  const fcmAttempt = res.attempts.find((attempt) => attempt.provider === 'fcm');
+  const unregistered = Boolean(
+    fcmAttempt &&
+      !fcmAttempt.ok &&
+      (fcmAttempt.statusCode === 404 ||
+        fcmAttempt.error?.toUpperCase().includes('UNREGISTERED'))
+  );
+
+  return { ok: res.success, unregistered };
 }
 
 /**
- * Dispatches an FCM push notification to all registered tokens for a merchant
- * (both legacy merchant.fcmToken and active merchant_devices.fcmToken rows).
+ * Sends a push notification to the merchant's Android companion app via the unified SMS/Push router.
+ * Delegates provider selection and fallback to `backend/src/router/sms.ts` (FCM HTTP v1).
  */
-export async function sendPushToMerchantDevices(
-  db: AppDb,
+export async function sendFcmPush(
   fcmServerKeyOrEnv: string | Env | undefined,
+  fcmToken: string | null | undefined,
+  title: string,
+  body: string,
+  data?: Record<string, string>
+): Promise<boolean> {
+  const res = await sendFcmPushDetailed(fcmServerKeyOrEnv, fcmToken, title, body, data);
+  return res.ok;
+}
+
+export interface DetailedPushResult {
+  totalDelivered: number;
+  wsDelivered: number;
+  fcmDelivered: number;
+  activeSockets: number;
+}
+
+function resolvePushEvent(data?: Record<string, string>): string {
+  if (data?.event) return data.event;
+  if (data?.trxId) return 'payment.verified';
+  if (data?.type === 'ADMIN_TEST_PUSH') return 'ADMIN_TEST_PUSH';
+  return 'notification';
+}
+
+async function sendFcmToMerchantTokens(
+  db: AppDb,
+  env: Env,
   merchant: MerchantRecord,
   title: string,
   body: string,
   data?: Record<string, string>
 ): Promise<number> {
-  if (!fcmServerKeyOrEnv) {
+  if (!env.FCM_SERVICE_ACCOUNT_JSON?.trim()) {
     return 0;
   }
 
@@ -280,13 +317,105 @@ export async function sendPushToMerchantDevices(
     return 0;
   }
 
-  let sentCount = 0;
+  let fcmDelivered = 0;
+  const unregisteredTokens: string[] = [];
+
   await Promise.allSettled(
     Array.from(tokens).map(async (token) => {
-      const ok = await sendFcmPush(fcmServerKeyOrEnv, token, title, body, data);
-      if (ok) sentCount++;
+      const res = await sendFcmPushDetailed(env, token, title, body, data);
+      if (res.ok) {
+        fcmDelivered++;
+      } else if (res.unregistered) {
+        unregisteredTokens.push(token);
+      }
     })
   );
 
-  return sentCount;
+  if (unregisteredTokens.length > 0) {
+    try {
+      await db
+        .update(merchantDevices)
+        .set({ fcmToken: null })
+        .where(
+          and(
+            eq(merchantDevices.merchantId, merchant.id),
+            inArray(merchantDevices.fcmToken, unregisteredTokens)
+          )
+        );
+
+      if (merchant.fcmToken && unregisteredTokens.includes(merchant.fcmToken)) {
+        await db
+          .update(merchants)
+          .set({ fcmToken: null })
+          .where(eq(merchants.id, merchant.id));
+      }
+    } catch (cleanupErr) {
+      console.warn('[FCM Token Cleanup Error]:', cleanupErr);
+    }
+  }
+
+  return fcmDelivered;
+}
+
+/**
+ * Dispatches a push notification across the 2 active server tiers for a merchant:
+ * - Tier 1 (Primary): Self-hosted Cloudflare Durable Object WebSocket hub (`MerchantPushHub`)
+ * - Tier 2 (Optional Backup): FCM HTTP v1 across `merchant.fcmToken` and active `merchant_devices.fcmToken` rows
+ */
+export async function sendPushToMerchantDevicesDetailed(
+  db: AppDb,
+  fcmServerKeyOrEnv: string | Env | undefined,
+  merchant: MerchantRecord,
+  title: string,
+  body: string,
+  data?: Record<string, string>
+): Promise<DetailedPushResult> {
+  const env = normalizePushEnv(fcmServerKeyOrEnv);
+  if (!env) {
+    return {
+      totalDelivered: 0,
+      wsDelivered: 0,
+      fcmDelivered: 0,
+      activeSockets: 0,
+    };
+  }
+
+  const [wsRes, fcmDelivered] = await Promise.all([
+    pushToMerchantWebSockets(env, merchant.id, {
+      event: resolvePushEvent(data),
+      title,
+      body,
+      data,
+    }),
+    sendFcmToMerchantTokens(db, env, merchant, title, body, data),
+  ]);
+
+  return {
+    totalDelivered: wsRes.delivered + fcmDelivered,
+    wsDelivered: wsRes.delivered,
+    fcmDelivered,
+    activeSockets: wsRes.activeSockets,
+  };
+}
+
+/**
+ * Backward-compatible wrapper returning total push deliveries (WebSocket + FCM v1) for a merchant.
+ */
+export async function sendPushToMerchantDevices(
+  db: AppDb,
+  fcmServerKeyOrEnv: string | Env | undefined,
+  merchant: MerchantRecord,
+  title: string,
+  body: string,
+  data?: Record<string, string>
+): Promise<number> {
+  const res = await sendPushToMerchantDevicesDetailed(
+    db,
+    fcmServerKeyOrEnv,
+    merchant,
+    title,
+    body,
+    data
+  );
+  return res.totalDelivered;
 }

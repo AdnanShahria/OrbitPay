@@ -4,6 +4,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,7 +29,9 @@ import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Store
+import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -56,9 +59,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.orbitsaas.payment.R
+import com.orbitsaas.payment.data.local.PreferencesManager
+import com.orbitsaas.payment.ui.locale.LocaleHelper
+import com.orbitsaas.payment.ui.theme.OrbitSemanticColors
 import com.orbitsaas.payment.ui.theme.StatusGreen
 import com.orbitsaas.payment.ui.theme.StatusGreenBg
 import com.orbitsaas.payment.ui.theme.StatusRed
@@ -75,18 +87,26 @@ fun SettingsScreen(
     onTestConnection: (serverUrl: String, merchantId: String, deviceKey: String, (Boolean, String) -> Unit) -> Unit,
     onLogoutClick: () -> Unit = {}
 ) {
+    val context = LocalContext.current
+    val preferencesManager = remember(context) { PreferencesManager(context) }
+
     var serverUrl by remember(state.serverUrl) {
         mutableStateOf(if (state.serverUrl.isBlank()) "https://payment.orbitsaas.cloud" else state.serverUrl)
     }
     var merchantId by remember(state.merchantId) { mutableStateOf(state.merchantId) }
     var deviceKey by remember(state.deviceKey) { mutableStateOf(state.deviceKey) }
     var enableForeground by remember(state.isForegroundEnabled) { mutableStateOf(state.isForegroundEnabled) }
+    var selectedLanguage by remember { mutableStateOf(LocaleHelper.currentLanguage(context)) }
+    var extraTrustedSenders by remember { mutableStateOf(preferencesManager.extraTrustedSenders) }
 
     var isTestingConnection by remember { mutableStateOf(false) }
     var testResult by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
 
-    val cardShape = RoundedCornerShape(20.dp)
-    val fieldShape = RoundedCornerShape(14.dp)
+    val greenFg = OrbitSemanticColors.statusGreen
+    val redFg = OrbitSemanticColors.statusRed
+
+    val cardShape = RoundedCornerShape(16.dp)
+    val fieldShape = RoundedCornerShape(12.dp)
     val textFieldColors = OutlinedTextFieldDefaults.colors(
         focusedBorderColor = MaterialTheme.colorScheme.primary,
         unfocusedBorderColor = MaterialTheme.colorScheme.outline,
@@ -111,7 +131,7 @@ fun SettingsScreen(
             TopAppBar(
                 title = {
                     Text(
-                        text = "Device & hub settings",
+                        text = stringResource(R.string.settings_title),
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onBackground
@@ -124,7 +144,7 @@ fun SettingsScreen(
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
+                            contentDescription = stringResource(R.string.action_back),
                             tint = MaterialTheme.colorScheme.onBackground
                         )
                     }
@@ -149,7 +169,7 @@ fun SettingsScreen(
                 testResult?.let { (isSuccess, message) ->
                     val bannerBg = if (isSuccess) StatusGreenBg else StatusRedBg
                     val bannerBorder = if (isSuccess) StatusGreen else StatusRed
-                    val textColor = if (isSuccess) StatusGreen else StatusRed
+                    val textColor = if (isSuccess) greenFg else redFg
 
                     Surface(
                         modifier = Modifier
@@ -161,11 +181,13 @@ fun SettingsScreen(
                         Row(
                             modifier = Modifier.padding(16.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             Icon(
                                 imageVector = if (isSuccess) Icons.Default.CheckCircle else Icons.Default.Error,
-                                contentDescription = null,
+                                contentDescription = stringResource(
+                                    if (isSuccess) R.string.cd_connection_success else R.string.cd_connection_error
+                                ),
                                 tint = textColor,
                                 modifier = Modifier.size(20.dp)
                             )
@@ -191,11 +213,11 @@ fun SettingsScreen(
                     shape = cardShape
                 ) {
                     Column(
-                        modifier = Modifier.padding(20.dp),
-                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         Text(
-                            text = "Merchant account",
+                            text = stringResource(R.string.settings_merchant_account),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurface
@@ -208,7 +230,7 @@ fun SettingsScreen(
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(44.dp)
+                                    .size(48.dp)
                                     .clip(RoundedCornerShape(12.dp))
                                     .background(MaterialTheme.colorScheme.surfaceVariant)
                                     .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp)),
@@ -216,7 +238,7 @@ fun SettingsScreen(
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.AccountCircle,
-                                    contentDescription = null,
+                                    contentDescription = stringResource(R.string.cd_merchant_avatar),
                                     tint = MaterialTheme.colorScheme.onSurface,
                                     modifier = Modifier.size(24.dp)
                                 )
@@ -224,10 +246,10 @@ fun SettingsScreen(
 
                             Column(
                                 modifier = Modifier.weight(1f),
-                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 Text(
-                                    text = state.storeName.ifBlank { "ORBIT Merchant" },
+                                    text = state.storeName.ifBlank { stringResource(R.string.settings_default_merchant_name) },
                                     style = MaterialTheme.typography.bodyLarge,
                                     fontWeight = FontWeight.SemiBold,
                                     color = MaterialTheme.colorScheme.onSurface
@@ -242,7 +264,9 @@ fun SettingsScreen(
                                 if (state.merchantId.isNotBlank()) {
                                     Text(
                                         text = state.merchantId,
-                                        style = MaterialTheme.typography.labelMedium,
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontFeatureSettings = "tnum"
+                                        ),
                                         fontFamily = FontFamily.Monospace,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -254,11 +278,11 @@ fun SettingsScreen(
                             onClick = onLogoutClick,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .heightIn(min = 46.dp),
+                                .heightIn(min = 48.dp),
                             shape = fieldShape,
                             border = BorderStroke(1.dp, StatusRed.copy(alpha = 0.45f)),
                             colors = ButtonDefaults.outlinedButtonColors(
-                                contentColor = StatusRed
+                                contentColor = redFg
                             )
                         ) {
                             Icon(
@@ -268,7 +292,7 @@ fun SettingsScreen(
                             )
                             Spacer(modifier = Modifier.size(8.dp))
                             Text(
-                                text = "Sign out",
+                                text = stringResource(R.string.action_sign_out),
                                 style = MaterialTheme.typography.labelLarge,
                                 fontWeight = FontWeight.SemiBold
                             )
@@ -287,18 +311,23 @@ fun SettingsScreen(
                 shape = cardShape
             ) {
                 Column(
-                    modifier = Modifier.padding(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Text(
-                        text = "Appearance",
+                        text = stringResource(R.string.settings_appearance),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
 
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .clip(fieldShape)
+                            .clickable { onToggleTheme() }
+                            .padding(vertical = 4.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -319,25 +348,33 @@ fun SettingsScreen(
                             ) {
                                 Icon(
                                     imageVector = if (state.isDarkTheme) Icons.Default.DarkMode else Icons.Default.LightMode,
-                                    contentDescription = null,
+                                    contentDescription = stringResource(R.string.cd_theme_icon),
                                     tint = MaterialTheme.colorScheme.onSurface,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
 
-                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Text(
-                                    text = if (state.isDarkTheme) "Premium Black theme" else "White theme",
+                                    text = stringResource(
+                                        if (state.isDarkTheme) {
+                                            R.string.settings_theme_dark_title
+                                        } else {
+                                            R.string.settings_theme_light_title
+                                        }
+                                    ),
                                     style = MaterialTheme.typography.bodyLarge,
                                     fontWeight = FontWeight.Medium,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = if (state.isDarkTheme) {
-                                        "Obsidian OLED surface active"
-                                    } else {
-                                        "Porcelain white surface active (default)"
-                                    },
+                                    text = stringResource(
+                                        if (state.isDarkTheme) {
+                                            R.string.settings_theme_dark_desc
+                                        } else {
+                                            R.string.settings_theme_light_desc
+                                        }
+                                    ),
                                     style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -353,6 +390,109 @@ fun SettingsScreen(
                 }
             }
 
+            // Language Selector Card ("Language / ভাষা")
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, MaterialTheme.colorScheme.outline, cardShape),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                shape = cardShape
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Translate,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = stringResource(R.string.settings_language_title),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    Text(
+                        text = stringResource(R.string.settings_language_subtitle),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    val languageOptions = listOf(
+                        LocaleHelper.LANG_SYSTEM to stringResource(R.string.settings_language_system),
+                        LocaleHelper.LANG_ENGLISH to stringResource(R.string.settings_language_english),
+                        LocaleHelper.LANG_BANGLA to stringResource(R.string.settings_language_bangla)
+                    )
+
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(14.dp)),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            languageOptions.forEach { (tag, label) ->
+                                val isSelected = selectedLanguage == tag
+                                val pillShape = RoundedCornerShape(10.dp)
+                                Surface(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .heightIn(min = 48.dp)
+                                        .clip(pillShape)
+                                        .clickable {
+                                            selectedLanguage = tag
+                                            LocaleHelper.setLanguage(context, tag)
+                                        },
+                                    shape = pillShape,
+                                    color = if (isSelected) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        Color.Transparent
+                                    }
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(min = 48.dp)
+                                            .padding(horizontal = 8.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = label,
+                                            style = MaterialTheme.typography.labelLarge,
+                                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                                            color = if (isSelected) {
+                                                MaterialTheme.colorScheme.onPrimary
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                            },
+                                            textAlign = TextAlign.Center,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // Connection Configuration Card
             Card(
                 modifier = Modifier
@@ -363,11 +503,11 @@ fun SettingsScreen(
                 shape = cardShape
             ) {
                 Column(
-                    modifier = Modifier.padding(20.dp),
+                    modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     Text(
-                        text = "ORBIT Cloud connection",
+                        text = stringResource(R.string.settings_cloud_connection),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface
@@ -377,7 +517,7 @@ fun SettingsScreen(
                     OutlinedTextField(
                         value = serverUrl,
                         onValueChange = { serverUrl = it },
-                        label = { Text("Server endpoint URL") },
+                        label = { Text(stringResource(R.string.settings_server_url_label)) },
                         leadingIcon = {
                             Icon(
                                 imageVector = Icons.Default.Language,
@@ -395,7 +535,7 @@ fun SettingsScreen(
                     OutlinedTextField(
                         value = merchantId,
                         onValueChange = { merchantId = it },
-                        label = { Text("Merchant ID (e.g. mer_live_xxxx)") },
+                        label = { Text(stringResource(R.string.settings_merchant_id_label)) },
                         leadingIcon = {
                             Icon(
                                 imageVector = Icons.Default.Store,
@@ -413,7 +553,7 @@ fun SettingsScreen(
                     OutlinedTextField(
                         value = deviceKey,
                         onValueChange = { deviceKey = it },
-                        label = { Text("Device API key (SHA-256 auth)") },
+                        label = { Text(stringResource(R.string.settings_device_key_label)) },
                         leadingIcon = {
                             Icon(
                                 imageVector = Icons.Default.Key,
@@ -423,7 +563,10 @@ fun SettingsScreen(
                         },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
-                        textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                        textStyle = MaterialTheme.typography.bodyMedium.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontFeatureSettings = "tnum"
+                        ),
                         shape = fieldShape,
                         colors = textFieldColors
                     )
@@ -456,16 +599,74 @@ fun SettingsScreen(
                             )
                             Spacer(modifier = Modifier.size(8.dp))
                             Text(
-                                text = "Testing reachability...",
+                                text = stringResource(R.string.settings_testing_connection),
                                 style = MaterialTheme.typography.labelLarge
                             )
                         } else {
                             Text(
-                                text = "Test hub connection",
+                                text = stringResource(R.string.settings_test_connection),
                                 style = MaterialTheme.typography.labelLarge
                             )
                         }
                     }
+                }
+            }
+
+            // SMS Trust & Extra Trusted Senders Card
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, MaterialTheme.colorScheme.outline, cardShape),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                shape = cardShape
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Security,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = stringResource(R.string.settings_sms_trust_title),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    OutlinedTextField(
+                        value = extraTrustedSenders,
+                        onValueChange = { updated ->
+                            extraTrustedSenders = updated
+                            preferencesManager.extraTrustedSenders = updated
+                        },
+                        label = { Text(stringResource(R.string.settings_extra_senders_label)) },
+                        placeholder = { Text(stringResource(R.string.settings_extra_senders_placeholder)) },
+                        supportingText = {
+                            Text(
+                                text = stringResource(R.string.settings_extra_senders_helper),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodyMedium.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontFeatureSettings = "tnum"
+                        ),
+                        shape = fieldShape,
+                        colors = textFieldColors
+                    )
                 }
             }
 
@@ -479,18 +680,23 @@ fun SettingsScreen(
                 shape = cardShape
             ) {
                 Column(
-                    modifier = Modifier.padding(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Text(
-                        text = "System resilience",
+                        text = stringResource(R.string.settings_resilience_title),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
 
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .clip(fieldShape)
+                            .clickable { enableForeground = !enableForeground }
+                            .padding(vertical = 4.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -498,16 +704,16 @@ fun SettingsScreen(
                             modifier = Modifier
                                 .weight(1f)
                                 .padding(end = 12.dp),
-                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             Text(
-                                text = "Sticky foreground service",
+                                text = stringResource(R.string.settings_foreground_title),
                                 style = MaterialTheme.typography.bodyLarge,
                                 fontWeight = FontWeight.Medium,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "Keeps sync worker alive and displays persistent status in notification shade",
+                                text = stringResource(R.string.settings_foreground_desc),
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -525,6 +731,7 @@ fun SettingsScreen(
             // Save Button
             Button(
                 onClick = {
+                    preferencesManager.extraTrustedSenders = extraTrustedSenders.trim()
                     onSaveSettings(serverUrl, merchantId, deviceKey, enableForeground)
                 },
                 modifier = Modifier
@@ -539,7 +746,7 @@ fun SettingsScreen(
                 Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.size(8.dp))
                 Text(
-                    text = "Save configuration",
+                    text = stringResource(R.string.settings_save_button),
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold
                 )
@@ -549,19 +756,21 @@ fun SettingsScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 4.dp),
+                    .padding(vertical = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Text(
-                    text = "ORBIT Payment Companion · v1.0.0",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f)
+                    text = stringResource(R.string.settings_footer_version),
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontFeatureSettings = "tnum"
+                    ),
+                    color = MaterialTheme.colorScheme.outlineVariant
                 )
                 Text(
-                    text = "Native Kotlin 2.0 · Jetpack Compose · Room DB",
+                    text = stringResource(R.string.settings_footer_stack),
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f)
+                    color = MaterialTheme.colorScheme.outlineVariant
                 )
             }
         }

@@ -52,7 +52,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -60,6 +59,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -68,6 +68,8 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.orbitsaas.payment.R
+import com.orbitsaas.payment.ui.theme.OrbitSemanticColors
 import com.orbitsaas.payment.ui.theme.StatusRed
 import com.orbitsaas.payment.ui.theme.StatusRedBg
 import com.orbitsaas.payment.ui.viewmodel.DashboardUiState
@@ -81,6 +83,7 @@ fun LoginScreen(
     onClearError: () -> Unit
 ) {
     val focusManager = LocalFocusManager.current
+    val redFg = OrbitSemanticColors.statusRed
 
     var serverUrl by rememberSaveable(state.serverUrl) {
         mutableStateOf(
@@ -92,8 +95,8 @@ fun LoginScreen(
     var passwordVisible by rememberSaveable { mutableStateOf(false) }
     var showServerField by rememberSaveable { mutableStateOf(false) }
 
-    val cardShape = RoundedCornerShape(20.dp)
-    val fieldShape = RoundedCornerShape(14.dp)
+    val cardShape = RoundedCornerShape(16.dp)
+    val fieldShape = RoundedCornerShape(12.dp)
 
     val textFieldColors = OutlinedTextFieldDefaults.colors(
         focusedBorderColor = MaterialTheme.colorScheme.primary,
@@ -119,7 +122,7 @@ fun LoginScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = 20.dp, vertical = 16.dp)
+                .padding(horizontal = 24.dp, vertical = 16.dp)
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
@@ -135,7 +138,9 @@ fun LoginScreen(
                 ) {
                     Icon(
                         imageVector = if (state.isDarkTheme) Icons.Default.LightMode else Icons.Default.DarkMode,
-                        contentDescription = if (state.isDarkTheme) "Switch to White theme" else "Switch to Black theme",
+                        contentDescription = stringResource(
+                            if (state.isDarkTheme) R.string.cd_switch_light_theme else R.string.cd_switch_dark_theme
+                        ),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -143,13 +148,13 @@ fun LoginScreen(
 
             Column(
                 modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(18.dp)
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 // Brand Header
                 Column(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Box(
                         modifier = Modifier
@@ -161,20 +166,20 @@ fun LoginScreen(
                     ) {
                         Icon(
                             imageVector = Icons.Default.Store,
-                            contentDescription = null,
+                            contentDescription = stringResource(R.string.cd_brand_logo),
                             tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(26.dp)
+                            modifier = Modifier.size(28.dp)
                         )
                     }
 
                     Text(
-                        text = "ORBIT Pay",
+                        text = stringResource(R.string.app_name),
                         style = MaterialTheme.typography.headlineMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onBackground
                     )
                     Text(
-                        text = "Sign in to sync MFS payments and manage live store orders",
+                        text = stringResource(R.string.login_subtitle),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center
@@ -192,20 +197,20 @@ fun LoginScreen(
                             shape = fieldShape
                         ) {
                             Row(
-                                modifier = Modifier.padding(14.dp),
+                                modifier = Modifier.padding(16.dp),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Error,
-                                    contentDescription = null,
-                                    tint = StatusRed,
-                                    modifier = Modifier.size(18.dp)
+                                    contentDescription = stringResource(R.string.cd_login_error),
+                                    tint = redFg,
+                                    modifier = Modifier.size(20.dp)
                                 )
                                 Text(
                                     text = errorMsg,
                                     style = MaterialTheme.typography.bodyMedium,
-                                    color = StatusRed,
+                                    color = redFg,
                                     fontWeight = FontWeight.Medium
                                 )
                             }
@@ -223,13 +228,14 @@ fun LoginScreen(
                     shape = cardShape
                 ) {
                     Column(
-                        modifier = Modifier.padding(20.dp),
-                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                        modifier = Modifier.padding(24.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        // Collapsible Server URL pill
+                        // Collapsible Server URL pill (>= 48dp touch target)
                         Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .heightIn(min = 48.dp)
                                 .clip(fieldShape)
                                 .border(1.dp, MaterialTheme.colorScheme.outline, fieldShape)
                                 .clickable { showServerField = !showServerField },
@@ -237,7 +243,10 @@ fun LoginScreen(
                             shape = fieldShape
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 48.dp)
+                                    .padding(horizontal = 16.dp, vertical = 12.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
@@ -262,7 +271,7 @@ fun LoginScreen(
                                 }
                                 Icon(
                                     imageVector = if (showServerField) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                                    contentDescription = "Edit server URL",
+                                    contentDescription = stringResource(R.string.cd_edit_server_url),
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(18.dp)
                                 )
@@ -276,7 +285,7 @@ fun LoginScreen(
                                     serverUrl = it
                                     if (state.loginError != null) onClearError()
                                 },
-                                label = { Text("ORBIT Hub server URL") },
+                                label = { Text(stringResource(R.string.login_server_url_label)) },
                                 leadingIcon = {
                                     Icon(
                                         imageVector = Icons.Default.Language,
@@ -305,8 +314,8 @@ fun LoginScreen(
                                 email = it
                                 if (state.loginError != null) onClearError()
                             },
-                            label = { Text("Merchant email") },
-                            placeholder = { Text("owner@store.com") },
+                            label = { Text(stringResource(R.string.login_email_label)) },
+                            placeholder = { Text(stringResource(R.string.login_email_placeholder)) },
                             leadingIcon = {
                                 Icon(
                                     imageVector = Icons.Default.Email,
@@ -335,7 +344,7 @@ fun LoginScreen(
                                 password = it
                                 if (state.loginError != null) onClearError()
                             },
-                            label = { Text("Password") },
+                            label = { Text(stringResource(R.string.login_password_label)) },
                             leadingIcon = {
                                 Icon(
                                     imageVector = Icons.Default.Lock,
@@ -344,10 +353,15 @@ fun LoginScreen(
                                 )
                             },
                             trailingIcon = {
-                                IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                                IconButton(
+                                    onClick = { passwordVisible = !passwordVisible },
+                                    modifier = Modifier.size(48.dp)
+                                ) {
                                     Icon(
                                         imageVector = if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                        contentDescription = if (passwordVisible) "Hide password" else "Show password",
+                                        contentDescription = stringResource(
+                                            if (passwordVisible) R.string.cd_hide_password else R.string.cd_show_password
+                                        ),
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
@@ -371,14 +385,12 @@ fun LoginScreen(
                             colors = textFieldColors
                         )
 
-                        Spacer(modifier = Modifier.height(2.dp))
-
                         // Primary Sign In Button
                         Button(
                             onClick = submitLogin,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .heightIn(min = 50.dp),
+                                .heightIn(min = 48.dp),
                             enabled = !state.isLoggingIn,
                             shape = fieldShape,
                             colors = ButtonDefaults.buttonColors(
@@ -392,15 +404,15 @@ fun LoginScreen(
                                     strokeWidth = 2.dp,
                                     color = MaterialTheme.colorScheme.onPrimary
                                 )
-                                Spacer(modifier = Modifier.size(10.dp))
+                                Spacer(modifier = Modifier.size(8.dp))
                                 Text(
-                                    text = "Signing in...",
+                                    text = stringResource(R.string.login_signing_in),
                                     style = MaterialTheme.typography.labelLarge,
                                     fontWeight = FontWeight.SemiBold
                                 )
                             } else {
                                 Text(
-                                    text = "Sign in to ORBIT Hub",
+                                    text = stringResource(R.string.login_sign_in_button),
                                     style = MaterialTheme.typography.labelLarge,
                                     fontWeight = FontWeight.SemiBold
                                 )
@@ -408,7 +420,7 @@ fun LoginScreen(
                         }
 
                         Text(
-                            text = "Merchant credentials are provisioned by ORBIT SaaS Admin.",
+                            text = stringResource(R.string.login_credentials_hint),
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = TextAlign.Center,
@@ -437,7 +449,7 @@ fun LoginScreen(
                     )
                     Spacer(modifier = Modifier.size(8.dp))
                     Text(
-                        text = "Use Manual Device Key / Settings",
+                        text = stringResource(R.string.login_manual_setup_button),
                         style = MaterialTheme.typography.labelLarge
                     )
                 }

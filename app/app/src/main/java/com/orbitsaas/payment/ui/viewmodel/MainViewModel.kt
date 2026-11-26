@@ -19,6 +19,8 @@ import com.orbitsaas.payment.data.remote.IngestSmsItem
 import com.orbitsaas.payment.data.remote.MerchantOrderDto
 import com.orbitsaas.payment.data.remote.OrbitApiClient
 import com.orbitsaas.payment.data.remote.UnauthorizedException
+import com.orbitsaas.payment.interceptors.InboxScanner
+import com.orbitsaas.payment.service.FcmTokenRegistrar
 import com.orbitsaas.payment.service.StickyForegroundService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -286,6 +288,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
 
+                viewModelScope.launch(Dispatchers.IO) {
+                    runCatching { FcmTokenRegistrar.refreshToken(getApplication()) }
+                    runCatching { InboxScanner.scheduleNow(getApplication()) }
+                }
+
                 _isLoggingIn.value = false
                 refreshStatsFromServer()
                 refreshOrders()
@@ -423,7 +430,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 amount = it.amount,
                                 senderNumber = it.senderNumber,
                                 rawSms = it.rawSms,
-                                receivedAt = it.receivedAt
+                                receivedAt = it.receivedAt,
+                                smsSender = it.smsSender.ifBlank { null },
+                                source = it.source
                             )
                         }
 

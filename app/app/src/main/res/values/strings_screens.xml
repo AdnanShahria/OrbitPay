@@ -1,0 +1,171 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Bottom Navigation -->
+    <string name="nav_home">Home</string>
+    <string name="nav_history">History</string>
+    <string name="nav_verify">Verify</string>
+    <string name="nav_diagnostics">Diagnostics</string>
+    <string name="nav_settings">Settings</string>
+
+    <!-- Shared Labels & Time -->
+    <string name="common_refresh">Refresh</string>
+    <string name="common_retry">Retry</string>
+    <string name="common_cancel">Cancel</string>
+    <string name="common_close">Close</string>
+    <string name="common_clear">Clear</string>
+    <string name="common_all">All</string>
+    <string name="common_never">Never</string>
+    <string name="common_just_now">Just now</string>
+    <string name="common_minutes_ago">%1$dm ago</string>
+    <string name="common_hours_ago">%1$dh ago</string>
+    <string name="common_days_ago">%1$dd ago</string>
+    <string name="common_amount_bdt">৳ %1$s</string>
+
+    <!-- Providers -->
+    <string name="provider_bkash">bKash</string>
+    <string name="provider_nagad">Nagad</string>
+    <string name="provider_rocket">Rocket</string>
+    <string name="provider_upay">Upay</string>
+    <string name="provider_cellfin">CellFin</string>
+
+    <!-- Status Badges -->
+    <string name="status_verified">Verified</string>
+    <string name="status_manual_verified">Manual</string>
+    <string name="status_unclaimed">Unclaimed</string>
+    <string name="status_uploaded">Uploaded</string>
+    <string name="status_pending_upload">Pending</string>
+
+    <!-- Trust Flags -->
+    <string name="trust_badge_flagged">Flagged</string>
+    <string name="trust_flag_legacy_unverified">Sender address was missing or unverified during ingestion.</string>
+    <string name="trust_flag_untrusted_sender">Originating sender or app package is not in the trusted MFS allowlist.</string>
+    <string name="trust_flag_parse_mismatch">Server re-parse of raw SMS did not match the reported TrxID or amount.</string>
+    <string name="trust_flag_generic">Transaction flagged by anti-spoofing check (%1$s).</string>
+
+    <!-- History Screen -->
+    <string name="history_title">Transaction history</string>
+    <string name="history_tab_phone">On this phone</string>
+    <string name="history_tab_server">Server</string>
+    <string name="history_search_hint">Search TrxID, sender, or order ID</string>
+    <string name="history_empty_phone_title">No matching phone records</string>
+    <string name="history_empty_phone_desc">Captured MFS SMS and notifications stored on this device will appear here.</string>
+    <string name="history_empty_server_title">No server transactions</string>
+    <string name="history_empty_server_desc">No ledger records matched your current search or filters on ORBIT Hub.</string>
+    <string name="history_load_more">Load more</string>
+    <string name="history_loading_server">Loading ledger transactions…</string>
+    <string name="history_error_prefix">Unable to load transactions: %1$s</string>
+    <string name="history_copied_trx">TrxID %1$s copied to clipboard</string>
+    <string name="history_copy_trx">Copy TrxID</string>
+
+    <!-- History Detail Bottom Sheet -->
+    <string name="history_detail_title">Transaction details</string>
+    <string name="history_detail_trx_id">Transaction ID</string>
+    <string name="history_detail_sender">Customer phone</string>
+    <string name="history_detail_sms_sender">Originating sender</string>
+    <string name="history_detail_source">Capture source</string>
+    <string name="history_detail_status">Status</string>
+    <string name="history_detail_match_type">Match type</string>
+    <string name="history_detail_order_id">Order ID</string>
+    <string name="history_detail_received_at">Received at</string>
+    <string name="history_detail_verified_at">Verified at</string>
+    <string name="history_detail_raw_sms">Raw message</string>
+    <string name="history_detail_unknown">Not available</string>
+
+    <!-- Verify Screen -->
+    <string name="verify_title">Manual verification</string>
+    <string name="verify_subtitle">Tap an unclaimed SMS to link it with a pending order</string>
+    <string name="verify_loading_unclaimed">Loading unclaimed payments…</string>
+    <string name="verify_empty_title">All payments reconciled</string>
+    <string name="verify_empty_desc">There are no unclaimed MFS transactions waiting for manual matching right now.</string>
+    <string name="verify_error_load">Failed to load unclaimed payments: %1$s</string>
+    <string name="verify_sheet_title">Match unclaimed SMS</string>
+    <string name="verify_candidates_header">Suggested queue orders</string>
+    <string name="verify_loading_candidates">Finding matching orders…</string>
+    <string name="verify_candidates_empty">No pending queue candidates found. Use the Order ID field below to match manually.</string>
+    <string name="verify_candidates_error">Unable to load pending queue: %1$s</string>
+    <string name="verify_candidate_score">Score %1$d</string>
+    <string name="verify_reason_provider">Same provider</string>
+    <string name="verify_reason_trx_exact">Exact TrxID</string>
+    <string name="verify_reason_trx_near">TrxID ~%1$d typo</string>
+    <string name="verify_reason_amount">Amount ±৳1</string>
+    <string name="verify_reason_sender">Same sender</string>
+    <string name="verify_candidate_expected">Expected %1$s</string>
+    <string name="verify_candidate_submitted_trx">Submitted: %1$s</string>
+    <string name="verify_manual_section_title">Match by Order ID</string>
+    <string name="verify_manual_order_label">External Order ID</string>
+    <string name="verify_manual_email_label">Customer email (optional)</string>
+    <string name="verify_manual_match_button">Match order</string>
+    <string name="verify_confirm_title">Confirm manual match</string>
+    <string name="verify_confirm_body">Link %1$s (%2$s, TrxID %3$s) to Order #%4$s?</string>
+    <string name="verify_confirm_trust_warning">Security warning: This SMS was flagged (%1$s). Verify inside your official MFS app that the funds actually arrived before confirming.</string>
+    <string name="verify_confirm_button">Confirm match</string>
+    <string name="verify_match_success">Matched TrxID %1$s to Order #%2$s</string>
+    <string name="verify_match_failed">Manual match failed: %1$s</string>
+
+    <!-- Diagnostics Screen -->
+    <string name="diag_title">System diagnostics</string>
+    <string name="diag_checklist_title">Capture &amp; sync health</string>
+    <string name="diag_check_sms_perms">SMS capture permissions</string>
+    <string name="diag_check_sms_perms_ok">RECEIVE_SMS &amp; READ_SMS granted</string>
+    <string name="diag_check_sms_perms_missing">Required to read and intercept MFS SMS</string>
+    <string name="diag_check_notifications">Post notifications</string>
+    <string name="diag_check_notifications_ok">Alert notifications enabled</string>
+    <string name="diag_check_notifications_missing">Grant notification permission for alerts</string>
+    <string name="diag_check_listener">Notification listener</string>
+    <string name="diag_check_listener_ok">Listening to official MFS app pushes</string>
+    <string name="diag_check_listener_missing">Enable notification access for push fallback</string>
+    <string name="diag_check_battery">Battery optimization</string>
+    <string name="diag_check_battery_ok">Unrestricted background execution</string>
+    <string name="diag_check_battery_missing">Exempt app to prevent OS background sleep</string>
+    <string name="diag_check_fg_service">Foreground sync service</string>
+    <string name="diag_check_fg_running">Active in notification shade</string>
+    <string name="diag_check_fg_stopped">Not currently running</string>
+    <string name="diag_check_ws">Self-hosted instant push (WebSocket)</string>
+    <string name="diag_check_ws_connected">Connected · Sub-second Cloudflare hub active</string>
+    <string name="diag_check_ws_connecting">Connecting to self-hosted push hub…</string>
+    <string name="diag_check_ws_disconnected">Disconnected · Polling fallback active</string>
+    <string name="diag_check_ws_unauthorized">Auth rejected · Re-sign in or reconnect device</string>
+    <string name="diag_check_fcm">Optional backup (FCM)</string>
+    <string name="diag_check_fcm_active">FCM v1 active · Backup token registered</string>
+    <string name="diag_check_fcm_missing_token">Firebase ready · Backup token not yet registered</string>
+    <string name="diag_check_fcm_unavailable">Not bundled (optional) · Self-hosted WebSocket &amp; polling handle alerts</string>
+    <string name="diag_action_grant">Grant</string>
+    <string name="diag_action_enable">Enable</string>
+    <string name="diag_action_exempt">Exempt</string>
+    <string name="diag_action_start">Start</string>
+    <string name="diag_action_reconnect">Reconnect</string>
+    <string name="diag_action_refresh_token">Refresh</string>
+    <string name="diag_telemetry_title">Sync telemetry &amp; recovery</string>
+    <string name="diag_last_heartbeat">Last heartbeat</string>
+    <string name="diag_last_sync">Last server sync</string>
+    <string name="diag_last_push">Last instant push</string>
+    <string name="diag_last_inbox_scan">Last inbox scan</string>
+    <string name="diag_pending_uploads">Pending uploads</string>
+    <string name="diag_rescan_button">Rescan inbox (72h)</string>
+    <string name="diag_rescan_running">Scanning SMS inbox…</string>
+    <string name="diag_rescan_result">Scanned %1$d messages · Imported %2$d · Blocked %3$d</string>
+    <string name="diag_rescan_permission_needed">Grant READ_SMS permission first to scan the inbox.</string>
+    <string name="diag_ws_reconnecting">Reconnecting instant push WebSocket…</string>
+    <string name="diag_ws_not_logged_in">Sign in or configure device credentials first.</string>
+    <string name="diag_fcm_refreshed">FCM registration token refreshed.</string>
+    <string name="diag_fcm_refresh_failed">Unable to fetch FCM token right now.</string>
+
+    <!-- Diagnostics Blocked Messages -->
+    <string name="diag_blocked_title">Blocked messages (%1$d)</string>
+    <string name="diag_blocked_subtitle">Spoofed or mismatched messages rejected by SenderTrust</string>
+    <string name="diag_blocked_empty">No blocked or spoofed messages recorded.</string>
+    <string name="diag_blocked_expand">Show blocked messages</string>
+    <string name="diag_blocked_collapse">Hide blocked messages</string>
+
+    <!-- Diagnostics Parser Self-Test -->
+    <string name="diag_parser_title">Parser self-test</string>
+    <string name="diag_parser_subtitle">Test raw SMS text and sender against live anti-spoof rules</string>
+    <string name="diag_parser_sender_label">Sender or package (e.g. bKash, NAGAD, 16216)</string>
+    <string name="diag_parser_sms_label">Raw SMS message</string>
+    <string name="diag_parser_result_accepted">Accepted · %1$s</string>
+    <string name="diag_parser_result_accepted_details">TrxID: %1$s · Amount: ৳ %2$s · Sender: %3$s</string>
+    <string name="diag_parser_result_rejected">Rejected · %1$s</string>
+    <string name="diag_parser_result_rejected_provider">Provider: %1$s</string>
+    <string name="diag_parser_result_not_payment">NotPayment · Does not match an incoming MFS credit SMS</string>
+    <string name="diag_parser_hint_enter">Enter sample SMS text above to inspect the live parse result.</string>
+</resources>

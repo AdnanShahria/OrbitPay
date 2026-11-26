@@ -22,6 +22,14 @@ bucket_name = "orbitpay-r2"
 [[send_email]]
 name = "SEND_EMAIL"
 
+[[durable_objects.bindings]]
+name = "PUSH_HUB"
+class_name = "MerchantPushHub"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["MerchantPushHub"]
+
 # Optional KV binding for the Service Router (`backend/src/router/`)
 # [[kv_namespaces]]
 # binding = "KV"

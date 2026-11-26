@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- App & System Channels (referenced by AndroidManifest.xml, OrbitApplication.kt, StickyForegroundService.kt) -->
+    <string name="app_name">ORBIT Pay</string>
+    <string name="push_listener_label">ORBIT নোটিফিকেশন লিসেনার</string>
+    <string name="foreground_service_title">ORBIT এমএফএস সিঙ্ক চালু আছে</string>
+    <string name="foreground_service_desc">বিকাশ ও নগদের ইনকামিং পেমেন্ট সক্রিয়ভাবে পর্যবেক্ষণ করা হচ্ছে</string>
+    <string name="sync_channel_name">ORBIT ব্যাকগ্রাউন্ড সিঙ্ক</string>
+    <string name="sync_channel_desc">ব্যাকগ্রাউন্ড এমএফএস সিঙ্ক অবস্থা ও চলমান লিসেনার দেখায়</string>
+    <string name="alert_channel_name">ORBIT পেমেন্ট অ্যালার্ট</string>
+    <string name="alert_channel_desc">যাচাইকৃত স্টোর পেমেন্টের তাৎক্ষণিক অ্যালার্ট</string>
+
+    <!-- Common Actions & Content Descriptions -->
+    <string name="action_back">পিছনে</string>
+    <string name="action_sync_now">সিঙ্ক করুন</string>
+    <string name="action_sign_out">সাইন আউট</string>
+    <string name="action_refresh_orders">অর্ডার রিফ্রেশ করুন</string>
+    <string name="cd_switch_light_theme">হোয়াইট থিমে পরিবর্তন করুন</string>
+    <string name="cd_switch_dark_theme">ব্ল্যাক থিমে পরিবর্তন করুন</string>
+    <string name="cd_settings">সেটিংস</string>
+    <string name="cd_brand_logo">ORBIT Pay স্টোর লোগো</string>
+    <string name="cd_edit_server_url">সার্ভার URL পরিবর্তন করুন</string>
+    <string name="cd_show_password">পাসওয়ার্ড দেখুন</string>
+    <string name="cd_hide_password">পাসওয়ার্ড লুকান</string>
+    <string name="cd_status_online">অনলাইন</string>
+    <string name="cd_status_offline">অফলাইন</string>
+    <string name="cd_connection_success">সংযোগ সফল হয়েছে</string>
+    <string name="cd_connection_error">সংযোগ ত্রুটি</string>
+    <string name="cd_login_error">সাইন ইন ত্রুটি</string>
+    <string name="cd_empty_orders">কোনো স্টোর অর্ডার নেই আইকন</string>
+    <string name="cd_empty_transactions">কোনো এমএফএস লেনদেন নেই আইকন</string>
+    <string name="cd_merchant_avatar">মার্চেন্ট অ্যাকাউন্ট আইকন</string>
+    <string name="cd_theme_icon">থিম মোড আইকন</string>
+    <string name="cd_onboarding_step_icon">সেটআপ ধাপের আইকন</string>
+    <string name="currency_bdt_amount">৳ %1$s</string>
+
+    <!-- Dashboard Screen -->
+    <plurals name="dashboard_pending_orders">
+        <item quantity="one">%1$dটি বাকি</item>
+        <item quantity="other">%1$dটি বাকি</item>
+    </plurals>
+    <string name="dashboard_tab_orders_alerts">অর্ডার ও অ্যালার্ট (%1$d)</string>
+    <string name="dashboard_tab_live_mfs_feed">লাইভ MFS ফিড (%1$d)</string>
+    <string name="status_syncing_hub">ORBIT হাবের সাথে সিঙ্ক হচ্ছে...</string>
+    <string name="status_online_syncing">অনলাইন ও সিঙ্ক হচ্ছে</string>
+    <string name="status_offline_queue">অফলাইন · লোকাল কিউ সক্রিয়</string>
+    <plurals name="status_pending_uploads">
+        <item quantity="one">%1$dটি আপলোড বাকি</item>
+        <item quantity="other">%1$dটি আপলোড বাকি</item>
+    </plurals>
+    <string name="status_all_synced">সব এমএফএস মেসেজ সিঙ্ক হয়েছে</string>
+    <string name="metric_total_verified">মোট যাচাইকৃত</string>
+    <string name="metric_store_volume">স্টোর ভলিউম</string>
+    <string name="metric_verified">যাচাইকৃত</string>
+    <string name="metric_orders">অর্ডার</string>
+    <string name="metric_unclaimed">অমীমাংসিত</string>
+    <string name="metric_personal_queue">পার্সোনাল/কিউ</string>
+    <string name="order_paid_amount">পরিশোধিত ৳ %1$s</string>
+    <string name="order_status_label">অর্ডার: %1$s</string>
+    <string name="payment_status_label">পেমেন্ট: %1$s</string>
+    <string name="payment_method_cod">সিওডি</string>
+    <string name="payment_method_orbit_mfs">ORBIT MFS</string>
+    <string name="payment_method_card">কার্ড</string>
+    <string name="order_status_pending">অপেক্ষমাণ</string>
+    <string name="order_status_confirmed">নিশ্চিত</string>
+    <string name="order_status_ready_to_ship">শিপিংয়ের জন্য প্রস্তুত</string>
+    <string name="order_status_shipped">পাঠানো হয়েছে</string>
+    <string name="order_status_delivered">ডেলিভারি সম্পন্ন</string>
+    <string name="order_status_completed">সম্পন্ন</string>
+    <string name="order_status_cancelled">বাতিল</string>
+    <string name="order_status_rejected">প্রত্যাখ্যাত</string>
+    <string name="pay_status_pending">অপেক্ষমাণ</string>
+    <string name="pay_status_paid">পরিশোধিত</string>
+    <string name="pay_status_verified">যাচাইকৃত</string>
+    <string name="pay_status_failed">ব্যর্থ</string>
+    <string name="pay_status_refunded">রিফান্ডকৃত</string>
+    <string name="order_action_confirm">নিশ্চিত করুন</string>
+    <string name="order_action_ready_to_ship">প্রস্তুত করুন</string>
+    <string name="order_action_mark_shipped">পাঠানো হয়েছে</string>
+    <string name="order_action_mark_paid">পরিশোধিত</string>
+    <string name="order_action_cancel">বাতিল</string>
+    <string name="dashboard_loading_orders">স্টোর অর্ডার লোড হচ্ছে...</string>
+    <string name="dashboard_empty_orders_title">কোনো স্টোর অর্ডার নেই</string>
+    <string name="dashboard_empty_orders_desc">আপনার স্টোর থেকে আসা সিওডি ও এমএফএস অর্ডারগুলো এখানে দেখা যাবে এক-ট্যাপে কনফার্ম ও ডিসপ্যাচ করার জন্য।</string>
+    <string name="tx_from_sender">প্রেরক: %1$s</string>
+    <string name="tx_status_verified_order">যাচাইকৃত (%1$s)</string>
+    <string name="tx_status_verified">যাচাইকৃত</string>
+    <string name="tx_status_pending_upload">আপলোডের অপেক্ষায়</string>
+    <string name="tx_status_unclaimed">অমীমাংসিত</string>
+    <string name="dashboard_empty_tx_title">এখনো কোনো এমএফএস লেনদেন নেই</string>
+    <string name="dashboard_empty_tx_desc">এই ফোনে বিকাশ বা নগদ পেমেন্ট এলে তা স্বয়ংক্রিয়ভাবে রিয়েল-টাইমে সংগ্রহ ও যাচাই করা হবে।</string>
+
+    <!-- Login Screen -->
+    <string name="login_subtitle">এমএফএস পেমেন্ট সিঙ্ক ও লাইভ স্টোর অর্ডার পরিচালনা করতে সাইন ইন করুন</string>
+    <string name="login_server_url_label">ORBIT হাব সার্ভার URL</string>
+    <string name="login_email_label">মার্চেন্ট ইমেইল</string>
+    <string name="login_email_placeholder">owner@store.com</string>
+    <string name="login_password_label">পাসওয়ার্ড</string>
+    <string name="login_signing_in">সাইন ইন হচ্ছে...</string>
+    <string name="login_sign_in_button">ORBIT হাবে সাইন ইন করুন</string>
+    <string name="login_credentials_hint">মার্চেন্ট লগইন তথ্য ORBIT SaaS অ্যাডমিন থেকে প্রদান করা হয়।</string>
+    <string name="login_manual_setup_button">ম্যানুয়াল ডিভাইস কী / সেটিংস ব্যবহার করুন</string>
+
+    <!-- Onboarding Screen -->
+    <string name="onboarding_title">মার্চেন্ট সেটআপ উইজার্ড</string>
+    <string name="onboarding_step_counter">ধাপ %1$d / %2$d</string>
+    <string name="onboarding_next_step">পরবর্তী ধাপ</string>
+    <string name="onboarding_finish_launch">সম্পন্ন করে চালু করুন</string>
+    <string name="onboarding_step1_title">১. এসএমএস অনুমতি দিন</string>
+    <string name="onboarding_step1_subtitle">বিকাশ ও নগদের ইনকামিং মেসেজ সংগ্রহের জন্য প্রয়োজন</string>
+    <string name="onboarding_step1_desc">ORBIT Pay শুধুমাত্র বিকাশ, নগদ, 16216, উপায় ও সেলফিনের অফিসিয়াল লেনদেনের এসএমএস পড়ে। শুধুমাত্র TrxID, টাকার পরিমাণ ও প্রেরকের নম্বর সংগ্রহ করা হয়।</string>
+    <string name="onboarding_step1_action">এসএমএস ও নোটিফিকেশন অনুমতি দিন</string>
+    <string name="onboarding_step2_title">২. নোটিফিকেশন লিসেনার অ্যাক্সেস</string>
+    <string name="onboarding_step2_subtitle">তাৎক্ষণিক পুশ যাচাইয়ের বিকল্প ব্যবস্থা</string>
+    <string name="onboarding_step2_desc">বেশি ট্রাফিকের সময় টেলিকম এসএমএস আসতে ২ মিনিট পর্যন্ত দেরি হতে পারে। নোটিফিকেশন লিসেনার চালু থাকলে বিকাশ বা নগদ অ্যাপের নোটিফিকেশন থেকেই পেমেন্ট যাচাই করা যায়।</string>
+    <string name="onboarding_step2_action">নোটিফিকেশন অ্যাক্সেস সেটিংস খুলুন</string>
+    <string name="onboarding_step3_title">৩. ব্যাটারি অপটিমাইজেশন বন্ধ করুন</string>
+    <string name="onboarding_step3_subtitle">অ্যান্ড্রয়েড যেন ব্যাকগ্রাউন্ডে ORBIT বন্ধ না করে</string>
+    <string name="onboarding_step3_desc">ফোনের ব্যাটারি সেভার (MIUI, ColorOS, OneUI) ব্যাকগ্রাউন্ড অ্যাপ স্লিপ করে দেয়। ব্যাটারি অপটিমাইজেশন থেকে অব্যাহতি দিলে পেমেন্ট যাচাই নিরবচ্ছিন্নভাবে চলবে।</string>
+    <string name="onboarding_step3_action">ব্যাটারি অপটিমাইজেশন বন্ধ করুন</string>
+    <string name="onboarding_step4_title">৪. অ্যান্ড্রয়েড ১৩/১৪ রেস্ট্রিক্টেড সেটিংস</string>
+    <string name="onboarding_step4_subtitle">সাইডলোড করা APK-এর অনুমতি আনলক করুন</string>
+    <string name="onboarding_step4_desc">অ্যান্ড্রয়েড ১৩ ও ১৪ সংস্করণে সাইডলোড করা অ্যাপের নোটিফিকেশন অ্যাক্সেস \'Restricted setting\' হিসেবে বন্ধ থাকতে পারে।\n\nআনলক করতে:\n১. নিচের \'অ্যাপ তথ্য খুলুন\' বোতামে ট্যাপ করুন\n২. উপরে ডানদিকের ৩-ডট মেনুতে ট্যাপ করুন\n৩. \'Allow restricted settings\' নির্বাচন করুন\n৪. ডিভাইস পিন বা ফিঙ্গারপ্রিন্ট দিয়ে নিশ্চিত করুন।</string>
+    <string name="onboarding_step4_action">অ্যাপ তথ্য খুলুন (রেস্ট্রিক্টেড সেটিংস অনুমোদন)</string>
+    <string name="onboarding_step5_title">৫. এসএমএস স্পুফ সুরক্ষা ও ইনবক্স স্ক্যান</string>
+    <string name="onboarding_step5_subtitle">ভুয়া পেমেন্ট এসএমএস থেকে ORBIT Pay যেভাবে সুরক্ষা দেয়</string>
+    <string name="onboarding_step5_desc">প্রতিটি পেমেন্ট মেসেজ অর্ডার নিশ্চিত করার আগে কঠোর প্রেরক-বিশ্বাসযোগ্যতা নিয়মে যাচাই করা হয়।</string>
+    <string name="onboarding_step5_spoof_title">শুধুমাত্র অফিসিয়াল এমএফএস প্রেরক</string>
+    <string name="onboarding_step5_spoof_desc">শুধুমাত্র অফিসিয়াল এমএফএস প্রেরক আইডি (bKash, NAGAD, 16216, Rocket, upay, CellFin, IBBL) ও যাচাইকৃত এমএফএস অ্যাপ গ্রহণ করা হয়। ব্যক্তিগত 01XXXXXXXXX ফোন নম্বর বা অমিল প্রোভাইডারের মেসেজ স্বয়ংক্রিয়ভাবে ব্লক হয়।</string>
+    <string name="onboarding_step5_readsms_title">হারিয়ে যাওয়া পেমেন্টের জন্য READ_SMS</string>
+    <string name="onboarding_step5_readsms_desc">লগইন বা নেটওয়ার্ক বিচ্ছিন্নতার পর সাম্প্রতিক ইনবক্স (৭২ ঘণ্টা পর্যন্ত) স্ক্যান করে বাদ পড়া পেমেন্ট উদ্ধারের জন্য READ_SMS প্রয়োজন। ব্যক্তিগত মেসেজ কখনোই আপলোড করা হয় না।</string>
+
+    <!-- Settings Screen -->
+    <string name="settings_title">ডিভাইস ও হাব সেটিংস</string>
+    <string name="settings_merchant_account">মার্চেন্ট অ্যাকাউন্ট</string>
+    <string name="settings_default_merchant_name">ORBIT মার্চেন্ট</string>
+    <string name="settings_appearance">থিম ও দৃশ্যমানতা</string>
+    <string name="settings_theme_dark_title">প্রিমিয়াম ব্ল্যাক থিম</string>
+    <string name="settings_theme_light_title">হোয়াইট থিম</string>
+    <string name="settings_theme_dark_desc">অবসিডিয়ান OLED ডার্ক মোড চালু</string>
+    <string name="settings_theme_light_desc">পোরসেলিন হোয়াইট লাইট মোড চালু (ডিফল্ট)</string>
+    <string name="settings_language_title">ভাষা / Language</string>
+    <string name="settings_language_subtitle">ORBIT Pay-এর প্রদর্শনের ভাষা নির্বাচন করুন</string>
+    <string name="settings_language_system">সিস্টেম</string>
+    <string name="settings_language_english">English</string>
+    <string name="settings_language_bangla">বাংলা</string>
+    <string name="settings_cloud_connection">ORBIT ক্লাউড সংযোগ</string>
+    <string name="settings_server_url_label">সার্ভার এন্ডপয়েন্ট URL</string>
+    <string name="settings_merchant_id_label">মার্চেন্ট আইডি (যেমন mer_live_xxxx)</string>
+    <string name="settings_device_key_label">ডিভাইস API কী (SHA-256 প্রমাণীকরণ)</string>
+    <string name="settings_testing_connection">সংযোগ পরীক্ষা করা হচ্ছে...</string>
+    <string name="settings_test_connection">হাব সংযোগ পরীক্ষা করুন</string>
+    <string name="settings_sms_trust_title">এসএমএস ট্রাস্ট ও অ্যান্টি-স্পুফিং</string>
+    <string name="settings_extra_senders_label">অতিরিক্ত বিশ্বস্ত প্রেরক</string>
+    <string name="settings_extra_senders_placeholder">BKASH:bKashAlert,NAGAD:16167</string>
+    <string name="settings_extra_senders_helper">কমা দিয়ে আলাদা করা PROVIDER:Sender ফরম্যাট লিখুন (যেমন BKASH:bKashAlert,NAGAD:16167)। ব্যক্তিগত 01XXXXXXXXX নম্বর সবসময় ব্লক থাকবে।</string>
+    <string name="settings_resilience_title">সিস্টেম স্থিতিশীলতা</string>
+    <string name="settings_foreground_title">স্টিকি ফোরগ্রাউন্ড সার্ভিস</string>
+    <string name="settings_foreground_desc">সিঙ্ক ওয়ার্কার সক্রিয় রাখে এবং নোটিফিকেশন শেডে চলমান অবস্থা দেখায়</string>
+    <string name="settings_save_button">কনফিগারেশন সংরক্ষণ করুন</string>
+    <string name="settings_footer_version">ORBIT পেমেন্ট কম্প্যানিয়ন · v1.0.0</string>
+    <string name="settings_footer_stack">নেটিভ Kotlin 2.0 · Jetpack Compose · Room DB</string>
+</resources>

@@ -41,6 +41,7 @@ class OrbitApiClient(
         isLenient = true
         ignoreUnknownKeys = true
         encodeDefaults = true
+        coerceInputValues = true
     }
 
     private val client: HttpClient = HttpClient(Android) {
@@ -267,6 +268,7 @@ class OrbitApiClient(
                         success = true,
                         ingestedCount = data?.ingestedCount ?: 0,
                         autoVerifiedCount = data?.autoVerifiedCount ?: 0,
+                        flaggedCount = data?.flaggedCount ?: 0,
                         message = envelope.message.orEmpty()
                     )
                 } else {
@@ -302,16 +304,142 @@ class OrbitApiClient(
     }
 
     /**
-     * Sends device telemetry heartbeat including battery level and charging state.
+     * Fetches paginated server ledger transactions with optional search and filters.
      */
-    suspend fun sendHeartbeat(batteryLevel: Int, isCharging: Boolean): Result<HeartbeatResponse> {
+    suspend fun fetchTransactions(
+        limit: Int = 50,
+        offset: Int = 0,
+        search: String? = null,
+        status: String? = null,
+        provider: String? = null
+    ): Result<TransactionsPageDto> {
+        return runCatching {
+            val url = "$baseUrl/api/v1/device/transactions"
+            val response: HttpResponse = client.get(url) {
+                applyAuthHeaders()
+                parameter("limit", limit)
+                parameter("offset", offset)
+                if (!search.isNullOrBlank()) parameter("search", search.trim())
+                if (!status.isNullOrBlank()) parameter("status", status.trim())
+                if (!provider.isNullOrBlank()) parameter("provider", provider.trim())
+            }
+
+            if (response.status.isSuccess()) {
+                val envelope = response.body<ApiEnvelope<TransactionsPageDto>>()
+                if (envelope.success && envelope.data != null) {
+                    envelope.data
+                } else {
+                    throw Exception(envelope.error ?: envelope.message ?: "Failed to load transactions")
+                }
+            } else {
+                throwHttpException(response)
+            }
+        }
+    }
+
+    /**
+     * Fetches pending payment verification queue candidates from ORBIT Central Hub.
+     */
+    suspend fun fetchQueue(): Result<QueueListDto> {
+        return runCatching {
+            val url = "$baseUrl/api/v1/device/queue"
+            val response: HttpResponse = client.get(url) {
+                applyAuthHeaders()
+            }
+
+            if (response.status.isSuccess()) {
+                val envelope = response.body<ApiEnvelope<QueueListDto>>()
+                if (envelope.success && envelope.data != null) {
+                    envelope.data
+                } else {
+                    throw Exception(envelope.error ?: envelope.message ?: "Failed to load queue")
+                }
+            } else {
+                throwHttpException(response)
+            }
+        }
+    }
+
+    /**
+     * Manually links an unclaimed SMS ledger entry to a storefront order ID.
+     */
+    suspend fun manualMatch(
+        smsLedgerId: String,
+        externalOrderId: String,
+        customerEmail: String? = null
+    ): Result<LedgerDto> {
+        return runCatching {
+            val url = "$baseUrl/api/v1/device/manual-match"
+            val payload = ManualMatchRequest(
+                smsLedgerId = smsLedgerId.trim(),
+                externalOrderId = externalOrderId.trim(),
+                customerEmail = customerEmail?.trim()?.ifBlank { null }
+            )
+            val response: HttpResponse = client.post(url) {
+                contentType(ContentType.Application.Json)
+                applyAuthHeaders()
+                setBody(payload)
+            }
+
+            if (response.status.isSuccess()) {
+                val envelope = response.body<ApiEnvelope<LedgerDto>>()
+                if (envelope.success && envelope.data != null) {
+                    envelope.data
+                } else {
+                    throw Exception(envelope.error ?: envelope.message ?: "Manual match failed")
+                }
+            } else {
+                throwHttpException(response)
+            }
+        }
+    }
+
+    /**
+     * Polls incremental verified events and updated orders since [sinceMs].
+     */
+    suspend fun syncSince(sinceMs: Long? = null): Result<DeviceSyncDto> {
+        return runCatching {
+            val url = "$baseUrl/api/v1/device/sync"
+            val response: HttpResponse = client.get(url) {
+                applyAuthHeaders()
+                if (sinceMs != null && sinceMs > 0L) {
+                    parameter("since", sinceMs)
+                }
+            }
+
+            if (response.status.isSuccess()) {
+                val envelope = response.body<ApiEnvelope<DeviceSyncDto>>()
+                if (envelope.success && envelope.data != null) {
+                    envelope.data
+                } else {
+                    throw Exception(envelope.error ?: envelope.message ?: "Sync failed")
+                }
+            } else {
+                throwHttpException(response)
+            }
+        }
+    }
+
+    /**
+     * Sends device telemetry heartbeat including battery level, charging state, and capability flags.
+     */
+    suspend fun sendHeartbeat(
+        batteryLevel: Int,
+        isCharging: Boolean,
+        fcmEnabled: Boolean = false,
+        smsPermission: Boolean = false,
+        listenerEnabled: Boolean = false
+    ): Result<HeartbeatResponse> {
         return runCatching {
             val url = "$baseUrl/api/v1/device/heartbeat"
             val payload = HeartbeatRequest(
                 merchantId = merchantId,
                 batteryLevel = batteryLevel,
                 isCharging = isCharging,
-                fcmToken = preferencesManager.fcmToken.ifBlank { null }
+                fcmToken = preferencesManager.fcmToken.ifBlank { null },
+                fcmEnabled = fcmEnabled,
+                smsPermission = smsPermission,
+                listenerEnabled = listenerEnabled
             )
 
             val response: HttpResponse = client.post(url) {

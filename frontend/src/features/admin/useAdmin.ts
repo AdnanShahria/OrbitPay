@@ -497,3 +497,104 @@ export function useSeedDemoProjectsMutation() {
     },
   });
 }
+
+export interface MessagingProviderCapability {
+  provider: string;
+  configured: boolean;
+  priority: number;
+  inCooldown: boolean;
+  cooldownUntil?: string;
+}
+
+export interface AdminMessagingStatus {
+  sms: MessagingProviderCapability[];
+  email?: MessagingProviderCapability[];
+  push: {
+    selfHostedWsConfigured?: boolean;
+    fcmV1Configured: boolean;
+    projectId: string | null;
+    fallbackPollingIntervalSec?: number;
+  };
+  otp: {
+    sentLast24h: number;
+    verifiedLast24h: number;
+  };
+}
+
+export interface MessagingAttempt {
+  provider: string;
+  ok: boolean;
+  statusCode?: number;
+  error?: string;
+  quotaExhausted?: boolean;
+  skippedDueToCooldown?: boolean;
+  latencyMs: number;
+}
+
+export interface TestSmsPayload {
+  to: string;
+  message: string;
+}
+
+export interface TestSmsResponse {
+  dispatched: boolean;
+  provider?: string;
+  attempts: MessagingAttempt[];
+}
+
+export interface TestPushPayload {
+  merchantId: string;
+  title: string;
+  body: string;
+}
+
+export interface TestPushResponse {
+  sentCount: number;
+  wsDelivered?: number;
+  fcmDelivered?: number;
+  activeSockets?: number;
+}
+
+export function useAdminMessagingStatus(enabled = true) {
+  return useQuery<AdminMessagingStatus>({
+    queryKey: ['admin', 'messaging', 'status'],
+    queryFn: async () => {
+      const res = await adminFetch('/api/v1/admin/messaging/status');
+      return unwrapApiResponse<AdminMessagingStatus>(res, 'Failed to load messaging status');
+    },
+    enabled: Boolean(enabled && getStoredAdminKey()),
+    retry: false,
+    refetchInterval: 15_000,
+  });
+}
+
+export function useSendTestSms() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (payload: TestSmsPayload): Promise<TestSmsResponse> => {
+      const res = await adminFetch('/api/v1/admin/messaging/test-sms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return unwrapApiResponse<TestSmsResponse>(res, 'Failed to dispatch test SMS');
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'messaging', 'status'] });
+    },
+  });
+}
+
+export function useSendTestPush() {
+  return useMutation({
+    mutationFn: async (payload: TestPushPayload): Promise<TestPushResponse> => {
+      const res = await adminFetch('/api/v1/admin/messaging/test-push', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return unwrapApiResponse<TestPushResponse>(res, 'Failed to dispatch test push');
+    },
+  });
+}

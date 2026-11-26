@@ -179,3 +179,153 @@ Public self-registration is **disabled**. To onboard a new client store:
    - **Web Merchant Portal** (`https://payment.orbitsaas.cloud`)
    - **ORBIT Android Companion App** (auto-pairs their `deviceApiKey` on login!)
 5. From `/admin` -> **Users & Auth**, you can create additional staff logins, reset passwords, or revoke active JWT sessions (`auth_sessions`) at any time.
+
+---
+
+## 6. Phone OTP Verification API (with Free Email Fallback) (`POST /api/v1/otp/send` & `POST /api/v1/otp/verify`)
+
+Use ORBIT's built-in OTP service to verify buyer phone numbers during checkout or account signup over BulkSMSBD, SSL Wireless, Twilio, or a custom SMS webhook — with automatic **free Email OTP fallback** via `routeEmail` when an optional `email` address is provided.
+
+**Authentication:** Protected by `authMerchantMiddleware`. Pass either:
+- `X-Merchant-Secret: <ORBIT_WEBHOOK_SECRET>` (optionally with `X-Merchant-Id: <MERCHANT_ID>`)
+- OR `Authorization: Bearer <JWT>`
+
+### Rate Limits & Security Rules
+- **6-digit CSPRNG code** generated via `crypto.getRandomValues` and stored as a constant-time **HMAC-SHA256** hash in `otp_codes`.
+- **TTL:** 5 minutes (configurable via `OTP_TTL_SECONDS`).
+- **Cooldown:** At least 60 seconds between sends per `(phone, purpose)`.
+- **Hourly Rate Limit:** Maximum 5 sends per hour per phone number.
+- **Brute-force Lockout:** Maximum 5 verify attempts per OTP row; on the 5th failed attempt, the OTP is locked. Single-use (`consumedAt` set atomically on match).
+- **Free Email OTP Fallback:** Pass an optional valid `email` field in `POST /api/v1/otp/send`. ORBIT attempts SMS delivery first; if no SMS provider is configured or all SMS providers fail, ORBIT automatically sends the 6-digit verification code to `email` via `routeEmail` (e.g. Resend, Brevo, Cloudflare Email, or Google Apps Script) and returns `channel: "EMAIL"` with `provider: "email:<providerUsed>"`.
+- **Response `channel` field:** `POST /api/v1/otp/send` returns `channel` as `'SMS' | 'EMAIL' | 'DEV'` indicating how the OTP was delivered.
+- **Non-production Dev Mode:** When `ENVIRONMENT !== 'production'` and neither SMS nor Email delivery is available/configured, `POST /api/v1/otp/send` returns `channel: "DEV"` with `devCode` in `data` for local testing. `devCode` is **never** returned in production.
+
+### `curl` Examples
+
+**Send OTP (`POST /api/v1/otp/send`)**
+
+```bash
+curl -X POST https://payment.orbitsaas.cloud/api/v1/otp/send \
+  -H "Content-Type: application/json" \
+  -H "X-Merchant-Id: YOUR_MERCHANT_ID" \
+  -H "X-Merchant-Secret: YOUR_WEBHOOK_SECRET" \
+  -d '{
+    "phone": "01712345678",
+    "email": "buyer@example.com",
+    "purpose": "BUYER_PHONE",
+    "template": "{storeName} verification code: {code}. Valid 5 minutes. Do not share."
+  }'
+```
+
+Response (SMS primary, or Email fallback when SMS is unconfigured/failing):
+
+```json
+{
+  "success": true,
+  "data": {
+    "otpId": "otp_9a8b7c6d5e4f",
+    "expiresAt": "2026-11-25T18:36:00.000Z",
+    "provider": "bulksmsbd",
+    "channel": "SMS"
+  }
+}
+```
+
+When delivered via Email fallback, `provider` is `"email:<providerUsed>"` (for example `"email:resend"`) and `channel` is `"EMAIL"`.
+
+**Verify OTP (`POST /api/v1/otp/verify`)**
+
+```bash
+curl -X POST https://payment.orbitsaas.cloud/api/v1/otp/verify \
+  -H "Content-Type: application/json" \
+  -H "X-Merchant-Id: YOUR_MERCHANT_ID" \
+  -H "X-Merchant-Secret: YOUR_WEBHOOK_SECRET" \
+  -d '{
+    "otpId": "otp_9a8b7c6d5e4f",
+    "phone": "01712345678",
+    "code": "482910",
+    "purpose": "BUYER_PHONE"
+  }'
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "data": {
+    "verified": true
+  }
+}
+```
+
+### Node.js / TypeScript Example
+
+```typescript
+const ORBIT_BASE = 'https://payment.orbitsaas.cloud';
+
+const orbitHeaders = {
+  'Content-Type': 'application/json',
+  'X-Merchant-Id': process.env.ORBIT_MERCHANT_ID!,
+  'X-Merchant-Secret': process.env.ORBIT_WEBHOOK_SECRET!,
+};
+
+export async function sendBuyerOtp(phone: string, email?: string) {
+  const res = await fetch(`${ORBIT_BASE}/api/v1/otp/send`, {
+    method: 'POST',
+    headers: orbitHeaders,
+    body: JSON.stringify({
+      phone,
+      ...(email ? { email } : {}),
+      purpose: 'BUYER_PHONE',
+    }),
+  });
+
+  const payload = (await res.json()) as {
+    success: boolean;
+    data?: {
+      otpId: string;
+      expiresAt: string;
+      provider: string;
+      channel: 'SMS' | 'EMAIL' | 'DEV';
+      devCode?: string;
+    };
+    error?: { message?: string };
+  };
+
+  if (!res.ok || !payload.success || !payload.data) {
+    throw new Error(payload.error?.message || `OTP send failed (${res.status})`);
+  }
+
+  return payload.data;
+}
+
+export async function verifyBuyerOtp(params: {
+  otpId?: string;
+  phone: string;
+  code: string;
+}) {
+  const res = await fetch(`${ORBIT_BASE}/api/v1/otp/verify`, {
+    method: 'POST',
+    headers: orbitHeaders,
+    body: JSON.stringify({
+      otpId: params.otpId,
+      phone: params.phone,
+      code: params.code,
+      purpose: 'BUYER_PHONE',
+    }),
+  });
+
+  const payload = (await res.json()) as {
+    success: boolean;
+    data?: { verified: boolean };
+    error?: { message?: string };
+  };
+
+  if (!res.ok || !payload.success || !payload.data?.verified) {
+    throw new Error(payload.error?.message || `OTP verification failed (${res.status})`);
+  }
+
+  return payload.data.verified;
+}
+```

@@ -145,6 +145,7 @@ export async function manualMatchTransaction(
     paidAmount: row.amount,
     trxId: row.trxId,
     matchType: 'MANUAL_VERIFIED',
+    customerEmail: payload.customerEmail,
     customerPhone: row.senderNumber,
   });
 

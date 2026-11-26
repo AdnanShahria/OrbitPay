@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="core_fg_connected">Connected: %1$s • Monitoring bKash/Nagad</string>
+    <string name="core_fg_instant_push_active">Instant Push Active • %1$s</string>
+    <string name="core_fg_polling_fallback">Polling Fallback (60s) • %1$s</string>
+    <string name="core_fg_merchant_fallback">Merchant</string>
+    <string name="core_notif_new_order_title">New %1$s Order #%2$s</string>
+    <string name="core_notif_new_order_body">Amount ৳%1$s • Tap to review and confirm.</string>
+    <string name="core_notif_action_required_prefix">Action Required • %1$s Order</string>
+    <string name="core_notif_new_order_prefix">New %1$s Order</string>
+    <string name="core_notif_order_tap_review">Tap to review and update order</string>
+    <string name="core_notif_verified_title">Payment Verified! • %1$s</string>
+    <string name="core_notif_verified_body">Order #%1$s matched with %2$s TrxID %3$s (%4$s BDT).</string>
+</resources>

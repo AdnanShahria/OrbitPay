@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="core_fg_connected">সংযুক্ত: %1$s • bKash/Nagad পর্যবেক্ষণ চলছে</string>
+    <string name="core_fg_instant_push_active">তাৎক্ষণিক পুশ সক্রিয় • %1$s</string>
+    <string name="core_fg_polling_fallback">পোলিং ফলব্যাক (৬০ সে.) • %1$s</string>
+    <string name="core_fg_merchant_fallback">মার্চেন্ট</string>
+    <string name="core_notif_new_order_title">নতুন %1$s অর্ডার #%2$s</string>
+    <string name="core_notif_new_order_body">পরিমাণ ৳%1$s • পর্যালোচনা ও নিশ্চিত করতে ট্যাপ করুন।</string>
+    <string name="core_notif_action_required_prefix">পদক্ষেপ প্রয়োজন • %1$s অর্ডার</string>
+    <string name="core_notif_new_order_prefix">নতুন %1$s অর্ডার</string>
+    <string name="core_notif_order_tap_review">অর্ডার পর্যালোচনা ও আপডেট করতে ট্যাপ করুন</string>
+    <string name="core_notif_verified_title">পেমেন্ট যাচাই হয়েছে! • %1$s</string>
+    <string name="core_notif_verified_body">অর্ডার #%1$s সফলভাবে %2$s TrxID %3$s (%4$s টাকা)-এর সাথে মিলানো হয়েছে।</string>
+</resources>

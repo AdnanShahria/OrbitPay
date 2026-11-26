@@ -1,5 +1,6 @@
 import type { AppDb } from '../db/client';
 import type { Env } from '../shared/types';
+import { getFcmV1Status as getFcmConfigStatus, sendFcmV1Message } from './fcm';
 import {
   buildChannelCapabilities,
   executeWithFallback,
@@ -52,36 +53,37 @@ function normalizePhoneBD(phone: string): string {
 const SMS_ADAPTERS: Record<string, ProviderAdapter<SmsOrPushRequest, SmsOrPushResult>> = {
   fcm: {
     id: 'fcm',
-    isConfigured: (env) => Boolean(env.FCM_SERVER_KEY),
+    isConfigured: (env) => Boolean(env.FCM_SERVICE_ACCOUNT_JSON?.trim()),
     execute: async (env, req) => {
       if (!req.fcmToken) {
         return { ok: false, statusCode: 400, error: 'Missing fcmToken for FCM push channel' };
       }
 
-      const res = await fetch('https://fcm.googleapis.com/fcm/send', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `key=${env.FCM_SERVER_KEY}`,
-        },
-        body: JSON.stringify({
-          to: req.fcmToken,
-          notification: {
-            title: req.title || 'ORBIT Payment Hub',
-            body: req.message,
-            sound: 'default',
-          },
-          data: req.data || {},
-          priority: 'high',
-        }),
-        signal: AbortSignal.timeout(5000),
+      const result = await sendFcmV1Message(env, {
+        token: req.fcmToken,
+        title: req.title || 'ORBIT Payment Hub',
+        body: req.message,
+        data: req.data,
       });
 
-      if (!res.ok) {
-        return { ok: false, statusCode: res.status, error: await parseErrorText(res) };
+      if (!result.ok) {
+        const errorMsg =
+          result.unregistered && !result.error?.toUpperCase().includes('UNREGISTERED')
+            ? `UNREGISTERED: ${result.error || 'Token unregistered'}`
+            : result.error;
+        return {
+          ok: false,
+          statusCode: result.statusCode,
+          error: errorMsg,
+          quotaExhausted: result.quotaExhausted,
+        };
       }
-      const json = (await res.json().catch(() => ({}))) as { message_id?: string };
-      return { ok: true, statusCode: res.status, data: { dispatched: true, externalId: json.message_id } };
+
+      return {
+        ok: true,
+        statusCode: result.statusCode,
+        data: { dispatched: true, externalId: result.externalId },
+      };
     },
   },
 
@@ -246,4 +248,11 @@ export async function routeSmsOrPush(
 export function getSmsProviderCapabilities(env: Env): ProviderCapability[] {
   const order = resolveProviderOrder(env.SMS_PROVIDER_ORDER, DEFAULT_SMS_PROVIDERS);
   return buildChannelCapabilities('sms', env, SMS_ADAPTERS, order);
+}
+
+export function getFcmV1Status(env: Env): {
+  fcmV1Configured: boolean;
+  projectId: string | null;
+} {
+  return getFcmConfigStatus(env);
 }

@@ -17,7 +17,9 @@ data class IngestSmsItem(
     val amount: Double,
     val senderNumber: String,
     val rawSms: String,
-    val receivedAt: Long
+    val receivedAt: Long,
+    val smsSender: String? = null,
+    val source: String = "SMS"
 )
 
 @Serializable
@@ -30,7 +32,8 @@ data class IngestSmsBatchRequest(
 @Serializable
 data class IngestData(
     val ingestedCount: Int = 0,
-    val autoVerifiedCount: Int = 0
+    val autoVerifiedCount: Int = 0,
+    val flaggedCount: Int = 0
 )
 
 @Serializable
@@ -38,6 +41,7 @@ data class IngestResponse(
     val success: Boolean = true,
     val ingestedCount: Int = 0,
     val autoVerifiedCount: Int = 0,
+    val flaggedCount: Int = 0,
     val message: String = ""
 )
 
@@ -67,12 +71,88 @@ data class DeviceStatsResponse(
 )
 
 @Serializable
+data class LedgerDto(
+    val id: String = "",
+    val merchantId: String = "",
+    val provider: String = "",
+    val trxId: String = "",
+    val amount: Double = 0.0,
+    val senderNumber: String = "",
+    val rawSms: String = "",
+    val status: String = "",
+    val matchType: String? = null,
+    val externalOrderId: String? = null,
+    val smsReceivedAt: String? = null,
+    val verifiedAt: String? = null,
+    val smsSender: String? = null,
+    val source: String = "SMS",
+    val trustFlag: String? = null
+)
+
+@Serializable
+data class TransactionsPageDto(
+    val items: List<LedgerDto> = emptyList(),
+    val total: Int = 0,
+    val limit: Int = 50,
+    val offset: Int = 0
+)
+
+@Serializable
+data class QueueItemDto(
+    val id: String = "",
+    val provider: String = "",
+    val externalOrderId: String = "",
+    val customerEmail: String? = null,
+    val expectedAmount: Double = 0.0,
+    val baseAmount: Double? = null,
+    val uniqueAmount: Double? = null,
+    val submittedAmount: Double? = null,
+    val submittedTrxId: String? = null,
+    val submittedSender: String? = null,
+    val status: String = "",
+    val expiresAt: String? = null,
+    val createdAt: String? = null
+)
+
+@Serializable
+data class QueueListDto(
+    val queue: List<QueueItemDto> = emptyList()
+)
+
+@Serializable
+data class ManualMatchRequest(
+    val smsLedgerId: String,
+    val externalOrderId: String,
+    val customerEmail: String? = null
+)
+
+@Serializable
+data class VerifiedEventDto(
+    val trxId: String = "",
+    val externalOrderId: String = "",
+    val verifiedAt: String? = null,
+    val amount: Double = 0.0,
+    val provider: String = ""
+)
+
+@Serializable
+data class DeviceSyncDto(
+    val serverTime: Long = 0L,
+    val verified: List<VerifiedEventDto> = emptyList(),
+    val orders: List<MerchantOrderDto> = emptyList(),
+    val pendingConfirmationCount: Int = 0
+)
+
+@Serializable
 data class HeartbeatRequest(
     val merchantId: String,
     val batteryLevel: Int,
     val isCharging: Boolean,
     val fcmToken: String? = null,
-    val appVersion: String = "1.0.0"
+    val appVersion: String = "1.0.0",
+    val fcmEnabled: Boolean = false,
+    val smsPermission: Boolean = false,
+    val listenerEnabled: Boolean = false
 )
 
 @Serializable

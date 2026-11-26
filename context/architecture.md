@@ -10,9 +10,9 @@
 |---|---|
 | **Document** | System Architecture & Network Topology |
 | **Status** | Active / Production Specification |
-| **Last Updated** | 2026-11-23 00:05:00 +06:00 |
-| **Last Prompt / Trigger** | Unique positive 2-decimal poisha checkout + base-amount fallback, admin-provisioned JWT/Session auth, and bi-directional e-commerce order sync |
-| **Actions Taken** | Added unique poisha amount allocation (`checkout_sessions`), 3-field buyer verification (`senderNumber`, `paidAmount`, `trxId`) with `BASE_AMOUNT_FALLBACK`, admin-provisioned JWT + D1 `auth_sessions` auth (`/api/v1/auth/*`), and bi-directional order sync (`/api/v1/orders/*`). |
+| **Last Updated** | 2026-11-25 19:50:00 +06:00 |
+| **Last Prompt / Trigger** | Self-Hosted Free Cloudflare Durable Objects WebSocket Push Hub, 3-Tier Push Fallback & Email OTP Fallback (`/spin-subagents`) |
+| **Actions Taken** | Added SQLite-backed Durable Object `MerchantPushHub` (`PUSH_HUB`) with WebSocket Hibernation + `"ping"`/`"pong"` auto-response, `GET /api/v1/device/ws` with Hono CORS bypass, 3-tier push chain (Self-Hosted DO WebSocket → Optional FCM v1 → Adaptive 60s/300s `/sync` polling), Android OkHttp `PushWebSocketClient`, and `routeEmail` OTP fallback. |
 
 ---
 
@@ -241,5 +241,24 @@ To guarantee **zero secret leakage** and **zero provider lock-in**, all external
 | :--- | :--- | :--- |
 | `backend/src/router/email.ts` | Email | `resend` → `brevo` → `sendpulse` → `aws_ses` (SigV4) → `sendgrid` → `cloudflare` → `apps_script` → `custom_webhook` |
 | `backend/src/router/image.ts` | Image Upload & Download | `r2` → `imgbb` → `supabase` → `mongodb` → `d1` (built-in `media_assets` blob fallback) |
-| `backend/src/router/sms.ts` | SMS & Push | SMS: `bulksmsbd` → `ssl_wireless` → `twilio` → `custom_webhook` \| Push: `fcm` → `custom_webhook` |
+| `backend/src/router/sms.ts` | SMS & Push | SMS: `bulksmsbd` → `ssl_wireless` → `twilio` → `custom_webhook` \| Push: `MerchantPushHub` (DO WebSocket via `router/push-hub.ts`) → `fcm` (optional HTTP v1 via `router/fcm.ts`) → `custom_webhook` |
 | `backend/src/router/database.ts` | Database & KV | `kv` → `d1` (`router_kv_store`) → `supabase` → `mongodb` → `turso` |
+
+---
+
+## 7. Anti-Spoofing Trust Model, 3-Tier Self-Hosted Push Hub & OTP Flow
+
+### 7.1 SMS & Push Anti-Spoofing Trust Model
+* **Phone Primary Anchor (`SenderTrust.kt` & `MfsParser.kt`):** Only accepts SMS whose originating address matches the provider's official sender list (`BKASH: ["bKash"]`, `NAGAD: ["NAGAD"]`, `ROCKET: ["16216", "Rocket"]`, `UPAY: ["upay"]`, `CELLFIN: ["CellFin", "IBBL"]` + user-configured `extraTrustedSenders`) or exact app package IDs (`PushListener.kt`). Personal phone numbers (`^\+?(88)?01\d{9}$`) and mismatched provider/sender pairs are rejected and logged locally in Room `blocked_messages`.
+* **Server Defense-in-Depth (`backend/src/shared/sms-trust.ts`):** `evaluateSmsTrust(msg)` checks in order: missing `smsSender` (`LEGACY_UNVERIFIED_SENDER`), personal phone or untrusted notification package (`UNTRUSTED_SENDER`), and server re-parse / TrxID / amount mismatch (`PARSE_MISMATCH`). Flagged rows are stored in `sms_ledger` as `UNCLAIMED` with `trust_flag`, excluded from auto-reconciliation and `verifyCheckoutPayment`, and broadcast via `SMS_FLAGGED`.
+* **Inbox Rescan (`InboxScanner.kt`):** Reads `Telephony.Sms.Inbox.CONTENT_URI` on login, `SyncWorker` runs, and manual Diagnostics triggers (default 72h lookback) using `source = 'INBOX_SCAN'` through the same trust pipeline.
+
+### 7.2 3-Tier Self-Hosted Push Hub (Zero-Firebase Instant Alerts)
+* **Tier 1 — Cloudflare Durable Objects WebSocket (`backend/src/durable/merchant-push-hub.ts` & `router/push-hub.ts`):** Uses SQLite-backed `MerchantPushHub` (`PUSH_HUB` binding, `new_sqlite_classes`) with WebSocket Hibernation (`acceptWebSocket`, `setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'))`) on the Cloudflare Free plan (`$0`). `GET /api/v1/device/ws` authenticates via `authDeviceMiddleware`, bypasses Hono CORS header mutation on `Upgrade: websocket`, and streams instant `<1s` JSON push frames (`payment.verified`, `order.created`, `order.action_required`, `ADMIN_TEST_PUSH`) to `PushWebSocketClient.kt` (OkHttp 45s keepalive + exponential backoff).
+* **Tier 2 — Optional FCM HTTP v1 (`backend/src/router/fcm.ts`):** If `FCM_SERVICE_ACCOUNT_JSON` + `google-services.json` are configured, `sendPushToMerchantDevicesDetailed` also dispatches data-only `HIGH` priority FCM v1 pushes (Web Crypto RS256 PKCS#8 JWT signing + cached OAuth2 token) and nulls out `UNREGISTERED` tokens.
+* **Tier 3 — Adaptive Sync Polling Fallback (`StickyForegroundService.kt`):** Polls `GET /api/v1/device/sync?since=...` every **60s** when WebSocket is not `CONNECTED` and Firebase is absent, relaxes to **300s** when WebSocket is `CONNECTED` or Firebase is active, triggers an immediate catch-up `/sync` upon WebSocket connect, and deduplicates order alerts via `PreferencesManager.markOrderSeen`.
+
+### 7.3 Storefront OTP Flow & Email Fallback (`backend/src/features/otp/`)
+* Protected by `authMerchantMiddleware` (`POST /api/v1/otp/send` and `POST /api/v1/otp/verify`).
+* Generates CSPRNG 6-digit OTPs (`crypto.getRandomValues`), hashes with `HMAC-SHA256(code, pepper + phone + id)` in `otp_codes` (5m TTL), enforces 60s resend cooldown and 5 sends/hour, and locks after 5 failed attempts.
+* **Delivery Failover:** Attempts SMS via `routeSmsOrPush`; if SMS fails or is unconfigured and optional `email` is supplied, falls back automatically to `routeEmail` (`channel: 'EMAIL'`, `provider: 'email:<provider>'`); falls back to `devCode` (`channel: 'DEV'`) only in non-production when no gateway succeeds.

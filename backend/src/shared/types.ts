@@ -19,6 +19,7 @@ export interface Env {
   R2_BUCKET?: R2Bucket;
   KV?: KVNamespace;
   SEND_EMAIL?: SendEmailBinding;
+  PUSH_HUB?: DurableObjectNamespace;
 
   // Core Platform Secrets
   MASTER_ADMIN_KEY?: string;
@@ -47,7 +48,10 @@ export interface Env {
 
   // SMS & Push Notification Router Secrets & Priority
   SMS_PROVIDER_ORDER?: string;
-  FCM_SERVER_KEY?: string;
+  FCM_SERVICE_ACCOUNT_JSON?: string;
+  FCM_PROJECT_ID?: string;
+  FCM_SERVER_KEY?: string; // Deprecated: legacy FCM API removed; use FCM_SERVICE_ACCOUNT_JSON
+  OTP_TTL_SECONDS?: string;
   BULKSMSBD_API_KEY?: string;
   BULKSMSBD_SENDER_ID?: string;
   SSL_WIRELESS_API_TOKEN?: string;

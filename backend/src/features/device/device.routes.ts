@@ -1,10 +1,17 @@
 import { Hono } from 'hono';
 import type { AppContextEnv } from '../../shared/types';
 import { authDeviceMiddleware, authMerchantOrDeviceMiddleware } from '../../shared/middleware';
-import { ingestSmsBatchSchema, heartbeatSchema } from './device.schema';
-import { ingestDeviceSmsBatch, getDeviceStats, recordDeviceHeartbeat } from './device.service';
+import { ingestSmsBatchSchema, heartbeatSchema, deviceSyncQuerySchema } from './device.schema';
+import {
+  ingestDeviceSmsBatch,
+  getDeviceStats,
+  recordDeviceHeartbeat,
+  getSyncPayload,
+} from './device.service';
 import { listOrdersQuerySchema, orderActionSchema } from '../orders/orders.schema';
 import { listOrders, performOrderAction } from '../orders/orders.service';
+import { listTransactionsQuerySchema, manualMatchSchema } from '../transactions/transactions.schema';
+import { listTransactions, listPendingQueue, manualMatchTransaction } from '../transactions/transactions.service';
 import { realtimeHub } from '../realtime/realtime.service';
 
 const router = new Hono<AppContextEnv>();
@@ -57,8 +64,86 @@ router.post('/heartbeat', authDeviceMiddleware, async (c) => {
     merchantId,
     isOnline: true,
     lastSeenAt: new Date().toISOString(),
+    fcmEnabled: input.fcmEnabled,
+    smsPermission: input.smsPermission,
+    listenerEnabled: input.listenerEnabled,
   });
   return c.json({ success: true, message: 'Heartbeat acknowledged' });
+});
+
+/**
+ * GET /api/v1/device/transactions
+ * Filterable, searchable, and paginated SMS ledger listing for the Android companion app.
+ */
+router.get('/transactions', authDeviceMiddleware, async (c) => {
+  const db = c.get('db');
+  const merchantId = c.get('merchantId')!;
+  const query = listTransactionsQuerySchema.parse(c.req.query());
+
+  const result = await listTransactions(db, merchantId, query);
+  return c.json({ success: true, data: result });
+});
+
+/**
+ * GET /api/v1/device/queue
+ * Returns active WAITING_FOR_SMS entries for mobile manual match / typo rescue.
+ */
+router.get('/queue', authDeviceMiddleware, async (c) => {
+  const db = c.get('db');
+  const merchantId = c.get('merchantId')!;
+  const queue = await listPendingQueue(db, merchantId);
+  return c.json({ success: true, data: { queue } });
+});
+
+/**
+ * POST /api/v1/device/manual-match
+ * Manually links an UNCLAIMED SMS ledger entry to an external order ID.
+ */
+router.post('/manual-match', authDeviceMiddleware, async (c) => {
+  const db = c.get('db');
+  const merchant = c.get('merchant')!;
+  const body = await c.req.json();
+  const input = manualMatchSchema.parse(body);
+
+  const matched = await manualMatchTransaction(db, merchant, input, c.env);
+  return c.json({ success: true, data: matched });
+});
+
+/**
+ * GET /api/v1/device/ws
+ * Upgrades an authenticated Android companion device connection to the merchant's
+ * self-hosted MerchantPushHub Durable Object WebSocket.
+ */
+router.get('/ws', authDeviceMiddleware, async (c) => {
+  if (c.req.header('upgrade')?.toLowerCase() !== 'websocket') {
+    return c.json({ success: false, error: 'WebSocket upgrade required' }, 426);
+  }
+
+  if (!c.env.PUSH_HUB) {
+    return c.json(
+      { success: false, error: 'Self-hosted push hub binding (PUSH_HUB) is not configured' },
+      503
+    );
+  }
+
+  const merchantId = c.get('merchantId')!;
+  const stub = c.env.PUSH_HUB.get(c.env.PUSH_HUB.idFromName(merchantId));
+  return stub.fetch('https://push-hub.internal/connect?clientType=android', {
+    headers: c.req.raw.headers,
+  });
+});
+
+/**
+ * GET /api/v1/device/sync
+ * Incremental polling endpoint returning verified transactions and updated orders since `since` epoch ms.
+ */
+router.get('/sync', authDeviceMiddleware, async (c) => {
+  const db = c.get('db');
+  const merchantId = c.get('merchantId')!;
+  const query = deviceSyncQuerySchema.parse(c.req.query());
+
+  const result = await getSyncPayload(db, merchantId, query.since);
+  return c.json({ success: true, data: result });
 });
 
 /**

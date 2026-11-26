@@ -1,4 +1,4 @@
-import { eq, and, gt, inArray, desc } from 'drizzle-orm';
+import { eq, and, gt, inArray, desc, isNull } from 'drizzle-orm';
 import type { AppDb } from '../../db/client';
 import {
   merchants,
@@ -328,7 +328,7 @@ export async function verifyCheckoutPayment(
   const effectiveBaseAmount = activeSession?.baseAmount ?? payload.baseAmount ?? submittedAmount;
   const effectiveUniqueAmount = activeSession?.uniqueAmount ?? submittedAmount;
 
-  // 1. Instant Match Flow: Check incoming UNCLAIMED sms_ledger by TrxID
+  // 1. Instant Match Flow: Check incoming UNCLAIMED, untagged sms_ledger by TrxID
   const existingLedgerRecords = await db
     .select()
     .from(smsLedger)
@@ -336,7 +336,8 @@ export async function verifyCheckoutPayment(
       and(
         eq(smsLedger.merchantId, merchant.id),
         eq(smsLedger.trxId, submittedTrxId),
-        eq(smsLedger.status, 'UNCLAIMED')
+        eq(smsLedger.status, 'UNCLAIMED'),
+        isNull(smsLedger.trustFlag)
       )
     )
     .limit(1);

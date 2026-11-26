@@ -10,47 +10,22 @@
 |---|---|
 | **Document** | Utilities, Regex Parsers, Crypto Engines & Feature Tiers |
 | **Status** | Active / Production Specification |
-| **Last Updated** | 2026-11-18 18:20:00 +06:00 |
-| **Last Prompt / Trigger** | Third-party storefront API architecture & multi-provider MFS expansion |
-| **Actions Taken** | Expanded regex engines to cover all 5 MFS providers (bKash Personal/PRA, Nagad, Rocket 12-digit, Upay, Cellfin), Web Crypto HMAC helpers, and third-party webhook payloads. |
+| **Last Updated** | 2026-11-25 19:50:00 +06:00 |
+| **Last Prompt / Trigger** | Self-Hosted Cloudflare Durable Objects Push Hub & Email OTP Fallback (`/spin-subagents`) |
+| **Actions Taken** | Added `router/push-hub.ts` + `durable/merchant-push-hub.ts` (Cloudflare DO WebSocket Hibernation), updated `sms.ts` + `otp.service.ts` with `routeEmail` OTP fallback, and preserved `fcm.ts` (HTTP v1) as an optional backup tier. |
 
 ---
 
 ## 1. Core Utilities & Helper Engines
 
-### 1.1 Multi-Provider MFS Regex Extraction Engine (`backend/src/shared/parsers/`)
+### 1.1 Multi-Provider MFS Regex Extraction & Anti-Spoof Engine (`backend/src/shared/parsers/mfs.ts`, `backend/src/shared/sms-trust.ts`, `app/.../interceptors/SenderTrust.kt`)
 
-Incoming telecom SMS and app push formats across all major Bangladeshi providers:
-
-```typescript
-export const PROVIDER_PARSERS = {
-  // 1. bKash Personal (Send Money)
-  // "You have received Tk 500.00 from 01711111111. Ref . Fee Tk 0.00. Balance Tk 1,250.00. TrxID 9GB7XQ21 at 18/11/2026 14:30"
-  BKASH_PERSONAL: /You have received Tk\s+([0-9,.]+)\s+from\s+(01[3-9]\d{8}).*?TrxID\s+([A-Za-z0-9]+)/i,
-
-  // 2. bKash Personal Retail (PRA Payment)
-  // "Payment received Tk 500.00 from 01711111111. TrxID 9GB7XQ21 at 18/11/2026 14:30. Balance Tk 5,200.00."
-  BKASH_PRA: /Payment received Tk\s+([0-9,.]+)\s+from\s+(01[3-9]\d{8}).*?TrxID\s+([A-Za-z0-9]+)/i,
-
-  // 3. Nagad Personal & Merchant
-  // "You have received BDT 500.00 from 01811111111. Fee: BDT 0.00. Balance: BDT 2,100.00. TxnID: 7XYZABC9 18/11/2026 14:35"
-  NAGAD_STANDARD: /received BDT\s+([0-9,.]+)\s+from\s+(01[3-9]\d{8}).*?TxnID:\s*([A-Za-z0-9]+)/i,
-  NAGAD_ALT: /Amount:\s*Tk\s*([0-9,.]+).*?Sender:\s*(01[3-9]\d{8}).*?TxnID:\s*([A-Za-z0-9]+)/i,
-
-  // 4. DBBL Rocket (Supports 12-digit format with check digit)
-  // "You have received Tk 500.00 from 019111111112. Fee Tk 0.00. Balance Tk 3,443.15. TrxID ADB3DB1GHF at 18/11/2026 19:17"
-  ROCKET_STANDARD: /You have received Tk\s+([0-9,.]+)\s+from\s+(01[3-9]\d{8,9}).*?TrxID\s+([A-Za-z0-9]+)/i,
-  ROCKET_MERCHANT: /Payment Tk\s+([0-9,.]+)\s+from\s+(01[3-9]\d{8,9}).*?TrxID:\s*([A-Za-z0-9]+)/i,
-
-  // 5. Upay (UCB MFS)
-  // "You have received Tk 500.00 from 01611111111. Fee Tk 0.00. Balance Tk 1,500.00. TrxID UP87912ABC at 18/11/2026 15:10"
-  UPAY_STANDARD: /You have received Tk\s+([0-9,.]+)\s+from\s+(01[3-9]\d{8}).*?TrxID\s+([A-Za-z0-9]+)/i,
-
-  // 6. Cellfin (Islami Bank Bangladesh PLC)
-  // "You have received Tk 1,200.00 from 01712345678. Balance Tk 4,500.00. TrxID CF9812481"
-  CELLFIN_STANDARD: /(?:received|credited)\s+Tk\s*([0-9,.]+)\s+from\s+(01[3-9]\d{8}).*?TrxID\s+([A-Za-z0-9]+)/i,
-};
-```
+Hardened parsing and trust enforcement across all 5 Bangladeshi MFS providers:
+- **Tolerant Amount Regex:** `([0-9][0-9,]*(?:\.[0-9]{1,2})?)` handles `Tk`, `Tk.`, `BDT`, commas, and trailing periods (`Tk 500.`).
+- **Provider Coverage:** bKash (Send Money, PRA Payment, Cash In), Nagad (Standard & multiline Key-Value), Rocket (`A/C:01912345678X` + legacy 12-digit normalized to 11 digits), Upay, and Cellfin.
+- **Explicit Rejections:** Rejects outgoing transfers (`Send Money ... to`), OTP/verification SMS, personal phone senders (`^\+?(88)?01\d{9}$`), numeric senders > 6 digits outside the whitelist, and provider/sender mismatches.
+- **Default Sender Whitelist:** `BKASH: ["bKash"]`, `NAGAD: ["NAGAD"]`, `ROCKET: ["16216", "Rocket"]`, `UPAY: ["upay"]`, `CELLFIN: ["CellFin", "IBBL"]` (extensible via `extraTrustedSenders` in Android Settings).
+- **Trusted App Packages:** Exact match on `com.bkash.customerapp`, `com.bkash.merchantapp`, `com.konasl.nagad`, `com.konasl.nagad.merchant`, `com.dbbl.mbb.rocket`, `bd.com.upay.customer`, `com.ibbl.cellfin`.
 
 ---
 
@@ -93,7 +68,7 @@ export async function verifyWebhookSignature(payload: string, receivedSig: strin
 Replaces direct provider/secret references across feature code with centralized fallback routers:
 - `email.ts`: Multi-provider email router (`resend`, `brevo`, `sendpulse`, `aws_ses`, `sendgrid`, `cloudflare`, `apps_script`, `custom_webhook`) with automatic quota/rate-limit cooldown failover.
 - `image.ts`: Multi-backend image upload & streaming download router (`r2`, `imgbb`, `supabase`, `mongodb`, `d1`) backed by D1 `media_assets`.
-- `sms.ts`: Unified SMS & FCM push router (`bulksmsbd`, `ssl_wireless`, `twilio`, `fcm`, `custom_webhook`).
+- `sms.ts`: Unified SMS & FCM push router (`bulksmsbd`, `ssl_wireless`, `twilio`, `fcm`, `custom_webhook`), paired with `push-hub.ts` (`MerchantPushHub` Cloudflare DO WebSocket primary push) and `otp.service.ts` (`routeEmail` fallback).
 - `database.ts`: Unified KV/document storage router (`kv`, `d1`, `supabase`, `mongodb`, `turso`).
 - `secrets.ts`: Backend-only secret & circuit-breaker orchestrator (`executeWithFallback`).
 

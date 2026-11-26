@@ -2,6 +2,7 @@ export type RealtimeEventType =
   | 'CONNECTED'
   | 'PING'
   | 'TRANSACTION_NEW'
+  | 'SMS_FLAGGED'
   | 'PAYMENT_VERIFIED'
   | 'QUEUE_UPDATED'
   | 'DEVICE_HEARTBEAT'

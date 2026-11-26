@@ -1,14 +1,18 @@
-import { eq, and, desc, sql } from 'drizzle-orm';
+import { eq, and, desc, sql, gte, inArray, isNotNull } from 'drizzle-orm';
 import type { AppDb } from '../../db/client';
 import {
   merchants,
   merchantDevices,
+  merchantOrders,
   smsLedger,
   verificationQueue,
   type MerchantRecord,
+  type MerchantOrderRecord,
+  type MfsProvider,
   type SmsLedgerRecord,
 } from '../../db/schema';
 import { generateSecureToken, hashDeviceApiKey } from '../../shared/crypto';
+import { evaluateSmsTrust } from '../../shared/sms-trust';
 import type { Env } from '../../shared/types';
 import { incrementWalletVolume } from '../wallets/wallets.service';
 import { dispatchWebhook, sendPushToMerchantDevices } from '../webhooks/webhook.dispatcher';
@@ -19,6 +23,22 @@ import type { IngestMessageDTO } from './device.schema';
 export interface IngestBatchResult {
   ingestedCount: number;
   autoVerifiedCount: number;
+  flaggedCount: number;
+}
+
+export interface SyncVerifiedItem {
+  trxId: string;
+  externalOrderId: string;
+  verifiedAt: string;
+  amount: number;
+  provider: MfsProvider;
+}
+
+export interface DeviceSyncResult {
+  serverTime: number;
+  verified: SyncVerifiedItem[];
+  orders: MerchantOrderRecord[];
+  pendingConfirmationCount: number;
 }
 
 export interface DeviceStatsResult {
@@ -46,11 +66,14 @@ export async function ingestDeviceSmsBatch(
 ): Promise<IngestBatchResult> {
   let ingestedCount = 0;
   let autoVerifiedCount = 0;
+  let flaggedCount = 0;
 
   for (const msg of messages) {
     const normalizedTrxId = msg.trxId.trim().toUpperCase();
     const normalizedSender = msg.senderNumber.replace(/^\+88/, '').replace(/^88/, '').trim();
     const receivedAtDate = msg.receivedAt ? new Date(msg.receivedAt) : new Date();
+    const source = msg.source ?? 'SMS';
+    const smsSender = msg.smsSender?.trim() || null;
 
     // Check if SMS already exists in sms_ledger
     const existing = await db
@@ -64,9 +87,18 @@ export async function ingestDeviceSmsBatch(
       continue;
     }
 
+    const trustFlag = evaluateSmsTrust({
+      provider: msg.provider,
+      trxId: normalizedTrxId,
+      amount: msg.amount,
+      rawSms: msg.rawSms,
+      smsSender,
+      source,
+    });
+
     const ledgerId = `sms_${generateSecureToken(16)}`;
 
-    // Insert into sms_ledger as UNCLAIMED
+    // Insert into sms_ledger as UNCLAIMED with trust metadata
     await db.insert(smsLedger).values({
       id: ledgerId,
       merchantId: merchant.id,
@@ -77,9 +109,23 @@ export async function ingestDeviceSmsBatch(
       rawSms: msg.rawSms,
       status: 'UNCLAIMED',
       smsReceivedAt: receivedAtDate,
+      smsSender,
+      source,
+      trustFlag,
     });
 
     ingestedCount++;
+
+    // Flagged rows are NEVER auto-reconciled; emit alert and leave UNCLAIMED for manual review
+    if (trustFlag !== null) {
+      flaggedCount++;
+      realtimeHub.broadcast('SMS_FLAGGED', {
+        trxId: normalizedTrxId,
+        provider: msg.provider,
+        flag: trustFlag,
+      });
+      continue;
+    }
 
     // AUTO-RECONCILIATION LOOP: Check if any order is waiting in verification_queue
     // Supports baseAmount fallback: msg.amount >= COALESCE(base_amount, expected_amount) - 0.001
@@ -197,6 +243,7 @@ export async function ingestDeviceSmsBatch(
   return {
     ingestedCount,
     autoVerifiedCount,
+    flaggedCount,
   };
 }
 
@@ -290,4 +337,83 @@ export async function recordDeviceHeartbeat(
         )
       );
   }
+}
+
+/**
+ * Lists merchant orders updated at or after `sinceMs`, capped at 100 items.
+ */
+export async function listOrdersUpdatedSince(
+  db: AppDb,
+  merchantId: string,
+  sinceMs: number,
+  limit = 100
+): Promise<MerchantOrderRecord[]> {
+  const cappedLimit = Math.min(Math.max(limit, 1), 100);
+  const sinceDate = new Date(sinceMs);
+
+  return db
+    .select()
+    .from(merchantOrders)
+    .where(
+      and(
+        eq(merchantOrders.merchantId, merchantId),
+        gte(merchantOrders.updatedAt, sinceDate)
+      )
+    )
+    .orderBy(desc(merchantOrders.updatedAt))
+    .limit(cappedLimit);
+}
+
+/**
+ * Returns incremental sync payload for the mobile companion polling fallback:
+ * newly verified transactions and updated orders since `sinceMs` (default 24h ago),
+ * each capped at 100 items, plus pending confirmation count.
+ */
+export async function getSyncPayload(
+  db: AppDb,
+  merchantId: string,
+  sinceMs?: number
+): Promise<DeviceSyncResult> {
+  const serverTime = Date.now();
+  const effectiveSinceMs = sinceMs ?? serverTime - 24 * 60 * 60 * 1000;
+  const sinceDate = new Date(effectiveSinceMs);
+
+  const [verifiedRows, orders, pendingRes] = await Promise.all([
+    db
+      .select()
+      .from(smsLedger)
+      .where(
+        and(
+          eq(smsLedger.merchantId, merchantId),
+          inArray(smsLedger.status, ['VERIFIED', 'MANUAL_VERIFIED']),
+          isNotNull(smsLedger.verifiedAt),
+          gte(smsLedger.verifiedAt, sinceDate)
+        )
+      )
+      .orderBy(desc(smsLedger.verifiedAt))
+      .limit(100),
+    listOrdersUpdatedSince(db, merchantId, effectiveSinceMs, 100),
+    db
+      .select({ count: sql<number>`COUNT(*)` })
+      .from(merchantOrders)
+      .where(
+        and(
+          eq(merchantOrders.merchantId, merchantId),
+          inArray(merchantOrders.orderStatus, ['NEW', 'AWAITING_CONFIRMATION'])
+        )
+      ),
+  ]);
+
+  return {
+    serverTime,
+    verified: verifiedRows.map((row) => ({
+      trxId: row.trxId,
+      externalOrderId: row.externalOrderId ?? '',
+      verifiedAt: row.verifiedAt ? row.verifiedAt.toISOString() : new Date().toISOString(),
+      amount: row.amount,
+      provider: row.provider,
+    })),
+    orders,
+    pendingConfirmationCount: Number(pendingRes[0]?.count || 0),
+  };
 }
