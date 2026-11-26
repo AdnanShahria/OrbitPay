@@ -45,3 +45,5 @@ crons = [
 [vars]
 ENVIRONMENT = "production"
 PRODUCTION_DOMAIN = "payment.orbitsaas.cloud"
+ORBITMAIL_URL = "https://mail.orbitsaas.cloud/api/v1/send"
+ORBITMAIL_FROM = "contact@mail.orbitsaas.cloud"

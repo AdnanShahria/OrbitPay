@@ -85,6 +85,11 @@ const DEFAULT_PROVIDER_IDS = [
 ] as const;
 
 const EMAIL_PROVIDER_META: Record<string, ProviderMeta> = {
+  orbitmail: {
+    label: 'OrbitMail',
+    channel: 'Centralized Email',
+    hint: 'ORBIT centralized email relay (ORBITMAIL_API_KEY + ORBITMAIL_URL)',
+  },
   resend: {
     label: 'Resend',
     channel: 'Email OTP',
@@ -128,6 +133,7 @@ const EMAIL_PROVIDER_META: Record<string, ProviderMeta> = {
 };
 
 const DEFAULT_EMAIL_PROVIDER_IDS = [
+  'orbitmail',
   'resend',
   'brevo',
   'sendpulse',

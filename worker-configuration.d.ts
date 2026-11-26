@@ -8,6 +8,9 @@ interface Env {
 	EMAIL_PROVIDER_ORDER: string;
 	EMAIL_FROM: string;
 	EMAIL_FROM_NAME: string;
+	ORBITMAIL_API_KEY: string;
+	ORBITMAIL_URL: "https://mail.orbitsaas.cloud/api/v1/send";
+	ORBITMAIL_FROM: "contact@mail.orbitsaas.cloud";
 	RESEND_API_KEY: string;
 	BREVO_API_KEY: string;
 	SENDPULSE_CLIENT_ID: string;

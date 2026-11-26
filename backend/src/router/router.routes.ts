@@ -53,7 +53,17 @@ const sendEmailSchema = z.object({
   fromName: z.string().max(120).optional(),
   replyTo: z.string().email().optional(),
   preferredProvider: z
-    .enum(['resend', 'brevo', 'sendpulse', 'aws_ses', 'sendgrid', 'cloudflare', 'apps_script', 'custom_webhook'])
+    .enum([
+      'orbitmail',
+      'resend',
+      'brevo',
+      'sendpulse',
+      'aws_ses',
+      'sendgrid',
+      'cloudflare',
+      'apps_script',
+      'custom_webhook',
+    ])
     .optional(),
 }).refine((v) => Boolean(v.html || v.text), {
   message: 'Either html or text body must be provided',

@@ -14,6 +14,7 @@ export interface SendEmailInput {
   fromName?: string;
   replyTo?: string;
   preferredProvider?:
+    | 'orbitmail'
     | 'resend'
     | 'brevo'
     | 'sendpulse'

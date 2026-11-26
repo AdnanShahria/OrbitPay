@@ -13,7 +13,11 @@ import type {
   RouterDispatchResponse,
 } from './types';
 
+export const DEFAULT_ORBITMAIL_URL = 'https://mail.orbitsaas.cloud/api/v1/send';
+export const DEFAULT_ORBITMAIL_FROM = 'contact@mail.orbitsaas.cloud';
+
 export const DEFAULT_EMAIL_PROVIDERS: readonly EmailProviderId[] = [
+  'orbitmail',
   'resend',
   'brevo',
   'sendpulse',
@@ -45,6 +49,7 @@ interface NormalizedEmailPayload {
   subject: string;
   html?: string;
   text?: string;
+  explicitFrom?: string;
   fromEmail: string;
   fromName: string;
   replyTo?: string;
@@ -52,6 +57,52 @@ interface NormalizedEmailPayload {
 
 // Per-isolate cached SendPulse OAuth access token
 let cachedSendPulseToken: { token: string; expiresAt: number } | null = null;
+
+function readProcessEnv(): Record<string, string | undefined> | undefined {
+  return (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
+}
+
+function resolveOrbitMailConfig(env?: Partial<Env>) {
+  const procEnv = readProcessEnv();
+  return {
+    apiKey: env?.ORBITMAIL_API_KEY || procEnv?.ORBITMAIL_API_KEY || '',
+    url: env?.ORBITMAIL_URL || procEnv?.ORBITMAIL_URL || DEFAULT_ORBITMAIL_URL,
+    from: env?.ORBITMAIL_FROM || procEnv?.ORBITMAIL_FROM || DEFAULT_ORBITMAIL_FROM,
+  };
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+async function postToOrbitMail(opts: {
+  url: string;
+  apiKey: string;
+  from: string;
+  to: string[];
+  subject: string;
+  html: string;
+}): Promise<Response> {
+  return fetch(opts.url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${opts.apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      from: opts.from,
+      to: opts.to,
+      subject: opts.subject,
+      html: opts.html,
+    }),
+    signal: AbortSignal.timeout(10000),
+  });
+}
 
 function normalizeEmailPayload(env: Env, req: EmailSendRequest): NormalizedEmailPayload {
   const toList = (Array.isArray(req.to) ? req.to : [req.to])
@@ -63,7 +114,8 @@ function normalizeEmailPayload(env: Env, req: EmailSendRequest): NormalizedEmail
     subject: req.subject,
     html: req.html,
     text: req.text,
-    fromEmail: req.from || env.EMAIL_FROM || 'noreply@payment.orbitsaas.cloud',
+    explicitFrom: req.from,
+    fromEmail: req.from || env.EMAIL_FROM || env.ORBITMAIL_FROM || DEFAULT_ORBITMAIL_FROM,
     fromName: req.fromName || env.EMAIL_FROM_NAME || 'ORBIT Payment Hub',
     replyTo: req.replyTo,
   };
@@ -153,6 +205,46 @@ async function signAwsSesV4Headers(opts: {
 }
 
 const EMAIL_ADAPTERS: Record<string, ProviderAdapter<NormalizedEmailPayload, EmailSendResult>> = {
+  orbitmail: {
+    id: 'orbitmail',
+    isConfigured: (env) => Boolean(resolveOrbitMailConfig(env).apiKey),
+    execute: async (env, payload) => {
+      const config = resolveOrbitMailConfig(env);
+      const html =
+        payload.html ||
+        (payload.text
+          ? `<pre style="font-family:inherit;white-space:pre-wrap;">${escapeHtml(payload.text)}</pre>`
+          : `<p>${escapeHtml(payload.subject)}</p>`);
+
+      const res = await postToOrbitMail({
+        url: config.url,
+        apiKey: config.apiKey,
+        from: payload.explicitFrom || config.from,
+        to: payload.toList,
+        subject: payload.subject,
+        html,
+      });
+
+      if (!res.ok) {
+        return { ok: false, statusCode: res.status, error: await parseErrorText(res) };
+      }
+
+      const json = (await res.json().catch(() => ({}))) as {
+        id?: string;
+        messageId?: string;
+        data?: { id?: string };
+      };
+      return {
+        ok: true,
+        statusCode: res.status,
+        data: {
+          accepted: true,
+          messageId: json.id ?? json.messageId ?? json.data?.id,
+        },
+      };
+    },
+  },
+
   resend: {
     id: 'resend',
     isConfigured: (env) => Boolean(env.RESEND_API_KEY),
@@ -502,6 +594,40 @@ export async function routeEmail(
     db: options?.db,
     callerId: options?.callerId,
   });
+}
+
+/**
+ * Direct OrbitMail delivery helper (zero external SDK, native fetch).
+ * Reads credentials from Worker `env` first, falling back to `process.env`.
+ */
+export async function sendEmail(
+  {
+    to,
+    subject,
+    html,
+  }: {
+    to: string | string[];
+    subject: string;
+    html: string;
+  },
+  env?: Partial<Env>
+): Promise<{ id?: string; [key: string]: unknown }> {
+  const config = resolveOrbitMailConfig(env);
+  const res = await postToOrbitMail({
+    url: config.url,
+    apiKey: config.apiKey,
+    from: config.from,
+    to: Array.isArray(to) ? to : [to],
+    subject,
+    html,
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`OrbitMail send failed (${res.status}): ${err}`);
+  }
+
+  return (await res.json()) as { id?: string; [key: string]: unknown };
 }
 
 export function getEmailProviderCapabilities(env: Env): ProviderCapability[] {

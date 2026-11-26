@@ -54,10 +54,13 @@ CUSTOM_SMS_WEBHOOK_URL=
 # ------------------------------------------------------------------------------
 # Email Service Router
 # ------------------------------------------------------------------------------
-EMAIL_PROVIDER_ORDER=resend,brevo,sendpulse,aws_ses,sendgrid,cloudflare,apps_script,custom_webhook
-EMAIL_FROM=no-reply@orbitsaas.cloud
+EMAIL_PROVIDER_ORDER=orbitmail,resend,brevo,sendpulse,aws_ses,sendgrid,cloudflare,apps_script,custom_webhook
+EMAIL_FROM=contact@mail.orbitsaas.cloud
 EMAIL_FROM_NAME=ORBIT Payment Hub
 
+ORBITMAIL_API_KEY=
+ORBITMAIL_URL=https://mail.orbitsaas.cloud/api/v1/send
+ORBITMAIL_FROM=contact@mail.orbitsaas.cloud
 RESEND_API_KEY=
 BREVO_API_KEY=
 SENDPULSE_CLIENT_ID=

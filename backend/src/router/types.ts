@@ -3,6 +3,7 @@ import type { Env } from '../shared/types';
 export type RouterChannel = 'email' | 'sms' | 'image' | 'database';
 
 export type EmailProviderId =
+  | 'orbitmail'
   | 'resend'
   | 'brevo'
   | 'sendpulse'

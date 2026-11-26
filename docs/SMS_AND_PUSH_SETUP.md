@@ -113,13 +113,14 @@ If you have not purchased SMS gateway credits yet (or if all configured SMS gate
 
 Default email priority order (overridable via `EMAIL_PROVIDER_ORDER`):
 ```text
-resend -> brevo -> sendpulse -> aws_ses -> sendgrid -> cloudflare -> apps_script -> custom_webhook
+orbitmail -> resend -> brevo -> sendpulse -> aws_ses -> sendgrid -> cloudflare -> apps_script -> custom_webhook
 ```
 
 ### Common Sender Identity Variables
 ```bash
-npx wrangler secret put EMAIL_FROM         # e.g. noreply@payment.orbitsaas.cloud
+npx wrangler secret put EMAIL_FROM         # e.g. contact@mail.orbitsaas.cloud
 npx wrangler secret put EMAIL_FROM_NAME    # e.g. ORBIT Payment Hub
+npx wrangler secret put ORBITMAIL_API_KEY  # OrbitMail Bearer API key
 ```
 
 ### Supported `routeEmail` Provider Secrets
@@ -127,6 +128,7 @@ Configure any one (or more for automatic multi-provider failover):
 
 | Provider ID | Required Secrets / Binding | Notes |
 | --- | --- | --- |
+| `orbitmail` | `ORBITMAIL_API_KEY`, `ORBITMAIL_URL`, `ORBITMAIL_FROM` | Primary centralized ORBIT mail service (`mail.orbitsaas.cloud`) |
 | `resend` | `RESEND_API_KEY` | Free tier: 3,000 emails/month |
 | `brevo` | `BREVO_API_KEY` | Free tier: 300 emails/day |
 | `sendpulse` | `SENDPULSE_CLIENT_ID`, `SENDPULSE_CLIENT_SECRET` | OAuth2 token cached per isolate |
