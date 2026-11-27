@@ -34,13 +34,16 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -50,9 +53,12 @@ import com.orbitsaas.payment.service.StickyForegroundService
 import com.orbitsaas.payment.ui.diagnostics.DiagnosticsScreen
 import com.orbitsaas.payment.ui.history.HistoryScreen
 import com.orbitsaas.payment.ui.theme.OrbitPaymentTheme
+import com.orbitsaas.payment.ui.update.AppUpdateDialog
 import com.orbitsaas.payment.ui.verify.VerifyScreen
 import com.orbitsaas.payment.ui.viewmodel.DashboardUiState
 import com.orbitsaas.payment.ui.viewmodel.MainViewModel
+import com.orbitsaas.payment.update.AppUpdateManager
+import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
 
@@ -91,6 +97,13 @@ class MainActivity : AppCompatActivity() {
         checkAndStartForegroundService()
         viewModel.refreshStatsFromServer()
         viewModel.refreshOrders()
+        lifecycleScope.launch {
+            AppUpdateManager.checkForUpdates(
+                context = this@MainActivity,
+                userInitiated = false,
+                autoDownload = true
+            )
+        }
     }
 
     private fun checkEssentialPermissions() {
@@ -165,6 +178,9 @@ fun OrbitPaymentApp(
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
+    val context = LocalContext.current
+    val appScope = rememberCoroutineScope()
+    val updateState by AppUpdateManager.state.collectAsState()
 
     val startDestination = remember {
         when {
@@ -362,5 +378,38 @@ fun OrbitPaymentApp(
                 )
             }
         }
+    }
+
+    if (updateState.shouldShowDialog) {
+        AppUpdateDialog(
+            state = updateState,
+            canInstallPackages = AppUpdateManager.canInstallPackages(context),
+            onDownloadClick = {
+                appScope.launch {
+                    AppUpdateManager.downloadAndVerify(context)
+                }
+            },
+            onInstallClick = {
+                appScope.launch {
+                    AppUpdateManager.installDownloadedUpdate(context)
+                }
+            },
+            onOpenPermissionSettings = {
+                AppUpdateManager.openInstallPermissionSettings(context)
+            },
+            onRetryClick = {
+                appScope.launch {
+                    AppUpdateManager.checkForUpdates(
+                        context = context,
+                        userInitiated = true,
+                        autoDownload = true,
+                        forceCheck = true
+                    )
+                }
+            },
+            onDismiss = {
+                AppUpdateManager.dismissSoftUpdate()
+            }
+        )
     }
 }

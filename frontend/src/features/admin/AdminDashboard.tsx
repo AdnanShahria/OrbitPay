@@ -7,6 +7,7 @@ import {
   RiMessage2Line,
   RiRadioButtonLine,
   RiShieldCheckLine,
+  RiSmartphoneLine,
   RiStore2Line,
   RiTimeLine,
   RiWebhookLine,
@@ -25,15 +26,17 @@ import { GlobalQueueTable } from './GlobalQueueTable';
 import { GlobalWebhookTable } from './GlobalWebhookTable';
 import { ProjectManagerTable } from './ProjectManagerTable';
 import { SmsPushPanel } from './SmsPushPanel';
+import { AppReleasesPanel } from './AppReleasesPanel';
 import {
   useAdminAuth,
   useAdminOverview,
   useAdminProjects,
   useAdminQueue,
+  useAdminReleases,
   useAdminWebhooks,
 } from './useAdmin';
 
-export type AdminTab = 'projects' | 'telemetry' | 'webhooks' | 'queue' | 'messaging';
+export type AdminTab = 'projects' | 'telemetry' | 'webhooks' | 'queue' | 'messaging' | 'releases';
 
 interface AdminDashboardProps {
   onExit: () => void;
@@ -76,6 +79,7 @@ function AdminDashboardContent({
   const { data: projects, isLoading: projectsLoading } = useAdminProjects(true);
   const { data: webhooks, isLoading: webhooksLoading } = useAdminWebhooks(true);
   const { data: queue, isLoading: queueLoading } = useAdminQueue(true);
+  const { data: releasesData } = useAdminReleases(true);
 
   const handleSimulateGlobal = async () => {
     setIsSimulating(true);
@@ -193,6 +197,9 @@ function AdminDashboardContent({
             <Tab id="messaging" icon={RiMessage2Line}>
               SMS &amp; Push
             </Tab>
+            <Tab id="releases" icon={RiSmartphoneLine} count={releasesData?.releases.length}>
+              App Releases
+            </Tab>
           </TabList>
 
           <TabPanel id="projects">
@@ -216,6 +223,10 @@ function AdminDashboardContent({
 
           <TabPanel id="messaging">
             <SmsPushPanel />
+          </TabPanel>
+
+          <TabPanel id="releases">
+            <AppReleasesPanel />
           </TabPanel>
         </Tabs>
       </main>

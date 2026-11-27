@@ -6,11 +6,13 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import com.orbitsaas.payment.BuildConfig
 import com.orbitsaas.payment.OrbitApplication
 import com.orbitsaas.payment.R
 import com.orbitsaas.payment.data.local.OrbitDatabase
 import com.orbitsaas.payment.data.local.PreferencesManager
 import com.orbitsaas.payment.ui.MainActivity
+import com.orbitsaas.payment.update.AppUpdateManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -354,6 +356,16 @@ class PushWebSocketClient(
     ) {
         val trxIdFromData = data["trxId"]?.trim().orEmpty()
         when {
+            event == "app.update_available" -> {
+                Log.i(TAG, "Received app.update_available via WebSocket; triggering background update check.")
+                AppUpdateManager.checkForUpdates(
+                    context = appContext,
+                    userInitiated = false,
+                    autoDownload = true,
+                    forceCheck = true
+                )
+            }
+
             event == "payment.verified" || trxIdFromData.isNotBlank() -> {
                 val orderId = (data["orderId"] ?: data["externalOrderId"]).orEmpty().trim()
                 val amount = data["amount"].orEmpty().trim()
@@ -493,7 +505,7 @@ class PushWebSocketClient(
 
     companion object {
         private const val TAG = "PushWebSocketClient"
-        private const val USER_AGENT = "OrbitPay-Android/1.0.0"
+        private val USER_AGENT = "OrbitPay-Android/${BuildConfig.VERSION_NAME}"
         private const val PING_INTERVAL_MS = 45_000L
         private val BACKOFF_DELAYS_MS = longArrayOf(2_000L, 4_000L, 8_000L, 16_000L, 30_000L, 60_000L)
 

@@ -598,3 +598,122 @@ export function useSendTestPush() {
     },
   });
 }
+
+export interface AppReleaseItem {
+  id: string;
+  platform: string;
+  versionCode: number;
+  versionName: string;
+  minSupportedVersionCode: number;
+  mandatory: boolean;
+  releaseNotes: string;
+  fileName: string;
+  sha256: string;
+  sizeBytes: number;
+  isActive: boolean;
+  downloadUrl: string;
+  createdAt: string;
+}
+
+export interface AdminReleasesResponse {
+  r2Configured: boolean;
+  releases: AppReleaseItem[];
+}
+
+export interface ReleaseBroadcastResult {
+  merchantsTargeted: number;
+  totalDelivered: number;
+  wsDelivered: number;
+  fcmDelivered: number;
+}
+
+export interface PublishReleaseResult {
+  release: AppReleaseItem;
+  broadcast?: ReleaseBroadcastResult;
+}
+
+export function useAdminReleases(enabled = true) {
+  return useQuery<AdminReleasesResponse>({
+    queryKey: ['admin', 'releases'],
+    queryFn: async () => {
+      const res = await adminFetch('/api/v1/admin/releases');
+      return unwrapApiResponse<AdminReleasesResponse>(res, 'Failed to load app releases');
+    },
+    enabled: Boolean(enabled && getStoredAdminKey()),
+    retry: false,
+    refetchInterval: 30_000,
+  });
+}
+
+export function usePublishAppRelease() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (formData: FormData): Promise<PublishReleaseResult> => {
+      const res = await adminFetch('/api/v1/admin/releases', {
+        method: 'POST',
+        body: formData,
+      });
+      return unwrapApiResponse<PublishReleaseResult>(res, 'Failed to publish APK release');
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'releases'] });
+    },
+  });
+}
+
+export function useBroadcastAppRelease() {
+  return useMutation({
+    mutationFn: async (releaseId: string): Promise<ReleaseBroadcastResult> => {
+      const res = await adminFetch(`/api/v1/admin/releases/${encodeURIComponent(releaseId)}/broadcast`, {
+        method: 'POST',
+      });
+      return unwrapApiResponse<ReleaseBroadcastResult>(res, 'Failed to broadcast app update');
+    },
+  });
+}
+
+export function useUpdateAppRelease() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      id,
+      patch,
+    }: {
+      id: string;
+      patch: {
+        mandatory?: boolean;
+        minSupportedVersionCode?: number;
+        releaseNotes?: string;
+        isActive?: boolean;
+      };
+    }): Promise<AppReleaseItem> => {
+      const res = await adminFetch(`/api/v1/admin/releases/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      return unwrapApiResponse<AppReleaseItem>(res, 'Failed to update release metadata');
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'releases'] });
+    },
+  });
+}
+
+export function useDeleteAppRelease() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (releaseId: string): Promise<{ id: string; deleted: boolean }> => {
+      const res = await adminFetch(`/api/v1/admin/releases/${encodeURIComponent(releaseId)}`, {
+        method: 'DELETE',
+      });
+      return unwrapApiResponse<{ id: string; deleted: boolean }>(res, 'Failed to delete release');
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'releases'] });
+    },
+  });
+}

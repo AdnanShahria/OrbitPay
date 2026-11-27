@@ -158,6 +158,34 @@
     <string name="settings_foreground_title">স্টিকি ফোরগ্রাউন্ড সার্ভিস</string>
     <string name="settings_foreground_desc">সিঙ্ক ওয়ার্কার সক্রিয় রাখে এবং নোটিফিকেশন শেডে চলমান অবস্থা দেখায়</string>
     <string name="settings_save_button">কনফিগারেশন সংরক্ষণ করুন</string>
-    <string name="settings_footer_version">ORBIT পেমেন্ট কম্প্যানিয়ন · v1.0.0</string>
+    <string name="settings_updates_title">অ্যাপ আপডেট</string>
+    <string name="settings_updates_current_version">ইনস্টলকৃত: v%1$s (বিল্ড %2$d)</string>
+    <string name="settings_updates_auto_desc">অ্যাপ চালু হওয়ার সময়, ব্যাকগ্রাউন্ড সিঙ্কে এবং পুশ নোটিফিকেশনে স্বয়ংক্রিয়ভাবে আপডেট পরীক্ষা করে।</string>
+    <string name="settings_updates_check_button">আপডেট পরীক্ষা করুন</string>
+    <string name="settings_updates_install_version">v%1$s ইনস্টল করুন</string>
+    <string name="settings_footer_version">ORBIT পেমেন্ট কম্প্যানিয়ন · v%1$s</string>
     <string name="settings_footer_stack">নেটিভ Kotlin 2.0 · Jetpack Compose · Room DB</string>
+
+    <!-- Self-Update Dialog & Notifications -->
+    <string name="update_dialog_available_title">নতুন আপডেট পাওয়া গেছে</string>
+    <string name="update_dialog_required_title">আবশ্যিক আপডেট</string>
+    <string name="update_dialog_version_line">v%1$s → v%2$s · %3$s</string>
+    <string name="update_status_checking">আপডেট পরীক্ষা করা হচ্ছে...</string>
+    <string name="update_status_downloading_pct">আপডেট ডাউনলোড হচ্ছে: %1$d%% (%2$s / %3$s)</string>
+    <string name="update_status_downloading_simple">আপডেট ডাউনলোড হচ্ছে (%1$d%%)...</string>
+    <string name="update_status_verifying">SHA-256 চেকসাম যাচাই করা হচ্ছে...</string>
+    <string name="update_status_installing">অ্যান্ড্রয়েড ইনস্টলার চালু হচ্ছে...</string>
+    <string name="update_status_ready">যাচাই সম্পন্ন হয়েছে ও ইনস্টলের জন্য প্রস্তুত।</string>
+    <string name="update_status_ready_version">v%1$s যাচাইকৃত ও ইনস্টলের জন্য প্রস্তুত।</string>
+    <string name="update_status_up_to_date">আপনি সর্বশেষ সংস্করণ ব্যবহার করছেন।</string>
+    <string name="update_status_error_generic">আপডেট পরীক্ষা বা ডাউনলোড করা যায়নি।</string>
+    <string name="update_permission_hint">এক-ট্যাপে আপডেট ইনস্টল করতে ORBIT Pay-এর জন্য "Install unknown apps" অনুমতি চালু করুন।</string>
+    <string name="update_action_download">আপডেট ডাউনলোড করুন</string>
+    <string name="update_action_install_now">আপডেট ইনস্টল করুন</string>
+    <string name="update_action_allow_installs">ইনস্টল অনুমতি দিন</string>
+    <string name="update_action_retry">আবার চেষ্টা করুন</string>
+    <string name="update_action_later">পরে</string>
+    <string name="update_notif_ready_title">ORBIT Pay v%1$s প্রস্তুত</string>
+    <string name="update_notif_ready_body">আপডেট ডাউনলোড ও যাচাই সম্পন্ন। v%1$s ইনস্টল করতে ট্যাপ করুন।</string>
+    <string name="update_notif_required_body">আবশ্যিক আপডেট v%1$s প্রস্তুত। এখনই ইনস্টল করতে ট্যাপ করুন।</string>
 </resources>

@@ -334,3 +334,49 @@ export const otpCodes = sqliteTable('otp_codes', {
 
 export type OtpCodeRecord = typeof otpCodes.$inferSelect;
 export type NewOtpCode = typeof otpCodes.$inferInsert;
+
+// 15. App Releases (Self-Hosted Android APK Distribution & Auto-Update Manifest)
+export const appReleases = sqliteTable('app_releases', {
+  id: text('id').primaryKey(), // rel_xxxx
+  platform: text('platform').default('ANDROID').notNull(),
+  versionCode: integer('version_code').notNull(),
+  versionName: text('version_name').notNull(),
+  minSupportedVersionCode: integer('min_supported_version_code').default(1).notNull(),
+  mandatory: integer('mandatory', { mode: 'boolean' }).default(false).notNull(),
+  releaseNotes: text('release_notes').default('').notNull(),
+  fileName: text('file_name').notNull(),
+  r2Key: text('r2_key').notNull(),
+  sha256: text('sha256').notNull(),
+  sizeBytes: integer('size_bytes').notNull(),
+  isActive: integer('is_active', { mode: 'boolean' }).default(true).notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()).notNull(),
+}, (table) => ({
+  uniquePlatformVersion: uniqueIndex('unique_app_release_version').on(table.platform, table.versionCode),
+  latestLookupIdx: index('idx_app_releases_latest').on(table.platform, table.isActive, table.versionCode),
+}));
+
+export type AppReleaseRecord = typeof appReleases.$inferSelect;
+export type NewAppRelease = typeof appReleases.$inferInsert;
+
+// 15. App Releases (Self-Hosted Android APK Distribution & Auto-Update Manifest)
+export const appReleases = sqliteTable('app_releases', {
+  id: text('id').primaryKey(), // rel_xxxx
+  platform: text('platform').default('ANDROID').notNull(),
+  versionCode: integer('version_code').notNull(),
+  versionName: text('version_name').notNull(),
+  minSupportedVersionCode: integer('min_supported_version_code').default(1).notNull(),
+  mandatory: integer('mandatory', { mode: 'boolean' }).default(false).notNull(),
+  releaseNotes: text('release_notes').default('').notNull(),
+  fileName: text('file_name').notNull(),
+  r2Key: text('r2_key').notNull(),
+  sha256: text('sha256').notNull(),
+  sizeBytes: integer('size_bytes').notNull(),
+  isActive: integer('is_active', { mode: 'boolean' }).default(true).notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()).notNull(),
+}, (table) => ({
+  uniquePlatformVersion: uniqueIndex('unique_app_release_version').on(table.platform, table.versionCode),
+  latestLookupIdx: index('idx_app_releases_latest').on(table.platform, table.isActive, table.versionCode),
+}));
+
+export type AppReleaseRecord = typeof appReleases.$inferSelect;
+export type NewAppRelease = typeof appReleases.$inferInsert;

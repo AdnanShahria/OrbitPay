@@ -22,6 +22,7 @@ import com.orbitsaas.payment.data.remote.IngestSmsItem
 import com.orbitsaas.payment.data.remote.OrbitApiClient
 import com.orbitsaas.payment.data.remote.UnauthorizedException
 import com.orbitsaas.payment.interceptors.InboxScanner
+import com.orbitsaas.payment.update.AppUpdateManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -104,6 +105,15 @@ class SyncWorker(
                 preferencesManager.clearAuthSession()
                 StickyForegroundService.stopService(applicationContext)
                 return@withContext Result.failure()
+            }
+
+            runCatching {
+                AppUpdateManager.checkForUpdates(
+                    context = applicationContext,
+                    userInitiated = false,
+                    autoDownload = true,
+                    forceCheck = false
+                )
             }
 
             Result.success()

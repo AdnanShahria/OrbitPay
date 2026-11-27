@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Store
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -52,9 +53,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -67,6 +70,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.orbitsaas.payment.BuildConfig
 import com.orbitsaas.payment.R
 import com.orbitsaas.payment.data.local.PreferencesManager
 import com.orbitsaas.payment.ui.locale.LocaleHelper
@@ -76,6 +80,9 @@ import com.orbitsaas.payment.ui.theme.StatusGreenBg
 import com.orbitsaas.payment.ui.theme.StatusRed
 import com.orbitsaas.payment.ui.theme.StatusRedBg
 import com.orbitsaas.payment.ui.viewmodel.DashboardUiState
+import com.orbitsaas.payment.update.AppUpdateManager
+import com.orbitsaas.payment.update.UpdateStatus
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -89,6 +96,8 @@ fun SettingsScreen(
 ) {
     val context = LocalContext.current
     val preferencesManager = remember(context) { PreferencesManager(context) }
+    val coroutineScope = rememberCoroutineScope()
+    val updateState by AppUpdateManager.state.collectAsState()
 
     var serverUrl by remember(state.serverUrl) {
         mutableStateOf(if (state.serverUrl.isBlank()) "https://payment.orbitsaas.cloud" else state.serverUrl)
@@ -728,6 +737,125 @@ fun SettingsScreen(
                 }
             }
 
+            // App Updates & Version Card
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, MaterialTheme.colorScheme.outline, cardShape),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                shape = cardShape
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.SystemUpdate,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = stringResource(R.string.settings_updates_title),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    Text(
+                        text = stringResource(
+                            R.string.settings_updates_current_version,
+                            BuildConfig.VERSION_NAME,
+                            BuildConfig.VERSION_CODE
+                        ),
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontFeatureSettings = "tnum"
+                        ),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    val updateStatusLine = when (updateState.status) {
+                        UpdateStatus.CHECKING -> stringResource(R.string.update_status_checking)
+                        UpdateStatus.DOWNLOADING -> stringResource(
+                            R.string.update_status_downloading_simple,
+                            (updateState.downloadProgress * 100).toInt().coerceIn(0, 100)
+                        )
+                        UpdateStatus.VERIFYING -> stringResource(R.string.update_status_verifying)
+                        UpdateStatus.READY_TO_INSTALL -> stringResource(
+                            R.string.update_status_ready_version,
+                            updateState.release?.versionName.orEmpty()
+                        )
+                        UpdateStatus.INSTALLING -> stringResource(R.string.update_status_installing)
+                        UpdateStatus.UP_TO_DATE -> stringResource(R.string.update_status_up_to_date)
+                        UpdateStatus.ERROR -> updateState.errorMessage ?: stringResource(R.string.update_status_error_generic)
+                        else -> stringResource(R.string.settings_updates_auto_desc)
+                    }
+
+                    Text(
+                        text = updateStatusLine,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (updateState.status == UpdateStatus.ERROR) redFg else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    val isUpdateBusy = updateState.status in setOf(
+                        UpdateStatus.CHECKING,
+                        UpdateStatus.DOWNLOADING,
+                        UpdateStatus.VERIFYING,
+                        UpdateStatus.INSTALLING
+                    )
+
+                    OutlinedButton(
+                        onClick = {
+                            coroutineScope.launch {
+                                if (updateState.status == UpdateStatus.READY_TO_INSTALL) {
+                                    AppUpdateManager.installDownloadedUpdate(context)
+                                } else {
+                                    AppUpdateManager.checkForUpdates(
+                                        context = context,
+                                        userInitiated = true,
+                                        autoDownload = true,
+                                        forceCheck = true
+                                    )
+                                }
+                            }
+                        },
+                        enabled = !isUpdateBusy,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp),
+                        shape = fieldShape,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                    ) {
+                        if (isUpdateBusy) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(modifier = Modifier.size(8.dp))
+                        }
+                        Text(
+                            text = when (updateState.status) {
+                                UpdateStatus.READY_TO_INSTALL -> stringResource(
+                                    R.string.settings_updates_install_version,
+                                    updateState.release?.versionName.orEmpty()
+                                )
+                                UpdateStatus.CHECKING -> stringResource(R.string.update_status_checking)
+                                else -> stringResource(R.string.settings_updates_check_button)
+                            },
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            }
+
             // Save Button
             Button(
                 onClick = {
@@ -761,7 +889,7 @@ fun SettingsScreen(
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Text(
-                    text = stringResource(R.string.settings_footer_version),
+                    text = stringResource(R.string.settings_footer_version, BuildConfig.VERSION_NAME),
                     style = MaterialTheme.typography.labelMedium.copy(
                         fontFeatureSettings = "tnum"
                     ),

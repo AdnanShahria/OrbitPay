@@ -13,6 +13,7 @@ import com.orbitsaas.payment.R
 import com.orbitsaas.payment.data.local.OrbitDatabase
 import com.orbitsaas.payment.data.local.PreferencesManager
 import com.orbitsaas.payment.ui.MainActivity
+import com.orbitsaas.payment.update.AppUpdateManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -46,6 +47,18 @@ class FcmService : FirebaseMessagingService() {
         val notifBody = remoteMessage.notification?.body ?: data["body"]?.takeIf { it.isNotBlank() }
 
         when {
+            eventType == "app.update_available" -> {
+                Log.i(TAG, "Received app.update_available via FCM; triggering background update check.")
+                serviceScope.launch {
+                    AppUpdateManager.checkForUpdates(
+                        context = applicationContext,
+                        userInitiated = false,
+                        autoDownload = true,
+                        forceCheck = true
+                    )
+                }
+            }
+
             eventType == "order.created" || eventType == "order.action_required" -> {
                 val orderId = data["externalOrderId"] ?: data["orderId"] ?: ""
                 val paymentMethod = (data["paymentMethod"] ?: data["method"] ?: "COD").uppercase()

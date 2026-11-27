@@ -1,6 +1,7 @@
 package com.orbitsaas.payment.data.remote
 
 import android.util.Log
+import com.orbitsaas.payment.BuildConfig
 import com.orbitsaas.payment.data.local.PreferencesManager
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
@@ -498,8 +499,34 @@ class OrbitApiClient(
         }
     }
 
+    /**
+     * Checks ORBIT Central Hub for the latest published Android APK release.
+     */
+    suspend fun fetchLatestRelease(currentVersionCode: Int): Result<LatestReleaseData> {
+        return runCatching {
+            val resolvedBaseUrl = PreferencesManager.normalizeServerUrl(baseUrl)
+            val url = "$resolvedBaseUrl/api/v1/app/latest"
+            val response: HttpResponse = client.get(url) {
+                header(HttpHeaders.UserAgent, USER_AGENT)
+                parameter("currentVersionCode", currentVersionCode)
+                parameter("platform", "ANDROID")
+            }
+
+            if (response.status.isSuccess()) {
+                val envelope = response.body<ApiEnvelope<LatestReleaseData>>()
+                if (envelope.success && envelope.data != null) {
+                    envelope.data
+                } else {
+                    throw Exception(envelope.error ?: envelope.message ?: "Failed to check app updates")
+                }
+            } else {
+                throwHttpException(response)
+            }
+        }
+    }
+
     companion object {
         private const val TAG = "OrbitApiClient"
-        private const val USER_AGENT = "OrbitPay-Android/1.0.0"
+        private val USER_AGENT = "OrbitPay-Android/${BuildConfig.VERSION_NAME}"
     }
 }

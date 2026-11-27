@@ -158,6 +158,34 @@
     <string name="settings_foreground_title">Sticky foreground service</string>
     <string name="settings_foreground_desc">Keeps sync worker alive and displays persistent status in notification shade</string>
     <string name="settings_save_button">Save configuration</string>
-    <string name="settings_footer_version">ORBIT Payment Companion · v1.0.0</string>
+    <string name="settings_updates_title">App updates</string>
+    <string name="settings_updates_current_version">Installed: v%1$s (build %2$d)</string>
+    <string name="settings_updates_auto_desc">Checks automatically on launch, background sync, and instant push alerts.</string>
+    <string name="settings_updates_check_button">Check for updates</string>
+    <string name="settings_updates_install_version">Install v%1$s</string>
+    <string name="settings_footer_version">ORBIT Payment Companion · v%1$s</string>
     <string name="settings_footer_stack">Native Kotlin 2.0 · Jetpack Compose · Room DB</string>
+
+    <!-- Self-Update Dialog & Notifications -->
+    <string name="update_dialog_available_title">Update available</string>
+    <string name="update_dialog_required_title">Required update</string>
+    <string name="update_dialog_version_line">v%1$s → v%2$s · %3$s</string>
+    <string name="update_status_checking">Checking for updates...</string>
+    <string name="update_status_downloading_pct">Downloading update: %1$d%% (%2$s / %3$s)</string>
+    <string name="update_status_downloading_simple">Downloading update (%1$d%%)...</string>
+    <string name="update_status_verifying">Verifying SHA-256 checksum...</string>
+    <string name="update_status_installing">Starting Android installer...</string>
+    <string name="update_status_ready">Verified &amp; ready to install.</string>
+    <string name="update_status_ready_version">v%1$s verified and ready to install.</string>
+    <string name="update_status_up_to_date">You are on the latest version.</string>
+    <string name="update_status_error_generic">Unable to check or download update.</string>
+    <string name="update_permission_hint">Enable "Install unknown apps" for ORBIT Pay so updates can install in one tap.</string>
+    <string name="update_action_download">Download update</string>
+    <string name="update_action_install_now">Install update</string>
+    <string name="update_action_allow_installs">Allow app installs</string>
+    <string name="update_action_retry">Retry</string>
+    <string name="update_action_later">Later</string>
+    <string name="update_notif_ready_title">ORBIT Pay v%1$s Ready</string>
+    <string name="update_notif_ready_body">Update downloaded and verified. Tap to install v%1$s.</string>
+    <string name="update_notif_required_body">Required update v%1$s is ready. Tap to install now.</string>
 </resources>
