@@ -1,4 +1,5 @@
 import { eq, desc, sql, and, isNull, asc } from 'drizzle-orm';
+import { ensureRuntimeSchema } from '../../db/bootstrap';
 import type { AppDb } from '../../db/client';
 import {
   merchants,
@@ -604,6 +605,7 @@ export async function revokeAdminSession(db: AppDb, sessionId: string) {
  * Returns deep inspection telemetry for a single connected project/merchant.
  */
 export async function inspectAdminProject(db: AppDb, projectId: string) {
+  await ensureRuntimeSchema(db);
   const merchantRes = await db
     .select()
     .from(merchants)
@@ -660,6 +662,7 @@ export async function deleteAdminProject(
   projectId: string,
   actor?: AdminActor
 ) {
+  await ensureRuntimeSchema(db);
   const merchantRes = await db
     .select({ id: merchants.id, storeName: merchants.storeName })
     .from(merchants)

@@ -544,7 +544,7 @@ export function AdminSecurityPanel({
               </div>
 
               {systemHealth?.tables && systemHealth.tables.length > 0 && (
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                   {systemHealth.tables.map((t) => (
                     <div
                       key={t.name}

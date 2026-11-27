@@ -248,7 +248,7 @@ router.get('/system/health', requireAdminAuth, async (c) => {
  */
 router.post('/system/ensure-schema', requireAdminAuth, async (c) => {
   const db = c.get('db');
-  await ensureRuntimeSchema(db);
+  await ensureRuntimeSchema(db, { force: true });
   const tables = await checkCoreTablesHealth(db);
 
   return c.json({

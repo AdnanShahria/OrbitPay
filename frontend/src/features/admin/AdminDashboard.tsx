@@ -315,27 +315,30 @@ function AdminDashboardContent({
           selectedKey={activeTab}
           onSelectionChange={(k) => setActiveTab(k as AdminTab)}
         >
-          <TabList aria-label="Admin central hub sections" className="overflow-x-auto">
+          <TabList
+            aria-label="Admin central hub sections"
+            className="overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          >
             <Tab id="projects" icon={RiStore2Line} count={projects?.length}>
-              Connected Projects
+              Projects
             </Tab>
             <Tab id="telemetry" icon={RiBarChartBoxLine}>
-              Global Telemetry
+              Telemetry
             </Tab>
             <Tab id="webhooks" icon={RiWebhookLine} count={webhooks?.length}>
-              Webhook Audit
+              Webhooks
             </Tab>
             <Tab id="queue" icon={RiTimeLine} count={queue?.length}>
-              Verification Queue
+              Queue
             </Tab>
             <Tab id="messaging" icon={RiMessage2Line}>
               SMS &amp; Push
             </Tab>
             <Tab id="releases" icon={RiSmartphoneLine} count={releasesData?.releases.length}>
-              App Releases
+              Releases
             </Tab>
             <Tab id="security" icon={RiShieldKeyholeLine}>
-              Security &amp; System
+              Security
             </Tab>
           </TabList>
 

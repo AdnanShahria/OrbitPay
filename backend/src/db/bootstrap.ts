@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm';
 import type { AppDb } from './client';
 
-const RUNTIME_SCHEMA_STATEMENTS: readonly string[] = [
+const CORE_TABLE_STATEMENTS: readonly string[] = [
   // 0004_app_releases
   `CREATE TABLE IF NOT EXISTS \`app_releases\` (
     \`id\` text PRIMARY KEY NOT NULL,
@@ -20,6 +20,94 @@ const RUNTIME_SCHEMA_STATEMENTS: readonly string[] = [
   )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS \`unique_app_release_version\` ON \`app_releases\` (\`platform\`,\`version_code\`)`,
   `CREATE INDEX IF NOT EXISTS \`idx_app_releases_latest\` ON \`app_releases\` (\`platform\`,\`is_active\`,\`version_code\`)`,
+
+  // 0005_universal_payment_v2 tables
+  `CREATE TABLE IF NOT EXISTS \`payment_intents\` (
+    \`id\` text PRIMARY KEY NOT NULL,
+    \`merchant_id\` text NOT NULL,
+    \`vertical\` text DEFAULT 'ecommerce' NOT NULL,
+    \`external_ref_id\` text NOT NULL,
+    \`verification_mode\` text DEFAULT 'AUTO' NOT NULL,
+    \`status\` text DEFAULT 'OPEN' NOT NULL,
+    \`base_amount\` real NOT NULL,
+    \`unique_amount\` real NOT NULL,
+    \`paid_amount\` real,
+    \`provider\` text,
+    \`trx_id\` text,
+    \`sender_number\` text,
+    \`receipt_asset_id\` text,
+    \`receipt_url\` text,
+    \`match_type\` text,
+    \`trust_flag\` text,
+    \`device_online_at_submit\` integer,
+    \`sms_ledger_id\` text,
+    \`sms_reconciliation_state\` text,
+    \`escalation_reason\` text,
+    \`resolution_source\` text,
+    \`resolved_by_json\` text,
+    \`rejection_reason\` text,
+    \`callback_url\` text,
+    \`return_url\` text,
+    \`cancel_url\` text,
+    \`customer_json\` text,
+    \`display_json\` text,
+    \`actions_json\` text,
+    \`metadata_json\` text,
+    \`state_version\` integer DEFAULT 1 NOT NULL,
+    \`submit_attempts\` integer DEFAULT 0 NOT NULL,
+    \`grace_expires_at\` integer,
+    \`expires_at\` integer NOT NULL,
+    \`verified_at\` integer,
+    \`resolved_at\` integer,
+    \`created_at\` integer NOT NULL,
+    \`updated_at\` integer NOT NULL,
+    FOREIGN KEY (\`merchant_id\`) REFERENCES \`merchants\`(\`id\`) ON UPDATE no action ON DELETE no action
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS \`uq_payment_intent_merchant_ref\` ON \`payment_intents\` (\`merchant_id\`,\`external_ref_id\`)`,
+  `CREATE INDEX IF NOT EXISTS \`idx_payment_intents_status\` ON \`payment_intents\` (\`merchant_id\`,\`status\`,\`created_at\`)`,
+  `CREATE INDEX IF NOT EXISTS \`idx_payment_intents_trx\` ON \`payment_intents\` (\`merchant_id\`,\`trx_id\`)`,
+  `CREATE INDEX IF NOT EXISTS \`idx_payment_intents_grace\` ON \`payment_intents\` (\`status\`,\`grace_expires_at\`)`,
+
+  `CREATE TABLE IF NOT EXISTS \`payment_links\` (
+    \`id\` text PRIMARY KEY NOT NULL,
+    \`merchant_id\` text NOT NULL,
+    \`slug\` text NOT NULL,
+    \`title\` text NOT NULL,
+    \`description\` text,
+    \`vertical\` text DEFAULT 'custom' NOT NULL,
+    \`amount_type\` text DEFAULT 'FIXED' NOT NULL,
+    \`fixed_amount\` real,
+    \`min_amount\` real,
+    \`max_amount\` real,
+    \`currency\` text DEFAULT 'BDT' NOT NULL,
+    \`verification_mode\` text,
+    \`display_json\` text,
+    \`actions_json\` text,
+    \`metadata_json\` text,
+    \`return_url\` text,
+    \`cancel_url\` text,
+    \`is_active\` integer DEFAULT 1 NOT NULL,
+    \`max_uses\` integer,
+    \`used_count\` integer DEFAULT 0 NOT NULL,
+    \`expires_at\` integer,
+    \`created_at\` integer NOT NULL,
+    \`updated_at\` integer NOT NULL,
+    FOREIGN KEY (\`merchant_id\`) REFERENCES \`merchants\`(\`id\`) ON UPDATE no action ON DELETE no action
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS \`uq_payment_links_slug\` ON \`payment_links\` (\`slug\`)`,
+  `CREATE INDEX IF NOT EXISTS \`idx_payment_links_merchant\` ON \`payment_links\` (\`merchant_id\`,\`is_active\`)`,
+
+  `CREATE TABLE IF NOT EXISTS \`consumed_trx_ids\` (
+    \`merchant_id\` text NOT NULL,
+    \`trx_id\` text NOT NULL,
+    \`provider\` text NOT NULL,
+    \`payment_intent_id\` text,
+    \`external_ref_id\` text,
+    \`resolution_source\` text NOT NULL,
+    \`consumed_at\` integer NOT NULL,
+    PRIMARY KEY(\`merchant_id\`, \`trx_id\`),
+    FOREIGN KEY (\`merchant_id\`) REFERENCES \`merchants\`(\`id\`) ON UPDATE no action ON DELETE no action
+  )`,
 
   // 0006_admin_auth_sessions
   `CREATE TABLE IF NOT EXISTS \`admin_users\` (
@@ -65,10 +153,43 @@ const RUNTIME_SCHEMA_STATEMENTS: readonly string[] = [
   `CREATE INDEX IF NOT EXISTS \`idx_admin_audit_action\` ON \`admin_audit_logs\` (\`action\`)`,
 ];
 
+const ALTER_COLUMN_STATEMENTS: readonly string[] = [
+  `ALTER TABLE \`merchants\` ADD COLUMN \`verification_mode\` text DEFAULT 'AUTO' NOT NULL`,
+  `ALTER TABLE \`merchants\` ADD COLUMN \`allow_base_amount_fallback\` integer DEFAULT 1 NOT NULL`,
+  `ALTER TABLE \`merchants\` ADD COLUMN \`receipt_policy\` text DEFAULT 'OFFLINE_OPTIONAL' NOT NULL`,
+  `ALTER TABLE \`merchants\` ADD COLUMN \`late_sms_auto_approve\` integer DEFAULT 0 NOT NULL`,
+  `ALTER TABLE \`merchants\` ADD COLUMN \`enabled_modules_json\` text DEFAULT '{"ecommerce_fulfillment":true,"phone_otp":false,"telegram_alerts":false}' NOT NULL`,
+  `ALTER TABLE \`merchants\` ADD COLUMN \`allowed_callback_origins_json\` text DEFAULT '[]' NOT NULL`,
+  `ALTER TABLE \`merchants\` ADD COLUMN \`api_key_hash\` text`,
+  `ALTER TABLE \`merchants\` ADD COLUMN \`api_key_prefix\` text`,
+  `ALTER TABLE \`merchants\` ADD COLUMN \`publishable_key\` text`,
+  `ALTER TABLE \`merchants\` ADD COLUMN \`telegram_bot_token\` text`,
+  `ALTER TABLE \`merchants\` ADD COLUMN \`telegram_chat_id\` text`,
+  `ALTER TABLE \`checkout_sessions\` ADD COLUMN \`payment_intent_id\` text`,
+  `ALTER TABLE \`checkout_sessions\` ADD COLUMN \`vertical\` text DEFAULT 'ecommerce' NOT NULL`,
+  `ALTER TABLE \`checkout_sessions\` ADD COLUMN \`display_json\` text`,
+  `ALTER TABLE \`checkout_sessions\` ADD COLUMN \`actions_json\` text`,
+  `ALTER TABLE \`verification_queue\` ADD COLUMN \`payment_intent_id\` text`,
+  `ALTER TABLE \`verification_queue\` ADD COLUMN \`receipt_asset_id\` text`,
+  `ALTER TABLE \`verification_queue\` ADD COLUMN \`receipt_url\` text`,
+  `ALTER TABLE \`verification_queue\` ADD COLUMN \`escalation_reason\` text`,
+  `ALTER TABLE \`verification_queue\` ADD COLUMN \`escalated_at\` integer`,
+  `ALTER TABLE \`verification_queue\` ADD COLUMN \`resolved_at\` integer`,
+  `ALTER TABLE \`sms_ledger\` ADD COLUMN \`payment_intent_id\` text`,
+  `ALTER TABLE \`merchant_orders\` ADD COLUMN \`payment_intent_id\` text`,
+];
+
+const POST_ALTER_INDEX_STATEMENTS: readonly string[] = [
+  `CREATE INDEX IF NOT EXISTS \`idx_merchants_api_key_hash\` ON \`merchants\` (\`api_key_hash\`)`,
+  `CREATE INDEX IF NOT EXISTS \`idx_queue_intent\` ON \`verification_queue\` (\`payment_intent_id\`)`,
+];
+
 const CORE_HEALTH_TABLES = [
   'merchants',
   'app_releases',
   'payment_intents',
+  'payment_links',
+  'consumed_trx_ids',
   'admin_users',
   'admin_sessions',
   'admin_audit_logs',
@@ -76,15 +197,50 @@ const CORE_HEALTH_TABLES = [
 
 let schemaReadyPromise: Promise<void> | null = null;
 
+function isIgnorableSchemaError(err: unknown): boolean {
+  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  return (
+    msg.includes('duplicate column name') ||
+    msg.includes('already exists') ||
+    msg.includes('no such table')
+  );
+}
+
 /**
- * Idempotently ensures runtime-critical D1 tables (`app_releases`, `admin_users`,
- * `admin_sessions`, `admin_audit_logs`) exist even if remote migrations lag behind.
+ * Idempotently ensures runtime-critical D1 tables and v2 columns (`app_releases`,
+ * `payment_intents`, `payment_links`, `consumed_trx_ids`, `admin_*`) exist even if
+ * remote migrations lag behind.
  */
-export function ensureRuntimeSchema(db: AppDb): Promise<void> {
+export function ensureRuntimeSchema(
+  db: AppDb,
+  options?: { force?: boolean }
+): Promise<void> {
+  if (options?.force) {
+    schemaReadyPromise = null;
+  }
+
   if (!schemaReadyPromise) {
     schemaReadyPromise = (async () => {
-      for (const stmt of RUNTIME_SCHEMA_STATEMENTS) {
+      for (const stmt of CORE_TABLE_STATEMENTS) {
         await db.run(sql.raw(stmt));
+      }
+      for (const alterStmt of ALTER_COLUMN_STATEMENTS) {
+        try {
+          await db.run(sql.raw(alterStmt));
+        } catch (err) {
+          if (!isIgnorableSchemaError(err)) {
+            throw err;
+          }
+        }
+      }
+      for (const idxStmt of POST_ALTER_INDEX_STATEMENTS) {
+        try {
+          await db.run(sql.raw(idxStmt));
+        } catch (err) {
+          if (!isIgnorableSchemaError(err)) {
+            throw err;
+          }
+        }
       }
     })().catch((err) => {
       schemaReadyPromise = null;
