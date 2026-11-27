@@ -77,14 +77,14 @@ export function isQuotaOrRateLimitError(statusCode?: number, errorText?: string)
  * Parses an optional comma-separated priority override (e.g. "aws_ses,resend,brevo")
  * and appends any remaining default providers so fallback coverage is never lost.
  */
-export function resolveProviderOrder(
+export function resolveProviderOrder<T extends string = string>(
   overrideCsv: string | undefined,
-  defaults: readonly string[],
+  defaults: readonly T[],
   preferredProvider?: string
-): string[] {
-  const ordered: string[] = [];
+): T[] {
+  const ordered: T[] = [];
   const pushUnique = (id: string) => {
-    const clean = id.trim().toLowerCase();
+    const clean = id.trim().toLowerCase() as T;
     if (clean && defaults.includes(clean) && !ordered.includes(clean)) {
       ordered.push(clean);
     }

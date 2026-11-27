@@ -288,7 +288,10 @@ export async function payPublicPaymentLink(
 
   const externalRefId = `lnk_${link.slug}_${generateSecureToken(6).toUpperCase()}`;
   const display = parseDisplayMetadata(link.displayJson, merchant.storeName, externalRefId);
-  const actions = parseActionsList(link.actionsJson);
+  const actions = parseActionsList(link.actionsJson).map((action) => ({
+    ...action,
+    style: action.style ?? ('secondary' as const),
+  }));
 
   const intentResult = await createPaymentIntent(
     db,
