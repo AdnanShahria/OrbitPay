@@ -9,26 +9,28 @@ export interface ParsedMfsResult {
 
 const AMOUNT = '([0-9][0-9,]*(?:\\.[0-9]{1,2})?)';
 const CURRENCY = '(?:Tk\\.?|BDT)';
+const BKASH_CURRENCY = 'Tk\\.?';
 const PHONE_CAPTURE = '((?:\\+?88)?01[3-9]\\d{8})';
 const ROCKET_PHONE_CAPTURE = '((?:\\+?88)?01[3-9]\\d{8}[A-Za-z0-9]?)';
 const TRX_ID = '(?:TrxID|TxnID|TxnId):?\\s*([A-Za-z0-9]+)';
+const BKASH_TRX_ID = 'TrxID:?\\s*([A-Za-z0-9]+)';
 
 export const PROVIDER_PARSERS = {
   // 1. bKash (Personal Send Money, PRA Payment, Cash In, Fallback)
   BKASH_PERSONAL: new RegExp(
-    `You have received\\s+(?:payment\\s+)?${CURRENCY}\\s*${AMOUNT}\\.?\\s+from\\s+${PHONE_CAPTURE}(?!\\d)[\\s\\S]*?${TRX_ID}`,
+    `You have received\\s+(?:payment\\s+)?${BKASH_CURRENCY}\\s*${AMOUNT}\\.?\\s+from\\s+${PHONE_CAPTURE}(?!\\d)[\\s\\S]*?${BKASH_TRX_ID}`,
     'i'
   ),
   BKASH_PRA: new RegExp(
-    `Payment received\\s+${CURRENCY}\\s*${AMOUNT}\\.?\\s+from\\s+${PHONE_CAPTURE}(?!\\d)[\\s\\S]*?${TRX_ID}`,
+    `Payment received\\s+${BKASH_CURRENCY}\\s*${AMOUNT}\\.?\\s+from\\s+${PHONE_CAPTURE}(?!\\d)[\\s\\S]*?${BKASH_TRX_ID}`,
     'i'
   ),
   BKASH_CASH_IN: new RegExp(
-    `Cash\\s+In\\s+${CURRENCY}\\s*${AMOUNT}\\.?\\s+from\\s+${PHONE_CAPTURE}(?!\\d)[\\s\\S]*?${TRX_ID}`,
+    `Cash\\s+In\\s+${BKASH_CURRENCY}\\s*${AMOUNT}\\.?\\s+from\\s+${PHONE_CAPTURE}(?!\\d)[\\s\\S]*?${BKASH_TRX_ID}`,
     'i'
   ),
   BKASH_FALLBACK: new RegExp(
-    `(?:received|Payment)\\s+(?:${CURRENCY}\\s*)?${AMOUNT}\\.?\\s+from\\s+${PHONE_CAPTURE}(?!\\d)[\\s\\S]*?${TRX_ID}`,
+    `(?:received|Payment)\\s+(?:${BKASH_CURRENCY}\\s*)?${AMOUNT}\\.?\\s+from\\s+${PHONE_CAPTURE}(?!\\d)[\\s\\S]*?${BKASH_TRX_ID}`,
     'i'
   ),
 

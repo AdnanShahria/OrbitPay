@@ -49,3 +49,9 @@
 -dontwarn org.bouncycastle.**
 -dontwarn org.openjsse.**
 -keepnames class okhttp3.internal.publicsuffix.PublicSuffixDatabase
+
+# Strip verbose/debug logs in release builds so sensitive payloads never reach logcat
+-assumenosideeffects class android.util.Log {
+    public static int v(...);
+    public static int d(...);
+}

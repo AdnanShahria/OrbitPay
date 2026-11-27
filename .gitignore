@@ -35,6 +35,8 @@ local.properties
 google-services.json
 *-firebase-adminsdk-*.json
 keystore.properties
+*.jks
+*.keystore
 
 # Codebase Memory
 .codebase-memory/artifact.json

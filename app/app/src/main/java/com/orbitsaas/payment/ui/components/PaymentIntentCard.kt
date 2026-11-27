@@ -306,11 +306,11 @@ fun PaymentIntentCard(
             if (hasMfsDetails) {
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    itemVerticalAlignment = Alignment.CenterVertically
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     intent.provider?.takeIf { it.isNotBlank() }?.let { prov ->
                         Row(
+                            modifier = Modifier.align(Alignment.CenterVertically),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
@@ -326,6 +326,7 @@ fun PaymentIntentCard(
                     intent.trxId?.takeIf { it.isNotBlank() }?.let { trx ->
                         Text(
                             text = "TrxID: $trx",
+                            modifier = Modifier.align(Alignment.CenterVertically),
                             style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum"),
                             fontFamily = FontFamily.Monospace,
                             color = MaterialTheme.colorScheme.onSurface
@@ -334,6 +335,7 @@ fun PaymentIntentCard(
                     intent.senderNumber?.takeIf { it.isNotBlank() }?.let { sender ->
                         Text(
                             text = sender,
+                            modifier = Modifier.align(Alignment.CenterVertically),
                             style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum"),
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

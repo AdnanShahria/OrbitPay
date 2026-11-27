@@ -16,9 +16,11 @@ object MfsParser {
 
     private const val AMT = """([0-9][0-9,]*(?:\.[0-9]{1,2})?)"""
     private const val TK = """(?:Tk\.?|BDT)"""
+    private const val BKASH_TK = """Tk\.?"""
     private const val PHONE_CAPTURE = """((?:\+?88)?01[3-9]\d{8})"""
     private const val ROCKET_PHONE_CAPTURE = """((?:\+?88)?01[3-9]\d{8}[A-Za-z0-9]?)"""
     private const val TRX_CAPTURE = """(?:TrxID|TxnID|TxnId):?\s*([A-Za-z0-9]+)"""
+    private const val BKASH_TRX_CAPTURE = """TrxID:?\s*([A-Za-z0-9]+)"""
     private val BD_PHONE_REGEX = Regex("""^01[3-9]\d{8}$""")
 
     private val OUTGOING_OR_OTP_REGEX = Pattern.compile(
@@ -26,24 +28,24 @@ object MfsParser {
         Pattern.CASE_INSENSITIVE or Pattern.DOTALL
     )
 
-    // 1. bKash Patterns
+    // 1. bKash Patterns (strictly Tk + TrxID to prevent Nagad BDT/TxnID spoof collisions)
     private val BKASH_PERSONAL_REGEX = Pattern.compile(
-        """You have received\s+(?:payment\s+)?$TK\s*$AMT\.?\s+from\s+$PHONE_CAPTURE(?!\d).*?$TRX_CAPTURE""",
+        """You have received\s+(?:payment\s+)?$BKASH_TK\s*$AMT\.?\s+from\s+$PHONE_CAPTURE(?!\d).*?$BKASH_TRX_CAPTURE""",
         Pattern.CASE_INSENSITIVE or Pattern.DOTALL
     )
 
     private val BKASH_PRA_REGEX = Pattern.compile(
-        """Payment received\s+$TK\s*$AMT\.?\s+from\s+$PHONE_CAPTURE(?!\d).*?$TRX_CAPTURE""",
+        """Payment received\s+$BKASH_TK\s*$AMT\.?\s+from\s+$PHONE_CAPTURE(?!\d).*?$BKASH_TRX_CAPTURE""",
         Pattern.CASE_INSENSITIVE or Pattern.DOTALL
     )
 
     private val BKASH_CASHIN_REGEX = Pattern.compile(
-        """Cash\s+In\s+$TK\s*$AMT\.?\s+from\s+$PHONE_CAPTURE(?!\d).*?$TRX_CAPTURE""",
+        """Cash\s+In\s+$BKASH_TK\s*$AMT\.?\s+from\s+$PHONE_CAPTURE(?!\d).*?$BKASH_TRX_CAPTURE""",
         Pattern.CASE_INSENSITIVE or Pattern.DOTALL
     )
 
     private val BKASH_FALLBACK_REGEX = Pattern.compile(
-        """(?:received|Payment)\s+(?:$TK\s*)?$AMT\.?\s+from\s+$PHONE_CAPTURE(?!\d).*?$TRX_CAPTURE""",
+        """(?:received|Payment)\s+(?:$BKASH_TK\s*)?$AMT\.?\s+from\s+$PHONE_CAPTURE(?!\d).*?$BKASH_TRX_CAPTURE""",
         Pattern.CASE_INSENSITIVE or Pattern.DOTALL
     )
 

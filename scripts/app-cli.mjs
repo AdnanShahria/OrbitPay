@@ -513,9 +513,13 @@ async function handleApkBuild(rl, cfg, nonInteractive = false) {
     );
     if (bump) {
       const nextCodeStr = await ask(rl, 'New versionCode', String(currentVersions.versionCode + 1));
+      if (!/^\d+$/.test(nextCodeStr)) {
+        console.log(`${c.red}Invalid versionCode "${nextCodeStr}": must be a whole integer like 2, 3, 4 (use versionName for "${nextCodeStr}").${c.reset}`);
+        return null;
+      }
       const parsedCode = Number.parseInt(nextCodeStr, 10);
-      if (!Number.isInteger(parsedCode) || parsedCode < 1) {
-        console.log(`${c.red}Invalid versionCode.${c.reset}`);
+      if (parsedCode < 1) {
+        console.log(`${c.red}Invalid versionCode: must be >= 1.${c.reset}`);
         return null;
       }
       const parts = currentVersions.versionName.split('.').map((n) => Number.parseInt(n, 10));

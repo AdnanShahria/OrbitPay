@@ -49,7 +49,6 @@ class SmsReceiver : BroadcastReceiver() {
                     val fullBody = partList.joinToString(separator = "") {
                         it.displayMessageBody ?: it.messageBody ?: ""
                     }
-                    Log.d(TAG, "Incoming SMS from [$sender]: $fullBody")
 
                     when (val outcome = MfsParser.parse(fullBody, sender, SmsEntity.SOURCE_SMS, extraSenders)) {
                         is ParseOutcome.Accepted -> {

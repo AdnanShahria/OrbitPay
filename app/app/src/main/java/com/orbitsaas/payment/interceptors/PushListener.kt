@@ -43,8 +43,6 @@ class PushListener : NotificationListenerService() {
             .trim()
         if (combinedContent.isEmpty()) return
 
-        Log.d(TAG, "Notification received from [$packageName]: $combinedContent")
-
         serviceScope.launch {
             try {
                 val prefs = PreferencesManager(applicationContext)

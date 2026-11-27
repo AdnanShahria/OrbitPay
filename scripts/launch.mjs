@@ -10,7 +10,7 @@
  *   bun run app:studio -> Open Android app project in Android Studio
  */
 
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -39,6 +39,7 @@ const noMirror = args.includes('--no-mirror');
 const noStudio = args.includes('--no-studio');
 const noEmulator = args.includes('--no-emulator');
 const forceEmulator = args.includes('--emulator');
+const forceBuild = args.includes('--build');
 
 const c = {
   reset: '\x1b[0m',
@@ -366,7 +367,32 @@ async function handleAndroidMode() {
     isInstalled = false;
   }
 
-  if (!isInstalled) {
+  if (!isInstalled || forceBuild) {
+    if (!fs.existsSync(DEBUG_APK_PATH) || forceBuild) {
+      console.log(
+        `${c.cyan}[BUILD]${c.reset} Building debug APK via Gradle (${c.bold}assembleDebug${c.reset})...`
+      );
+      const isWin = process.platform === 'win32';
+      const gradlewCmd = isWin ? 'gradlew.bat' : './gradlew';
+      const buildRes = spawnSync(gradlewCmd, ['assembleDebug'], {
+        cwd: androidDir,
+        stdio: 'inherit',
+        shell: isWin,
+      });
+      if (buildRes.status !== 0) {
+        console.log(
+          `${c.red}[BUILD FAILED]${c.reset} Gradle assembleDebug failed (check JDK 17 / JAVA_HOME and Android SDK).`
+        );
+        console.log(
+          `You can also open ${c.bold}app/${c.reset} in Android Studio once, let Gradle sync, and click Run (▶).`
+        );
+        if (!noStudio) {
+          launchAndroidStudio();
+        }
+        return;
+      }
+    }
+
     if (fs.existsSync(DEBUG_APK_PATH)) {
       console.log(`${c.cyan}[INSTALL]${c.reset} Installing debug APK from ${DEBUG_APK_PATH}...`);
       execFileSync(adbBin, ['-s', serial, 'install', '-r', DEBUG_APK_PATH], { stdio: 'inherit' });
@@ -376,9 +402,6 @@ async function handleAndroidMode() {
         `${c.yellow}[BUILD NEEDED]${c.reset} ${ANDROID_PACKAGE} is not installed yet, and no debug APK exists at:`
       );
       console.log(`  ${DEBUG_APK_PATH}`);
-      console.log(
-        `Please open ${c.bold}app/${c.reset} in Android Studio once, let Gradle sync, and click Run (▶) to build & install.`
-      );
       if (!noStudio) {
         launchAndroidStudio();
       }
