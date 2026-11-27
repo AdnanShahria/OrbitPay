@@ -1,9 +1,14 @@
-import { useState } from 'react';
+import { useState, type FormEvent } from 'react';
 import {
   RiAddLine,
   RiCheckLine,
+  RiDeleteBinLine,
+  RiEditLine,
+  RiErrorWarningLine,
   RiExternalLinkLine,
+  RiEyeLine,
   RiFileCopyLine,
+  RiGlobalLine,
   RiPauseLine,
   RiPlayLine,
   RiShieldKeyholeLine,
@@ -11,6 +16,7 @@ import {
   RiSmartphoneLine,
   RiSparklingLine,
   RiStore2Line,
+  RiTimeLine,
 } from '@remixicon/react';
 import { Chip } from '@/components/base/badges/chip';
 import { StatusDot } from '@/components/base/badges/status-dot';
@@ -18,6 +24,7 @@ import { Button } from '@/components/base/buttons/button';
 import { Card } from '@/components/base/card/card';
 import { Input } from '@/components/base/input/input';
 import {
+  AlertDialog,
   Modal,
   ModalBody,
   ModalFooter,
@@ -36,9 +43,11 @@ import {
 import { toast } from '@/components/base/toast/toast';
 import { formatBDT, formatDate } from '@/shared/utils/format';
 import { AddProjectModal } from './AddProjectModal';
+import { ProjectInspectDrawer } from './ProjectInspectDrawer';
 import { ProjectUsersModal } from './ProjectUsersModal';
 import {
   type AdminProjectSummary,
+  useDeleteProjectMutation,
   useSeedDemoProjectsMutation,
   useUpdateProjectMutation,
 } from './useAdmin';
@@ -54,15 +63,25 @@ export function ProjectManagerTable({
 }: ProjectManagerTableProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [selectedCreds, setSelectedCreds] = useState<AdminProjectSummary | null>(
-    null,
-  );
-  const [selectedUsersProject, setSelectedUsersProject] = useState<AdminProjectSummary | null>(
-    null,
-  );
+  const [selectedCreds, setSelectedCreds] = useState<AdminProjectSummary | null>(null);
+  const [selectedUsersProject, setSelectedUsersProject] = useState<AdminProjectSummary | null>(null);
+  const [inspectedProject, setInspectedProject] = useState<AdminProjectSummary | null>(null);
+
+  // Edit modal state
+  const [editingProject, setEditingProject] = useState<AdminProjectSummary | null>(null);
+  const [editStoreName, setEditStoreName] = useState('');
+  const [editWebhookUrl, setEditWebhookUrl] = useState('');
+  const [editGracePeriod, setEditGracePeriod] = useState('60');
+  const [editError, setEditError] = useState<string | null>(null);
+
+  // Delete confirmation state
+  const [deletingProject, setDeletingProject] = useState<AdminProjectSummary | null>(null);
+  const [deleteConfirmInput, setDeleteConfirmInput] = useState('');
+
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   const updateMutation = useUpdateProjectMutation();
+  const deleteMutation = useDeleteProjectMutation();
   const seedMutation = useSeedDemoProjectsMutation();
 
   const filteredProjects = projects.filter(
@@ -83,6 +102,76 @@ export function ProjectManagerTable({
       );
     } catch {
       toast.error(`Failed to update ${p.storeName}`);
+    }
+  };
+
+  const openEditModal = (p: AdminProjectSummary) => {
+    setEditingProject(p);
+    setEditStoreName(p.storeName);
+    setEditWebhookUrl(p.webhookUrl || '');
+    setEditGracePeriod(String(p.gracePeriodMinutes || 60));
+    setEditError(null);
+  };
+
+  const handleSaveEdit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!editingProject || updateMutation.isPending) return;
+
+    const trimmedName = editStoreName.trim();
+    const trimmedWebhook = editWebhookUrl.trim();
+    const parsedGrace = Number(editGracePeriod);
+
+    if (trimmedName.length < 2) {
+      setEditError('Storefront name must be at least 2 characters.');
+      return;
+    }
+    if (!Number.isInteger(parsedGrace) || parsedGrace < 5 || parsedGrace > 1440) {
+      setEditError('Grace period must be an integer between 5 and 1440 minutes.');
+      return;
+    }
+
+    setEditError(null);
+    try {
+      await updateMutation.mutateAsync({
+        id: editingProject.id,
+        updates: {
+          storeName: trimmedName,
+          webhookUrl: trimmedWebhook,
+          gracePeriodMinutes: parsedGrace,
+        },
+      });
+      toast.success(`Updated ${trimmedName}`);
+      setEditingProject(null);
+    } catch (err: unknown) {
+      setEditError(
+        err instanceof Error ? err.message : 'Failed to update storefront settings',
+      );
+    }
+  };
+
+  const openDeleteDialog = (p: AdminProjectSummary) => {
+    setDeletingProject(p);
+    setDeleteConfirmInput('');
+  };
+
+  const isDeleteMatch = Boolean(
+    deletingProject &&
+      (deleteConfirmInput.trim() === deletingProject.id ||
+        deleteConfirmInput.trim() === deletingProject.storeName),
+  );
+
+  const handleConfirmDelete = async () => {
+    if (!deletingProject || !isDeleteMatch) return;
+    try {
+      await deleteMutation.mutateAsync(deletingProject.id);
+      toast.success(`Deleted storefront ${deletingProject.storeName}`);
+      setDeletingProject(null);
+      setDeleteConfirmInput('');
+    } catch (err: unknown) {
+      toast.error(
+        err instanceof Error ? err.message : 'Failed to delete storefront',
+      );
+      throw err;
     }
   };
 
@@ -273,7 +362,27 @@ export function ProjectManagerTable({
                   </TableCell>
 
                   <TableCell className="text-end">
-                    <div className="flex items-center justify-end gap-1.5">
+                    <div className="flex flex-wrap items-center justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="small"
+                        onClick={() => setInspectedProject(p)}
+                        leadingIcon={RiEyeLine}
+                        title="Inspect SIM wallets, SMS ledger, and orders"
+                      >
+                        Inspect
+                      </Button>
+
+                      <Button
+                        variant="ghost"
+                        size="small"
+                        onClick={() => openEditModal(p)}
+                        leadingIcon={RiEditLine}
+                        title="Edit storefront settings"
+                      >
+                        Edit
+                      </Button>
+
                       <Button
                         variant="ghost"
                         size="small"
@@ -306,6 +415,17 @@ export function ProjectManagerTable({
                       >
                         {p.isActive ? 'Pause' : 'Resume'}
                       </Button>
+
+                      <Button
+                        variant="ghost"
+                        size="small"
+                        onClick={() => openDeleteDialog(p)}
+                        leadingIcon={RiDeleteBinLine}
+                        className="text-text-destructive"
+                        title="Delete Storefront"
+                      >
+                        Delete
+                      </Button>
                     </div>
                   </TableCell>
                 </TableRow>
@@ -321,11 +441,131 @@ export function ProjectManagerTable({
         onClose={() => setIsAddModalOpen(false)}
       />
 
+      {/* Live Project Inspection Drawer */}
+      <ProjectInspectDrawer
+        project={inspectedProject}
+        onClose={() => setInspectedProject(null)}
+      />
+
       {/* Provisioned Users & JWT Sessions Modal */}
       <ProjectUsersModal
         project={selectedUsersProject}
         onClose={() => setSelectedUsersProject(null)}
       />
+
+      {/* Edit Storefront Modal */}
+      <Modal
+        isOpen={editingProject !== null}
+        onOpenChange={(open) => !open && setEditingProject(null)}
+        size="md"
+      >
+        {editingProject && (
+          <form onSubmit={handleSaveEdit} className="flex min-h-0 flex-1 flex-col gap-4">
+            <ModalHeader
+              title={`Edit Storefront: ${editingProject.storeName}`}
+              description={`Update storefront metadata and callback settings for ${editingProject.id}.`}
+              icon={RiEditLine}
+            />
+            <ModalBody className="space-y-4">
+              <Input
+                label="Storefront Name"
+                value={editStoreName}
+                onChange={setEditStoreName}
+                leadingIcon={RiStore2Line}
+                isRequired
+              />
+              <Input
+                label="Store Webhook Callback URL"
+                type="url"
+                placeholder="https://client-store.com/payment/v1"
+                value={editWebhookUrl}
+                onChange={setEditWebhookUrl}
+                leadingIcon={RiGlobalLine}
+                inputClassName="font-mono"
+                hint="Leave empty if only verifying payments via portal."
+              />
+              <Input
+                label="Grace Period (Minutes)"
+                type="number"
+                value={editGracePeriod}
+                onChange={setEditGracePeriod}
+                leadingIcon={RiTimeLine}
+                inputClassName="font-mono tabular-nums"
+                hint="Accepted range: 5 to 1440 minutes."
+              />
+
+              {editError && (
+                <div
+                  role="alert"
+                  className="rounded-xl border border-border-error-default/20 bg-notification-error-background px-3 py-2 text-caption-1-medium text-notification-error-foreground flex items-center gap-2"
+                >
+                  <RiErrorWarningLine className="size-4 shrink-0" aria-hidden />
+                  <span>{editError}</span>
+                </div>
+              )}
+            </ModalBody>
+            <ModalFooter>
+              <Button
+                type="button"
+                variant="ghost"
+                size="medium"
+                onClick={() => setEditingProject(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                variant="primary"
+                size="medium"
+                isLoading={updateMutation.isPending}
+              >
+                Save Changes
+              </Button>
+            </ModalFooter>
+          </form>
+        )}
+      </Modal>
+
+      {/* Delete Storefront AlertDialog */}
+      <AlertDialog
+        isOpen={deletingProject !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeletingProject(null);
+            setDeleteConfirmInput('');
+          }
+        }}
+        variant="danger"
+        title={
+          deletingProject
+            ? `Delete ${deletingProject.storeName}?`
+            : 'Delete storefront?'
+        }
+        description="This permanently removes the storefront, its SIM wallets, merchant accounts, and ledger associations. This action cannot be undone."
+        confirmLabel="Delete Storefront"
+        pendingLabel="Deleting..."
+        isConfirmDisabled={!isDeleteMatch}
+        onConfirm={handleConfirmDelete}
+      >
+        {deletingProject && (
+          <div className="space-y-3 pt-1">
+            <p className="text-caption-1-regular text-text-secondary">
+              Type{' '}
+              <span className="font-mono text-text-primary">{deletingProject.id}</span>{' '}
+              or{' '}
+              <span className="font-mono text-text-primary">{deletingProject.storeName}</span>{' '}
+              to confirm deletion.
+            </p>
+            <Input
+              aria-label="Confirm storefront deletion"
+              placeholder={deletingProject.id}
+              value={deleteConfirmInput}
+              onChange={setDeleteConfirmInput}
+              inputClassName="font-mono"
+            />
+          </div>
+        )}
+      </AlertDialog>
 
       {/* Credentials Dialog */}
       <Modal

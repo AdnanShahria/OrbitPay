@@ -557,3 +557,66 @@ export const consumedTrxIds = sqliteTable('consumed_trx_ids', {
 
 export type ConsumedTrxIdRecord = typeof consumedTrxIds.$inferSelect;
 export type NewConsumedTrxId = typeof consumedTrxIds.$inferInsert;
+
+// 19. Master Admin Users, Sessions & Audit Logs
+export const ADMIN_ROLES = ['SUPER_ADMIN', 'ADMIN_OPERATOR'] as const;
+export type AdminRole = (typeof ADMIN_ROLES)[number];
+
+export const ADMIN_AUTH_METHODS = ['PASSWORD', 'MASTER_KEY'] as const;
+export type AdminAuthMethod = (typeof ADMIN_AUTH_METHODS)[number];
+
+export const adminUsers = sqliteTable('admin_users', {
+  id: text('id').primaryKey(), // adm_xxxx
+  email: text('email').notNull(),
+  fullName: text('full_name').notNull(),
+  passwordHash: text('password_hash').notNull(),
+  role: text('role', { enum: ADMIN_ROLES }).default('ADMIN_OPERATOR').notNull(),
+  isActive: integer('is_active', { mode: 'boolean' }).default(true).notNull(),
+  lastLoginAt: integer('last_login_at', { mode: 'timestamp' }),
+  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).$defaultFn(() => new Date()).notNull(),
+}, (table) => ({
+  uniqueAdminEmail: uniqueIndex('unique_admin_user_email').on(table.email),
+}));
+
+export const adminSessions = sqliteTable('admin_sessions', {
+  id: text('id').primaryKey(), // ases_xxxx
+  adminUserId: text('admin_user_id'),
+  adminEmail: text('admin_email'),
+  authMethod: text('auth_method', { enum: ADMIN_AUTH_METHODS }).notNull(),
+  role: text('role', { enum: ADMIN_ROLES }).notNull(),
+  ipAddress: text('ip_address'),
+  userAgent: text('user_agent'),
+  lastSeenAt: integer('last_seen_at', { mode: 'timestamp' }),
+  expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+  revokedAt: integer('revoked_at', { mode: 'timestamp' }),
+  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()).notNull(),
+}, (table) => ({
+  activeIdx: index('idx_admin_sessions_active').on(table.revokedAt, table.expiresAt),
+  userIdx: index('idx_admin_sessions_user').on(table.adminUserId),
+}));
+
+export const adminAuditLogs = sqliteTable('admin_audit_logs', {
+  id: text('id').primaryKey(), // aud_xxxx
+  adminUserId: text('admin_user_id'),
+  adminEmail: text('admin_email'),
+  sessionId: text('session_id'),
+  action: text('action').notNull(),
+  targetType: text('target_type'),
+  targetId: text('target_id'),
+  metadataJson: text('metadata_json'),
+  ipAddress: text('ip_address'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()).notNull(),
+}, (table) => ({
+  createdIdx: index('idx_admin_audit_created').on(table.createdAt),
+  actionIdx: index('idx_admin_audit_action').on(table.action),
+}));
+
+export type AdminUserRecord = typeof adminUsers.$inferSelect;
+export type NewAdminUser = typeof adminUsers.$inferInsert;
+
+export type AdminSessionRecord = typeof adminSessions.$inferSelect;
+export type NewAdminSession = typeof adminSessions.$inferInsert;
+
+export type AdminAuditLogRecord = typeof adminAuditLogs.$inferSelect;
+export type NewAdminAuditLog = typeof adminAuditLogs.$inferInsert;

@@ -63,7 +63,119 @@ export interface QueueSummaryItem {
   storeName: string | null;
 }
 
+export interface AdminUserProfile {
+  id: string;
+  email: string;
+  fullName: string | null;
+  role: 'SUPER_ADMIN' | 'ADMIN_OPERATOR' | 'MASTER_ADMIN' | string;
+  isActive?: boolean;
+  lastLoginAt?: string | null;
+  createdAt?: string;
+}
+
+export interface AdminAuthSessionInfo {
+  id: string;
+  adminUserId?: string | null;
+  adminEmail?: string | null;
+  email?: string | null;
+  role?: string;
+  authMethod?: string;
+  ipAddress?: string | null;
+  userAgent?: string | null;
+  expiresAt: string;
+  revokedAt?: string | null;
+  createdAt?: string;
+}
+
+export interface AdminAuditLogItem {
+  id: string;
+  action: string;
+  adminUserId?: string | null;
+  adminEmail?: string | null;
+  actorId?: string | null;
+  actorEmail?: string | null;
+  actorRole?: string | null;
+  targetType?: string | null;
+  targetId?: string | null;
+  metadataJson?: string | null;
+  details?: string | null;
+  ipAddress?: string | null;
+  createdAt: string;
+}
+
+export interface AdminSecurityState {
+  hasAdminUsers: boolean;
+  currentAdmin?: AdminUserProfile | null;
+  currentSession?: AdminAuthSessionInfo | null;
+  adminUsers: AdminUserProfile[];
+  sessions: AdminAuthSessionInfo[];
+  auditLogs: AdminAuditLogItem[];
+}
+
+export interface AdminSystemTableStatus {
+  name: string;
+  exists: boolean;
+  rowCount?: number;
+}
+
+export interface AdminSystemHealth {
+  environment: string;
+  simulatorEnabled: boolean;
+  r2Configured: boolean;
+  pushHubConfigured: boolean;
+  fcmConfigured: boolean;
+  schemaHealthy: boolean;
+  missingTables: string[];
+  tables: AdminSystemTableStatus[];
+  checkedAt?: string;
+}
+
+export interface AdminProjectInspectWallet {
+  id: string;
+  provider: string;
+  accountType: string;
+  walletNumber: string;
+  monthlyVolumeLimit: number;
+  currentMonthVolume: number;
+  isPrimary: boolean;
+  isActive: boolean;
+}
+
+export interface AdminProjectInspectLedgerItem {
+  id: string;
+  provider: string;
+  trxId: string;
+  amount: number;
+  senderNumber: string;
+  status: string;
+  createdAt: string;
+}
+
+export interface AdminProjectInspectOrderItem {
+  id: string;
+  externalOrderId: string;
+  customerName?: string | null;
+  customerEmail?: string | null;
+  baseAmount?: number;
+  uniqueAmount?: number | null;
+  paidAmount?: number | null;
+  totalAmount?: number;
+  expectedAmount?: number;
+  amount?: number;
+  paymentStatus: string;
+  orderStatus: string;
+  createdAt?: string;
+}
+
+export interface AdminProjectInspectData {
+  project: AdminProjectSummary;
+  wallets: AdminProjectInspectWallet[];
+  recentSms: AdminProjectInspectLedgerItem[];
+  recentOrders: AdminProjectInspectOrderItem[];
+}
+
 export const ADMIN_KEY_STORAGE = 'orbit_master_admin_key';
+export const ADMIN_TOKEN_STORAGE = 'orbit_admin_jwt';
 export const ADMIN_UNAUTHORIZED_EVENT = 'orbit:admin-unauthorized';
 
 export function getStoredAdminKey(): string | null {
@@ -90,14 +202,47 @@ export function clearStoredAdminKey(): void {
   }
 }
 
+export function getStoredAdminToken(): string | null {
+  try {
+    return sessionStorage.getItem(ADMIN_TOKEN_STORAGE);
+  } catch {
+    return null;
+  }
+}
+
+export function setStoredAdminToken(token: string): void {
+  try {
+    sessionStorage.setItem(ADMIN_TOKEN_STORAGE, token.trim());
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
+export function clearStoredAdminToken(): void {
+  try {
+    sessionStorage.removeItem(ADMIN_TOKEN_STORAGE);
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+export function hasAdminCredentials(): boolean {
+  return Boolean(getStoredAdminToken()?.trim() || getStoredAdminKey()?.trim());
+}
+
 /**
  * Authenticated fetch wrapper for Root Admin Hub API calls.
- * Reads the current key dynamically at request time and clears stale keys on 401.
+ * Prefers Admin JWT (`Authorization: Bearer`) and includes `x-admin-key` if present.
+ * Clears stale credentials and broadcasts `ADMIN_UNAUTHORIZED_EVENT` on HTTP 401.
  */
 export async function adminFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+  const adminToken = getStoredAdminToken()?.trim() || '';
   const adminKey = getStoredAdminKey()?.trim() || '';
   const headers = new Headers(init.headers);
 
+  if (adminToken && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${adminToken}`);
+  }
   if (adminKey && !headers.has('x-admin-key')) {
     headers.set('x-admin-key', adminKey);
   }
@@ -108,8 +253,12 @@ export async function adminFetch(input: RequestInfo | URL, init: RequestInit = {
   });
 
   if (res.status === 401) {
+    const currentToken = getStoredAdminToken()?.trim() || '';
     const currentKey = getStoredAdminKey()?.trim() || '';
-    if (adminKey && currentKey === adminKey) {
+    const sameToken = adminToken && currentToken === adminToken;
+    const sameKey = adminKey && currentKey === adminKey;
+    if (sameToken || sameKey) {
+      clearStoredAdminToken();
       clearStoredAdminKey();
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent(ADMIN_UNAUTHORIZED_EVENT));
@@ -120,25 +269,101 @@ export async function adminFetch(input: RequestInfo | URL, init: RequestInit = {
   return res;
 }
 
+interface AdminAuthVerifyPayload {
+  accessToken?: string;
+  token?: string;
+  role?: string;
+  admin?: AdminUserProfile | null;
+  session?: AdminAuthSessionInfo | null;
+  hasAdminUsers?: boolean;
+}
+
 export function useAdminAuth() {
   const queryClient = useQueryClient();
   const [adminKey, setAdminKey] = useState<string | null>(() => getStoredAdminKey());
+  const [admin, setAdmin] = useState<AdminUserProfile | null>(null);
+  const [session, setSession] = useState<AdminAuthSessionInfo | null>(null);
+  const [hasAdminUsers, setHasAdminUsers] = useState<boolean | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
-  const [isVerifying, setIsVerifying] = useState<boolean>(() => Boolean(getStoredAdminKey()?.trim()));
+  const [isVerifying, setIsVerifying] = useState<boolean>(() => hasAdminCredentials());
+  const [isLoggingOut, setIsLoggingOut] = useState<boolean>(false);
 
   const clearAdminSession = useCallback(() => {
+    clearStoredAdminToken();
     clearStoredAdminKey();
     setAdminKey(null);
+    setAdmin(null);
+    setSession(null);
     setIsAuthenticated(false);
     setIsVerifying(false);
     queryClient.removeQueries({ queryKey: ['admin'] });
   }, [queryClient]);
 
-  useEffect(() => {
-    let active = true;
+  const applyVerifiedPayload = useCallback(
+    (payload: AdminAuthVerifyPayload | null | undefined, fallbackKey?: string) => {
+      const jwt = payload?.accessToken ?? payload?.token;
+      if (jwt) {
+        setStoredAdminToken(jwt);
+      }
+      if (payload?.admin !== undefined) {
+        setAdmin(payload.admin ?? null);
+      } else if (payload?.role) {
+        setAdmin({
+          id: 'master_admin',
+          email: 'Master Security Key',
+          fullName: 'Master Admin',
+          role: payload.role,
+        });
+      }
+      if (payload?.session !== undefined) {
+        setSession(payload.session ?? null);
+      }
+      if (typeof payload?.hasAdminUsers === 'boolean') {
+        setHasAdminUsers(payload.hasAdminUsers);
+      }
+      if (fallbackKey) {
+        setAdminKey(fallbackKey);
+      }
+      setIsAuthenticated(true);
+      setIsVerifying(false);
+    },
+    [],
+  );
+
+  const refreshAuth = useCallback(async () => {
+    const storedToken = getStoredAdminToken()?.trim();
     const storedKey = getStoredAdminKey()?.trim();
 
-    if (!storedKey) {
+    if (storedToken) {
+      const res = await adminFetch('/api/v1/admin/auth/me');
+      const json = await res.json().catch(() => null);
+      if (res.ok && json?.success) {
+        applyVerifiedPayload(json.data as AdminAuthVerifyPayload);
+        return true;
+      }
+      clearStoredAdminToken();
+    }
+
+    if (storedKey) {
+      const res = await fetch('/api/v1/admin/auth/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ adminKey: storedKey }),
+      });
+      const json = await res.json().catch(() => null);
+      if (res.ok && json?.success) {
+        applyVerifiedPayload(json.data as AdminAuthVerifyPayload, storedKey);
+        return true;
+      }
+    }
+
+    clearAdminSession();
+    return false;
+  }, [applyVerifiedPayload, clearAdminSession]);
+
+  useEffect(() => {
+    let active = true;
+    if (!hasAdminCredentials()) {
       setIsAuthenticated(false);
       setIsVerifying(false);
       return;
@@ -146,34 +371,18 @@ export function useAdminAuth() {
 
     (async () => {
       try {
-        const res = await fetch('/api/v1/admin/auth/verify', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ adminKey: storedKey }),
-        });
-        const json = await res.json().catch(() => null);
-        if (!active) return;
-
-        if (res.ok && json?.success) {
-          setAdminKey(storedKey);
-          setIsAuthenticated(true);
-        } else {
-          clearAdminSession();
-        }
+        await refreshAuth();
       } catch {
-        if (!active) return;
-        clearAdminSession();
+        if (active) clearAdminSession();
       } finally {
-        if (active) {
-          setIsVerifying(false);
-        }
+        if (active) setIsVerifying(false);
       }
     })();
 
     return () => {
       active = false;
     };
-  }, [clearAdminSession]);
+  }, [refreshAuth, clearAdminSession]);
 
   useEffect(() => {
     const handleUnauthorized = () => {
@@ -184,6 +393,47 @@ export function useAdminAuth() {
     return () => window.removeEventListener(ADMIN_UNAUTHORIZED_EVENT, handleUnauthorized);
   }, [clearAdminSession]);
 
+  const loginWithPassword = useCallback(
+    async (email: string, password: string) => {
+      const res = await fetch('/api/v1/admin/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), password }),
+      });
+      const data = await unwrapApiResponse<AdminAuthVerifyPayload>(
+        res,
+        'Invalid admin email or password',
+      );
+      clearStoredAdminKey();
+      setAdminKey(null);
+      applyVerifiedPayload(data);
+      queryClient.invalidateQueries({ queryKey: ['admin'] });
+      return data;
+    },
+    [applyVerifiedPayload, queryClient],
+  );
+
+  const loginWithMasterKey = useCallback(
+    async (key: string) => {
+      const cleanKey = key.trim();
+      const res = await fetch('/api/v1/admin/auth/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ adminKey: cleanKey }),
+      });
+      const data = await unwrapApiResponse<AdminAuthVerifyPayload>(
+        res,
+        'Invalid Master Admin Key',
+      );
+      setStoredAdminKey(cleanKey);
+      applyVerifiedPayload(data, cleanKey);
+      queryClient.invalidateQueries({ queryKey: ['admin'] });
+      return data;
+    },
+    [applyVerifiedPayload, queryClient],
+  );
+
+  // Kept compatible for callers passing a raw master key after verification
   const login = useCallback(
     (key: string) => {
       const cleanKey = key.trim();
@@ -196,16 +446,48 @@ export function useAdminAuth() {
     [queryClient],
   );
 
-  const logout = useCallback(() => {
-    clearAdminSession();
+  const logout = useCallback(async () => {
+    setIsLoggingOut(true);
+    try {
+      if (hasAdminCredentials()) {
+        await adminFetch('/api/v1/admin/auth/logout', { method: 'POST' }).catch(() => null);
+      }
+    } finally {
+      clearAdminSession();
+      setIsLoggingOut(false);
+    }
+  }, [clearAdminSession]);
+
+  const logoutAll = useCallback(async () => {
+    setIsLoggingOut(true);
+    try {
+      if (hasAdminCredentials()) {
+        await adminFetch('/api/v1/admin/auth/logout-all', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ includeCurrent: true }),
+        }).catch(() => null);
+      }
+    } finally {
+      clearAdminSession();
+      setIsLoggingOut(false);
+    }
   }, [clearAdminSession]);
 
   return {
     adminKey,
+    admin,
+    session,
+    hasAdminUsers,
     isAuthenticated,
     isVerifying,
+    isLoggingOut,
+    loginWithPassword,
+    loginWithMasterKey,
     login,
     logout,
+    logoutAll,
+    refreshAuth,
   };
 }
 
@@ -216,7 +498,7 @@ export function useAdminOverview(enabled = true) {
       const res = await adminFetch('/api/v1/admin/overview');
       return unwrapApiResponse<AdminOverviewStats>(res, 'Failed to load admin overview');
     },
-    enabled: Boolean(enabled && getStoredAdminKey()),
+    enabled: Boolean(enabled && hasAdminCredentials()),
     retry: false,
     refetchInterval: 10_000,
   });
@@ -229,7 +511,7 @@ export function useAdminProjects(enabled = true) {
       const res = await adminFetch('/api/v1/admin/projects');
       return unwrapApiResponse<AdminProjectSummary[]>(res, 'Failed to load admin projects');
     },
-    enabled: Boolean(enabled && getStoredAdminKey()),
+    enabled: Boolean(enabled && hasAdminCredentials()),
     retry: false,
     refetchInterval: 10_000,
   });
@@ -314,7 +596,7 @@ export function useAdminProjectUsers(projectId: string | null) {
         'Failed to load project users',
       );
     },
-    enabled: Boolean(getStoredAdminKey() && projectId),
+    enabled: Boolean(hasAdminCredentials() && projectId),
     retry: false,
   });
 }
@@ -431,10 +713,68 @@ export function useUpdateProjectMutation() {
       });
       return unwrapApiResponse(res, 'Failed to update project settings');
     },
+    onSuccess: (_, vars) => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'projects'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'overview'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'project-inspect', vars.id] });
+    },
+  });
+}
+
+export function useDeleteProjectMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (projectId: string): Promise<{ id: string; deleted: boolean }> => {
+      const res = await adminFetch(`/api/v1/admin/projects/${encodeURIComponent(projectId)}`, {
+        method: 'DELETE',
+      });
+      return unwrapApiResponse<{ id: string; deleted: boolean }>(res, 'Failed to delete project');
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'projects'] });
       queryClient.invalidateQueries({ queryKey: ['admin', 'overview'] });
     },
+  });
+}
+
+export function useAdminProjectInspect(projectId: string | null) {
+  return useQuery<AdminProjectInspectData>({
+    queryKey: ['admin', 'project-inspect', projectId],
+    queryFn: async () => {
+      const res = await adminFetch(
+        `/api/v1/admin/projects/${encodeURIComponent(projectId!)}/inspect`,
+      );
+      const raw = await unwrapApiResponse<Record<string, unknown>>(
+        res,
+        'Failed to inspect project telemetry',
+      );
+      const rawSms =
+        (raw.recentTransactions as Array<Record<string, unknown>> | undefined) ??
+        (raw.recentSms as Array<Record<string, unknown>> | undefined) ??
+        (raw.recentLedger as Array<Record<string, unknown>> | undefined) ??
+        [];
+      const recentSms: AdminProjectInspectLedgerItem[] = rawSms.map((item) => ({
+        id: String(item.id ?? ''),
+        provider: String(item.provider ?? ''),
+        trxId: String(item.trxId ?? ''),
+        amount: Number(item.amount ?? 0),
+        senderNumber: String(item.senderNumber ?? ''),
+        status: String(item.status ?? ''),
+        createdAt: String(item.smsReceivedAt ?? item.createdAt ?? ''),
+      }));
+      return {
+        project: raw.project as AdminProjectSummary,
+        wallets: (raw.wallets as AdminProjectInspectWallet[]) ?? [],
+        recentSms,
+        recentOrders:
+          (raw.recentOrders as AdminProjectInspectOrderItem[]) ??
+          (raw.orders as AdminProjectInspectOrderItem[]) ??
+          [],
+      };
+    },
+    enabled: Boolean(hasAdminCredentials() && projectId),
+    retry: false,
   });
 }
 
@@ -445,7 +785,7 @@ export function useAdminWebhooks(enabled = true) {
       const res = await adminFetch('/api/v1/admin/webhooks');
       return unwrapApiResponse<WebhookDeliverySummary[]>(res, 'Failed to load webhook audit logs');
     },
-    enabled: Boolean(enabled && getStoredAdminKey()),
+    enabled: Boolean(enabled && hasAdminCredentials()),
     retry: false,
     refetchInterval: 10_000,
   });
@@ -475,9 +815,32 @@ export function useAdminQueue(enabled = true) {
       const res = await adminFetch('/api/v1/admin/queue');
       return unwrapApiResponse<QueueSummaryItem[]>(res, 'Failed to load verification queue');
     },
-    enabled: Boolean(enabled && getStoredAdminKey()),
+    enabled: Boolean(enabled && hasAdminCredentials()),
     retry: false,
     refetchInterval: 8_000,
+  });
+}
+
+export function useAdminSimulateMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (payload?: {
+      provider?: string;
+      amount?: number;
+      trxId?: string;
+      merchantId?: string;
+    }) => {
+      const res = await adminFetch('/api/v1/realtime/simulate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload || {}),
+      });
+      return unwrapApiResponse(res, 'Failed to simulate MFS SMS transaction');
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin'] });
+    },
   });
 }
 
@@ -494,6 +857,251 @@ export function useSeedDemoProjectsMutation() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'projects'] });
       queryClient.invalidateQueries({ queryKey: ['admin', 'overview'] });
+    },
+  });
+}
+
+export function useAdminSystemHealth(enabled = true) {
+  return useQuery<AdminSystemHealth>({
+    queryKey: ['admin', 'system', 'health'],
+    queryFn: async () => {
+      const res = await adminFetch('/api/v1/admin/system/health');
+      const raw = await unwrapApiResponse<Record<string, unknown>>(
+        res,
+        'Failed to load system health diagnostics',
+      );
+      const rawTables = raw.tables;
+      let tables: AdminSystemTableStatus[] = [];
+      if (Array.isArray(rawTables)) {
+        tables = rawTables as AdminSystemTableStatus[];
+      } else if (rawTables && typeof rawTables === 'object') {
+        tables = Object.entries(rawTables as Record<string, unknown>).map(([name, val]) => {
+          if (typeof val === 'boolean') {
+            return { name, exists: val };
+          }
+          if (val && typeof val === 'object') {
+            const obj = val as { exists?: boolean; rowCount?: number };
+            return { name, exists: Boolean(obj.exists), rowCount: obj.rowCount };
+          }
+          return { name, exists: Boolean(val) };
+        });
+      }
+      const missingTables = Array.isArray(raw.missingTables)
+        ? (raw.missingTables as string[])
+        : tables.filter((t) => !t.exists).map((t) => t.name);
+
+      return {
+        environment: String(raw.environment ?? 'production'),
+        simulatorEnabled: Boolean(raw.simulatorEnabled),
+        r2Configured: Boolean(raw.r2Configured),
+        pushHubConfigured: Boolean(
+          raw.pushHubConfigured ?? raw.durableObjectConfigured ?? raw.selfHostedWsConfigured,
+        ),
+        fcmConfigured: Boolean(raw.fcmConfigured ?? raw.fcmV1Configured),
+        schemaHealthy:
+          typeof raw.schemaHealthy === 'boolean'
+            ? raw.schemaHealthy
+            : missingTables.length === 0,
+        missingTables,
+        tables,
+        checkedAt: typeof raw.checkedAt === 'string' ? raw.checkedAt : undefined,
+      };
+    },
+    enabled: Boolean(enabled && hasAdminCredentials()),
+    retry: false,
+    refetchInterval: 30_000,
+  });
+}
+
+export function useEnsureAdminSchemaMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async () => {
+      const res = await adminFetch('/api/v1/admin/system/ensure-schema', {
+        method: 'POST',
+      });
+      return unwrapApiResponse<{ repaired?: boolean; tables?: AdminSystemTableStatus[] }>(
+        res,
+        'Schema verification & repair failed',
+      );
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'system', 'health'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'releases'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'auth', 'security'] });
+    },
+  });
+}
+
+export function useAdminSecurityState(enabled = true) {
+  return useQuery<AdminSecurityState>({
+    queryKey: ['admin', 'auth', 'security'],
+    queryFn: async () => {
+      const res = await adminFetch('/api/v1/admin/auth/security');
+      const raw = await unwrapApiResponse<Record<string, unknown>>(
+        res,
+        'Failed to load admin security state',
+      );
+      const adminUsers =
+        (raw.adminUsers as AdminUserProfile[]) ??
+        (raw.users as AdminUserProfile[]) ??
+        [];
+      const rawSessions = (raw.sessions as AdminAuthSessionInfo[]) ?? [];
+      const sessions = rawSessions.map((s) => ({
+        ...s,
+        email: s.email ?? s.adminEmail ?? null,
+      }));
+      const rawAuditLogs = (raw.auditLogs as AdminAuditLogItem[]) ?? [];
+      const auditLogs = rawAuditLogs.map((l) => ({
+        ...l,
+        actorId: l.actorId ?? l.adminUserId ?? null,
+        actorEmail: l.actorEmail ?? l.adminEmail ?? null,
+        details: l.details ?? l.metadataJson ?? null,
+      }));
+      return {
+        hasAdminUsers:
+          typeof raw.hasAdminUsers === 'boolean' ? raw.hasAdminUsers : adminUsers.length > 0,
+        currentAdmin: (raw.currentAdmin as AdminUserProfile | null) ?? null,
+        currentSession: (raw.currentSession as AdminAuthSessionInfo | null) ?? null,
+        adminUsers,
+        sessions,
+        auditLogs,
+      };
+    },
+    enabled: Boolean(enabled && hasAdminCredentials()),
+    retry: false,
+    refetchInterval: 15_000,
+  });
+}
+
+export function useBootstrapAdminMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (payload: {
+      email: string;
+      fullName: string;
+      password: string;
+    }): Promise<AdminUserProfile> => {
+      const res = await adminFetch('/api/v1/admin/auth/bootstrap', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return unwrapApiResponse<AdminUserProfile>(
+        res,
+        'Failed to bootstrap admin account',
+      );
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'auth'] });
+    },
+  });
+}
+
+export function useRevokeAdminSessionMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (sessionId: string) => {
+      const res = await adminFetch(
+        `/api/v1/admin/auth/sessions/${encodeURIComponent(sessionId)}`,
+        { method: 'DELETE' },
+      );
+      return unwrapApiResponse(res, 'Failed to revoke admin session');
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'auth', 'security'] });
+    },
+  });
+}
+
+export function useCreateAdminUserMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (payload: {
+      email: string;
+      fullName: string;
+      role: 'SUPER_ADMIN' | 'ADMIN_OPERATOR';
+      password?: string;
+    }): Promise<{
+      user: AdminUserProfile;
+      temporaryPassword?: string;
+      password?: string;
+      generatedPassword?: string;
+    }> => {
+      const res = await adminFetch('/api/v1/admin/auth/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const raw = await unwrapApiResponse<Record<string, unknown>>(
+        res,
+        'Failed to create admin user',
+      );
+      const user = (raw.user as AdminUserProfile | undefined) ?? (raw as unknown as AdminUserProfile);
+      return {
+        user,
+        temporaryPassword:
+          (raw.temporaryPassword as string | undefined) ??
+          (raw.generatedPassword as string | undefined) ??
+          (raw.password as string | undefined),
+      };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'auth', 'security'] });
+    },
+  });
+}
+
+export function useUpdateAdminUserMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      id,
+      updates,
+    }: {
+      id: string;
+      updates: {
+        fullName?: string;
+        role?: 'SUPER_ADMIN' | 'ADMIN_OPERATOR';
+        isActive?: boolean;
+        resetPassword?: boolean | string;
+        password?: string;
+      };
+    }): Promise<{
+      user?: AdminUserProfile;
+      temporaryPassword?: string;
+      password?: string;
+      generatedPassword?: string;
+    }> => {
+      const body: Record<string, unknown> = {};
+      if (updates.fullName !== undefined) body.fullName = updates.fullName;
+      if (updates.role !== undefined) body.role = updates.role;
+      if (updates.isActive !== undefined) body.isActive = updates.isActive;
+      if (updates.resetPassword !== undefined) {
+        body.resetPassword = updates.resetPassword;
+      } else if (updates.password !== undefined) {
+        body.resetPassword = updates.password;
+      }
+
+      const res = await adminFetch(`/api/v1/admin/auth/users/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      return unwrapApiResponse<{
+        user?: AdminUserProfile;
+        temporaryPassword?: string;
+        password?: string;
+        generatedPassword?: string;
+      }>(res, 'Failed to update admin account');
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'auth', 'security'] });
     },
   });
 }
@@ -562,7 +1170,7 @@ export function useAdminMessagingStatus(enabled = true) {
       const res = await adminFetch('/api/v1/admin/messaging/status');
       return unwrapApiResponse<AdminMessagingStatus>(res, 'Failed to load messaging status');
     },
-    enabled: Boolean(enabled && getStoredAdminKey()),
+    enabled: Boolean(enabled && hasAdminCredentials()),
     retry: false,
     refetchInterval: 15_000,
   });
@@ -639,7 +1247,7 @@ export function useAdminReleases(enabled = true) {
       const res = await adminFetch('/api/v1/admin/releases');
       return unwrapApiResponse<AdminReleasesResponse>(res, 'Failed to load app releases');
     },
-    enabled: Boolean(enabled && getStoredAdminKey()),
+    enabled: Boolean(enabled && hasAdminCredentials()),
     retry: false,
     refetchInterval: 30_000,
   });

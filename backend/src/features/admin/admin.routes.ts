@@ -1,20 +1,45 @@
 import { Hono } from 'hono';
 import type { AppContextEnv } from '../../shared/types';
-import { AppError, UnauthorizedError } from '../../shared/errors';
-import { timingSafeEqual } from '../../shared/crypto';
-import { authMasterAdminMiddleware, resolveMasterAdminKey } from '../../shared/middleware';
+import {
+  authenticateAdminJwt,
+  authMasterAdminMiddleware,
+  requireSuperAdminMiddleware,
+  resolveMasterAdminKey,
+} from '../../shared/middleware';
+import { checkCoreTablesHealth, ensureRuntimeSchema } from '../../db/bootstrap';
 import {
   verifyAdminKeySchema,
+  adminLoginSchema,
+  bootstrapAdminSchema,
+  createAdminUserSchema,
+  updateAdminUserSchema,
+  logoutAllAdminSchema,
   createProjectSchema,
   updateProjectSchema,
   createProjectUserSchema,
   resetUserPasswordSchema,
 } from './admin.schema';
 import {
+  bootstrapFirstAdmin,
+  createAdminUser,
+  extractAdminActor,
+  extractAdminRequestMeta,
+  getAdminAuthContext,
+  listAdminSecurityState,
+  loginAdminWithMasterKey,
+  loginAdminWithPassword,
+  logoutAdminSession,
+  logoutAllAdminSessions,
+  revokeSpecificAdminSession,
+  updateAdminUser,
+} from './admin-auth.service';
+import {
   getAdminOverview,
   getAdminProjects,
   createAdminProject,
   updateAdminProject,
+  inspectAdminProject,
+  deleteAdminProject,
   getAdminWebhooks,
   getAdminQueue,
   getProjectUsersAndSessions,
@@ -30,21 +55,59 @@ const router = new Hono<AppContextEnv>();
 const requireAdminAuth = authMasterAdminMiddleware;
 
 /**
+ * POST /api/v1/admin/auth/login
+ * Authenticates a Hub Admin via email + password OR Master Admin Key, issuing a 24h Admin JWT.
+ */
+router.post('/auth/login', async (c) => {
+  const db = c.get('db');
+  const body = await c.req.json().catch(() => ({}));
+  const input = adminLoginSchema.parse(body);
+  const meta = extractAdminRequestMeta(c);
+
+  const result = input.adminKey
+    ? await loginAdminWithMasterKey(db, c.env, input.adminKey, meta)
+    : await loginAdminWithPassword(db, c.env, input.email!, input.password!, meta);
+
+  return c.json({
+    success: true,
+    data: result,
+  });
+});
+
+/**
  * POST /api/v1/admin/auth/verify
- * Validates admin key and returns session confirmation.
+ * Backward-compatible Admin verification: accepts Bearer Admin JWT or `{ adminKey }`.
  */
 router.post('/auth/verify', async (c) => {
+  const db = c.get('db');
+  const authHeader = c.req.header('authorization');
+  const bearerToken =
+    authHeader && authHeader.toLowerCase().startsWith('bearer ')
+      ? authHeader.substring(7).trim()
+      : undefined;
+
+  if (bearerToken && bearerToken.split('.').length === 3) {
+    await authenticateAdminJwt(c, db, bearerToken);
+    const context = await getAdminAuthContext(db, c);
+    return c.json({
+      success: true,
+      data: {
+        role: 'MASTER_ADMIN',
+        authenticatedAt: new Date().toISOString(),
+        expiresIn: 86400,
+        ...context,
+      },
+    });
+  }
+
   const body = await c.req.json().catch(() => ({}));
   const input = verifyAdminKeySchema.parse(body);
-  const expectedKey = resolveMasterAdminKey(c.env);
-
-  if (!expectedKey) {
-    throw new AppError('MASTER_ADMIN_KEY is not configured on this environment', 500, 'ADMIN_NOT_CONFIGURED');
-  }
-
-  if (!timingSafeEqual(input.adminKey, expectedKey)) {
-    throw new UnauthorizedError('Incorrect Master Admin Key');
-  }
+  const result = await loginAdminWithMasterKey(
+    db,
+    c.env,
+    input.adminKey,
+    extractAdminRequestMeta(c)
+  );
 
   return c.json({
     success: true,
@@ -52,6 +115,147 @@ router.post('/auth/verify', async (c) => {
       role: 'MASTER_ADMIN',
       authenticatedAt: new Date().toISOString(),
       expiresIn: 86400,
+      ...result,
+    },
+  });
+});
+
+/**
+ * GET /api/v1/admin/auth/me
+ * Returns the authenticated admin identity, current session, and bootstrap status.
+ */
+router.get('/auth/me', requireAdminAuth, async (c) => {
+  const db = c.get('db');
+  const data = await getAdminAuthContext(db, c);
+  return c.json({ success: true, data });
+});
+
+/**
+ * POST /api/v1/admin/auth/bootstrap
+ * Bootstraps the first SUPER_ADMIN account when no admin_users exist yet.
+ */
+router.post('/auth/bootstrap', requireAdminAuth, requireSuperAdminMiddleware, async (c) => {
+  const db = c.get('db');
+  const body = await c.req.json().catch(() => ({}));
+  const input = bootstrapAdminSchema.parse(body);
+
+  const created = await bootstrapFirstAdmin(db, c.env, input, {
+    ...extractAdminRequestMeta(c),
+    actor: extractAdminActor(c),
+  });
+
+  return c.json({ success: true, data: created }, 201);
+});
+
+/**
+ * POST /api/v1/admin/auth/logout
+ * Revokes the caller's current Admin JWT session.
+ */
+router.post('/auth/logout', requireAdminAuth, async (c) => {
+  const db = c.get('db');
+  const result = await logoutAdminSession(db, c.get('adminSessionId'), extractAdminActor(c));
+  return c.json({ success: true, data: result });
+});
+
+/**
+ * POST /api/v1/admin/auth/logout-all
+ * Revokes all active Admin sessions across all devices (optionally keeping current).
+ */
+router.post('/auth/logout-all', requireAdminAuth, requireSuperAdminMiddleware, async (c) => {
+  const db = c.get('db');
+  const body = await c.req.json().catch(() => ({}));
+  const input = logoutAllAdminSchema.parse(body);
+  const exceptSessionId = input.includeCurrent ? undefined : c.get('adminSessionId');
+
+  const result = await logoutAllAdminSessions(db, exceptSessionId, extractAdminActor(c));
+  return c.json({ success: true, data: result });
+});
+
+/**
+ * GET /api/v1/admin/auth/security
+ * Lists recent admin sessions, admin accounts, and audit logs.
+ */
+router.get('/auth/security', requireAdminAuth, async (c) => {
+  const db = c.get('db');
+  const data = await listAdminSecurityState(db);
+  return c.json({ success: true, data });
+});
+
+/**
+ * DELETE /api/v1/admin/auth/sessions/:sessionId
+ * Revokes a specific Admin JWT session immediately.
+ */
+router.delete('/auth/sessions/:sessionId', requireAdminAuth, async (c) => {
+  const db = c.get('db');
+  const sessionId = c.req.param('sessionId');
+  const result = await revokeSpecificAdminSession(db, sessionId, extractAdminActor(c));
+  return c.json({ success: true, data: result });
+});
+
+/**
+ * POST /api/v1/admin/auth/users
+ * Creates a new Hub Admin account (SUPER_ADMIN only).
+ */
+router.post('/auth/users', requireAdminAuth, requireSuperAdminMiddleware, async (c) => {
+  const db = c.get('db');
+  const body = await c.req.json().catch(() => ({}));
+  const input = createAdminUserSchema.parse(body);
+
+  const created = await createAdminUser(db, input, extractAdminActor(c));
+  return c.json({ success: true, data: created }, 201);
+});
+
+/**
+ * PATCH /api/v1/admin/auth/users/:id
+ * Updates an admin account, toggles active state, or resets password (SUPER_ADMIN only).
+ */
+router.patch('/auth/users/:id', requireAdminAuth, requireSuperAdminMiddleware, async (c) => {
+  const db = c.get('db');
+  const id = c.req.param('id');
+  const body = await c.req.json().catch(() => ({}));
+  const input = updateAdminUserSchema.parse(body);
+
+  const updated = await updateAdminUser(db, id, input, extractAdminActor(c));
+  return c.json({ success: true, data: updated });
+});
+
+/**
+ * GET /api/v1/admin/system/health
+ * Reports environment bindings, D1 table readiness, and simulator status.
+ */
+router.get('/system/health', requireAdminAuth, async (c) => {
+  const db = c.get('db');
+  const tables = await checkCoreTablesHealth(db);
+
+  return c.json({
+    success: true,
+    data: {
+      environment: c.env.ENVIRONMENT || 'production',
+      simulatorEnabled: c.env.ENVIRONMENT !== 'production',
+      d1Connected: true,
+      r2Configured: Boolean(c.env.R2_BUCKET),
+      pushHubConfigured: Boolean(c.env.PUSH_HUB),
+      fcmConfigured: Boolean(c.env.FCM_SERVICE_ACCOUNT_JSON),
+      masterKeyConfigured: Boolean(resolveMasterAdminKey(c.env)),
+      tables,
+    },
+  });
+});
+
+/**
+ * POST /api/v1/admin/system/ensure-schema
+ * Idempotently runs runtime D1 schema bootstrap and returns updated table health.
+ */
+router.post('/system/ensure-schema', requireAdminAuth, async (c) => {
+  const db = c.get('db');
+  await ensureRuntimeSchema(db);
+  const tables = await checkCoreTablesHealth(db);
+
+  return c.json({
+    success: true,
+    data: {
+      ensured: true,
+      tables,
     },
   });
 });
@@ -101,6 +305,28 @@ router.patch('/projects/:id', requireAdminAuth, async (c) => {
 
   const updated = await updateAdminProject(db, id, input);
   return c.json({ success: true, data: updated });
+});
+
+/**
+ * GET /api/v1/admin/projects/:id/inspect
+ * Returns deep inspection telemetry (wallets, transactions, orders, queue) for a storefront.
+ */
+router.get('/projects/:id/inspect', requireAdminAuth, async (c) => {
+  const db = c.get('db');
+  const id = c.req.param('id');
+  const data = await inspectAdminProject(db, id);
+  return c.json({ success: true, data });
+});
+
+/**
+ * DELETE /api/v1/admin/projects/:id
+ * Safely deletes a storefront and all dependent merchant-scoped records (SUPER_ADMIN only).
+ */
+router.delete('/projects/:id', requireAdminAuth, requireSuperAdminMiddleware, async (c) => {
+  const db = c.get('db');
+  const id = c.req.param('id');
+  const deleted = await deleteAdminProject(db, id, extractAdminActor(c));
+  return c.json({ success: true, data: deleted });
 });
 
 /**

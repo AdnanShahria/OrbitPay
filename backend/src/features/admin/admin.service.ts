@@ -1,18 +1,26 @@
-import { eq, desc, sql, and, isNull } from 'drizzle-orm';
+import { eq, desc, sql, and, isNull, asc } from 'drizzle-orm';
 import type { AppDb } from '../../db/client';
 import {
   merchants,
   merchantWallets,
   merchantUsers,
   merchantDevices,
+  merchantOrders,
   authSessions,
   smsLedger,
   verificationQueue,
   webhookDeliveries,
+  checkoutSessions,
+  paymentIntents,
+  paymentLinks,
+  consumedTrxIds,
+  otpCodes,
+  mediaAssets,
   type MerchantRecord,
 } from '../../db/schema';
 import { generateSecureToken, hashDeviceApiKey, hashPassword } from '../../shared/crypto';
 import { ConflictError, NotFoundError } from '../../shared/errors';
+import { recordAdminAudit, type AdminActor } from './admin-auth.service';
 import type {
   CreateProjectDTO,
   UpdateProjectDTO,
@@ -589,5 +597,109 @@ export async function revokeAdminSession(db: AppDb, sessionId: string) {
   return {
     sessionId,
     revokedAt: now.toISOString(),
+  };
+}
+
+/**
+ * Returns deep inspection telemetry for a single connected project/merchant.
+ */
+export async function inspectAdminProject(db: AppDb, projectId: string) {
+  const merchantRes = await db
+    .select()
+    .from(merchants)
+    .where(eq(merchants.id, projectId))
+    .limit(1);
+
+  const merchant = merchantRes[0];
+  if (!merchant) {
+    throw new NotFoundError(`Project '${projectId}' not found`);
+  }
+
+  const { deviceApiKeyHash: _deviceHash, apiKeyHash: _apiKeyHash, ...safeProject } = merchant;
+
+  const [wallets, recentTransactions, recentOrders, recentQueue] = await Promise.all([
+    db
+      .select()
+      .from(merchantWallets)
+      .where(eq(merchantWallets.merchantId, projectId))
+      .orderBy(asc(merchantWallets.priorityOrder)),
+    db
+      .select()
+      .from(smsLedger)
+      .where(eq(smsLedger.merchantId, projectId))
+      .orderBy(desc(smsLedger.smsReceivedAt))
+      .limit(20),
+    db
+      .select()
+      .from(merchantOrders)
+      .where(eq(merchantOrders.merchantId, projectId))
+      .orderBy(desc(merchantOrders.createdAt))
+      .limit(15),
+    db
+      .select()
+      .from(verificationQueue)
+      .where(eq(verificationQueue.merchantId, projectId))
+      .orderBy(desc(verificationQueue.createdAt))
+      .limit(15),
+  ]);
+
+  return {
+    project: safeProject,
+    wallets,
+    recentTransactions,
+    recentOrders,
+    recentQueue,
+  };
+}
+
+/**
+ * Safely deletes a merchant storefront and all dependent records in FK-safe order.
+ */
+export async function deleteAdminProject(
+  db: AppDb,
+  projectId: string,
+  actor?: AdminActor
+) {
+  const merchantRes = await db
+    .select({ id: merchants.id, storeName: merchants.storeName })
+    .from(merchants)
+    .where(eq(merchants.id, projectId))
+    .limit(1);
+
+  const merchant = merchantRes[0];
+  if (!merchant) {
+    throw new NotFoundError(`Project '${projectId}' not found`);
+  }
+
+  await db.batch([
+    db.delete(consumedTrxIds).where(eq(consumedTrxIds.merchantId, projectId)),
+    db.delete(webhookDeliveries).where(eq(webhookDeliveries.merchantId, projectId)),
+    db.delete(verificationQueue).where(eq(verificationQueue.merchantId, projectId)),
+    db.delete(checkoutSessions).where(eq(checkoutSessions.merchantId, projectId)),
+    db.delete(paymentIntents).where(eq(paymentIntents.merchantId, projectId)),
+    db.delete(paymentLinks).where(eq(paymentLinks.merchantId, projectId)),
+    db.delete(merchantOrders).where(eq(merchantOrders.merchantId, projectId)),
+    db.delete(smsLedger).where(eq(smsLedger.merchantId, projectId)),
+    db.delete(merchantWallets).where(eq(merchantWallets.merchantId, projectId)),
+    db.delete(merchantDevices).where(eq(merchantDevices.merchantId, projectId)),
+    db.delete(authSessions).where(eq(authSessions.merchantId, projectId)),
+    db.delete(merchantUsers).where(eq(merchantUsers.merchantId, projectId)),
+    db.delete(otpCodes).where(eq(otpCodes.merchantId, projectId)),
+    db.delete(mediaAssets).where(eq(mediaAssets.merchantId, projectId)),
+    db.delete(merchants).where(eq(merchants.id, projectId)),
+  ]);
+
+  await recordAdminAudit(db, {
+    actor,
+    action: 'PROJECT_DELETED',
+    targetType: 'merchant',
+    targetId: projectId,
+    metadata: { storeName: merchant.storeName },
+  });
+
+  return {
+    id: projectId,
+    storeName: merchant.storeName,
+    deleted: true,
   };
 }

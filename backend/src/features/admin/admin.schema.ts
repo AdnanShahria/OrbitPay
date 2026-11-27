@@ -1,9 +1,5 @@
 import { z } from 'zod';
-import { USER_ROLES } from '../../db/schema';
-
-export const verifyAdminKeySchema = z.object({
-  adminKey: z.string().trim().min(1, 'Admin key is required'),
-});
+import { ADMIN_ROLES, USER_ROLES } from '../../db/schema';
 
 const optionalWebhookUrl = z
   .union([
@@ -15,6 +11,63 @@ const optionalWebhookUrl = z
 
 const optionalBlankToUndefined = <T extends z.ZodTypeAny>(schema: T) =>
   z.preprocess((val) => (typeof val === 'string' && val.trim() === '' ? undefined : val), schema.optional());
+
+export const verifyAdminKeySchema = z.object({
+  adminKey: z.string().trim().min(1, 'Admin key is required'),
+});
+
+export const adminLoginSchema = z
+  .object({
+    email: optionalBlankToUndefined(
+      z
+        .string()
+        .trim()
+        .email('Valid email is required')
+        .transform((v) => v.toLowerCase())
+    ),
+    password: optionalBlankToUndefined(z.string().min(1, 'Password is required')),
+    adminKey: optionalBlankToUndefined(z.string().trim().min(1, 'Admin key is required')),
+  })
+  .refine((data) => Boolean(data.adminKey) || Boolean(data.email && data.password), {
+    message: 'Provide either an adminKey or both email and password',
+  });
+
+export const bootstrapAdminSchema = z.object({
+  email: z
+    .string()
+    .trim()
+    .email('Valid email is required')
+    .transform((v) => v.toLowerCase()),
+  fullName: z.string().trim().min(2, 'Full name must be at least 2 characters'),
+  password: z.string().min(8, 'Password must be at least 8 characters'),
+});
+
+export const createAdminUserSchema = z.object({
+  email: z
+    .string()
+    .trim()
+    .email('Valid email is required')
+    .transform((v) => v.toLowerCase()),
+  fullName: z.string().trim().min(2, 'Full name must be at least 2 characters'),
+  password: optionalBlankToUndefined(z.string().min(8, 'Password must be at least 8 characters')),
+  role: z.enum(ADMIN_ROLES).default('ADMIN_OPERATOR'),
+});
+
+export const updateAdminUserSchema = z.object({
+  fullName: z.string().trim().min(2, 'Full name must be at least 2 characters').optional(),
+  role: z.enum(ADMIN_ROLES).optional(),
+  isActive: z.boolean().optional(),
+  resetPassword: z
+    .union([
+      z.boolean(),
+      z.string().min(8, 'Password must be at least 8 characters'),
+    ])
+    .optional(),
+});
+
+export const logoutAllAdminSchema = z.object({
+  includeCurrent: z.boolean().optional().default(false),
+});
 
 export const createProjectSchema = z.object({
   id: optionalBlankToUndefined(
@@ -60,3 +113,8 @@ export type CreateProjectDTO = z.infer<typeof createProjectSchema>;
 export type UpdateProjectDTO = z.infer<typeof updateProjectSchema>;
 export type CreateProjectUserDTO = z.infer<typeof createProjectUserSchema>;
 export type ResetUserPasswordDTO = z.infer<typeof resetUserPasswordSchema>;
+export type AdminLoginDTO = z.infer<typeof adminLoginSchema>;
+export type BootstrapAdminDTO = z.infer<typeof bootstrapAdminSchema>;
+export type CreateAdminUserDTO = z.infer<typeof createAdminUserSchema>;
+export type UpdateAdminUserDTO = z.infer<typeof updateAdminUserSchema>;
+export type LogoutAllAdminDTO = z.infer<typeof logoutAllAdminSchema>;

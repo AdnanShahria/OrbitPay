@@ -13,37 +13,39 @@ import {
   TableRow,
 } from '@/components/base/table/table';
 import { toast } from '@/components/base/toast/toast';
-import { useRealtime } from '@/shared/hooks/useRealtime';
 import { formatBDT, formatDate } from '@/shared/utils/format';
-import type { QueueSummaryItem } from './useAdmin';
+import { useAdminSimulateMutation, type QueueSummaryItem } from './useAdmin';
 
 interface GlobalQueueTableProps {
   queue?: QueueSummaryItem[];
   isLoading: boolean;
+  simulatorEnabled?: boolean;
 }
 
 export function GlobalQueueTable({
   queue = [],
   isLoading,
+  simulatorEnabled = false,
 }: GlobalQueueTableProps) {
-  const { simulateTransaction } = useRealtime();
+  const simulateMutation = useAdminSimulateMutation();
   const [matchingTrxId, setMatchingTrxId] = useState<string | null>(null);
 
   const handleSimulateMatch = async (item: QueueSummaryItem) => {
     setMatchingTrxId(item.submittedTrxId);
     try {
-      const result = await simulateTransaction({
+      await simulateMutation.mutateAsync({
         provider: item.provider,
         amount: item.expectedAmount,
         trxId: item.submittedTrxId,
+        merchantId: item.merchantId,
       });
-      if (result) {
-        toast.success(`Simulated SMS match for ${item.submittedTrxId}`);
-      } else {
-        toast.error('Failed to simulate verification match');
-      }
+      toast.success(`Simulated SMS match for ${item.submittedTrxId}`);
+    } catch (err: unknown) {
+      toast.error(
+        err instanceof Error ? err.message : 'Failed to simulate verification match',
+      );
     } finally {
-      setTimeout(() => setMatchingTrxId(null), 1000);
+      setTimeout(() => setMatchingTrxId(null), 600);
     }
   };
 
@@ -95,7 +97,9 @@ export function GlobalQueueTable({
               <TableColumn>Customer info</TableColumn>
               <TableColumn>Submitted TrxID</TableColumn>
               <TableColumn>Submitted at</TableColumn>
-              <TableColumn className="text-end">Instant reconcile</TableColumn>
+              <TableColumn className="text-end">
+                {simulatorEnabled ? 'Instant reconcile' : 'Queue status'}
+              </TableColumn>
             </TableHeader>
             <TableBody>
               {queue.map((item) => (
@@ -139,16 +143,22 @@ export function GlobalQueueTable({
 
                   <TableCell className="text-end">
                     <div className="flex justify-end">
-                      <Button
-                        variant="secondary"
-                        size="small"
-                        onClick={() => handleSimulateMatch(item)}
-                        isLoading={matchingTrxId === item.submittedTrxId}
-                        leadingIcon={RiFlashlightLine}
-                        title="Simulate companion phone SMS with this exact TrxID to auto-reconcile"
-                      >
-                        Simulate Match
-                      </Button>
+                      {simulatorEnabled ? (
+                        <Button
+                          variant="secondary"
+                          size="small"
+                          onClick={() => handleSimulateMatch(item)}
+                          isLoading={matchingTrxId === item.submittedTrxId}
+                          leadingIcon={RiFlashlightLine}
+                          title="Simulate companion phone SMS with this exact TrxID to auto-reconcile"
+                        >
+                          Simulate Match
+                        </Button>
+                      ) : (
+                        <Chip variant="caption" color="yellow">
+                          Awaiting SMS
+                        </Chip>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>

@@ -2,7 +2,15 @@ import type { MiddlewareHandler, ErrorHandler, Context } from 'hono';
 import { ZodError } from 'zod';
 import { eq, and, isNull, gt } from 'drizzle-orm';
 import { getDb, type AppDb } from '../db/client';
-import { merchants, merchantUsers, authSessions, merchantDevices } from '../db/schema';
+import { ensureRuntimeSchema } from '../db/bootstrap';
+import {
+  merchants,
+  merchantUsers,
+  authSessions,
+  merchantDevices,
+  adminUsers,
+  adminSessions,
+} from '../db/schema';
 import { hashDeviceApiKey, hashSha256, timingSafeEqual, verifyJwt } from './crypto';
 import { AppError, ForbiddenError, UnauthorizedError } from './errors';
 import type { AppContextEnv, Env } from './types';
@@ -14,6 +22,17 @@ export interface OrbitJwtClaims extends Record<string, unknown> {
   role: string;
   sid: string;
   deviceType: 'WEB' | 'ANDROID';
+  iat: number;
+  exp: number;
+}
+
+export interface OrbitAdminJwtClaims extends Record<string, unknown> {
+  typ: 'ORBIT_ADMIN_JWT';
+  sub: string;
+  email: string;
+  role: 'SUPER_ADMIN' | 'ADMIN_OPERATOR';
+  sid: string;
+  authMethod: 'PASSWORD' | 'MASTER_KEY';
   iat: number;
   exp: number;
 }
@@ -372,10 +391,76 @@ export const requireOwnerRoleMiddleware: MiddlewareHandler<AppContextEnv> = asyn
 };
 
 /**
- * Master Admin Key Middleware
- * Validates 'X-Admin-Key' header against MASTER_ADMIN_KEY in constant time.
+ * Verifies a 3-segment Master Admin Bearer JWT (`ORBIT_ADMIN_JWT`), ensures the
+ * `admin_sessions` row is active and unrevoked, and populates Admin context variables.
+ */
+export async function authenticateAdminJwt(
+  c: Context<AppContextEnv>,
+  db: AppDb,
+  token: string
+): Promise<OrbitAdminJwtClaims> {
+  await ensureRuntimeSchema(db);
+
+  const claims = await verifyJwt<OrbitAdminJwtClaims>(token, resolveJwtSecret(c.env));
+  if (!claims || claims.typ !== 'ORBIT_ADMIN_JWT' || !claims.sid || !claims.sub) {
+    throw new UnauthorizedError('Invalid or expired Admin JWT token');
+  }
+
+  const now = new Date();
+  const sessionRes = await db
+    .select()
+    .from(adminSessions)
+    .where(
+      and(
+        eq(adminSessions.id, claims.sid),
+        isNull(adminSessions.revokedAt),
+        gt(adminSessions.expiresAt, now)
+      )
+    )
+    .limit(1);
+
+  const session = sessionRes[0];
+  if (!session) {
+    throw new UnauthorizedError('Admin session revoked or expired');
+  }
+
+  if (claims.authMethod === 'PASSWORD' && claims.sub !== 'master_admin') {
+    const userRes = await db
+      .select({ id: adminUsers.id, email: adminUsers.email, role: adminUsers.role })
+      .from(adminUsers)
+      .where(and(eq(adminUsers.id, claims.sub), eq(adminUsers.isActive, true)))
+      .limit(1);
+
+    if (!userRes[0]) {
+      throw new UnauthorizedError('Admin account is inactive or not found');
+    }
+  }
+
+  c.set('adminUserId', claims.sub);
+  c.set('adminSessionId', session.id);
+  c.set('adminRole', session.role);
+  c.set('adminEmail', session.adminEmail || claims.email);
+  c.set('adminAuthMethod', 'jwt');
+
+  return claims;
+}
+
+/**
+ * Master Admin Authentication Middleware
+ * Accepts EITHER:
+ * - Authorization: Bearer <admin_jwt> (3 dot-separated segments verified against admin_sessions)
+ * - X-Admin-Key header (validated in constant time against MASTER_ADMIN_KEY)
  */
 export const authMasterAdminMiddleware: MiddlewareHandler<AppContextEnv> = async (c, next) => {
+  const db = c.get('db') || getDb(c.env.DB);
+  const bearerToken = extractBearerToken(c.req.header('authorization'));
+
+  if (bearerToken && bearerToken.split('.').length === 3) {
+    await authenticateAdminJwt(c, db, bearerToken);
+    await next();
+    return;
+  }
+
   const adminKey = c.req.header('x-admin-key')?.trim();
   const expectedKey = resolveMasterAdminKey(c.env);
 
@@ -384,10 +469,29 @@ export const authMasterAdminMiddleware: MiddlewareHandler<AppContextEnv> = async
   }
 
   if (!adminKey || !timingSafeEqual(adminKey, expectedKey)) {
-    throw new UnauthorizedError('Invalid or missing Master Admin Key');
+    throw new UnauthorizedError('Invalid or missing Master Admin credentials');
   }
 
+  c.set('adminUserId', 'master_admin');
+  c.set('adminRole', 'SUPER_ADMIN');
+  c.set('adminEmail', 'master-key@orbit.internal');
+  c.set('adminAuthMethod', 'master_key');
+
   await next();
+};
+
+/**
+ * Restricts sensitive hub operations (admin user management, logout-all, project deletion)
+ * to SUPER_ADMIN accounts or Master Key sessions.
+ */
+export const requireSuperAdminMiddleware: MiddlewareHandler<AppContextEnv> = async (c, next) => {
+  const authMethod = c.get('adminAuthMethod');
+  const role = c.get('adminRole');
+  if (authMethod === 'master_key' || role === 'SUPER_ADMIN') {
+    await next();
+    return;
+  }
+  throw new ForbiddenError('Super Admin role required for this action');
 };
 
 /**

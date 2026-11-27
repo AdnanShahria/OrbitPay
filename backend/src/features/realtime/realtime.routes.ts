@@ -2,8 +2,10 @@ import { Hono, type MiddlewareHandler } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { eq } from 'drizzle-orm';
 import type { AppContextEnv } from '../../shared/types';
+import { base64UrlDecode } from '../../shared/crypto';
 import { ForbiddenError } from '../../shared/errors';
 import {
+  authenticateAdminJwt,
   authMasterAdminMiddleware,
   authMerchantOrDeviceMiddleware,
   authenticateJwtSession,
@@ -15,13 +17,41 @@ import { merchants } from '../../db/schema';
 const router = new Hono<AppContextEnv>();
 
 /**
- * Authenticates SSE connections via standard merchant/device headers OR `?token=<jwt>`
- * for browser EventSource compatibility, scoping events strictly to the caller's merchantId.
+ * Authenticates SSE connections via:
+ * - `?adminToken=<admin_jwt>` or `Authorization: Bearer <admin_jwt>` (Master Admin cross-tenant stream)
+ * - `?token=<merchant_jwt>` or standard merchant/device headers (strictly tenant-scoped)
  */
 const authStreamMiddleware: MiddlewareHandler<AppContextEnv> = async (c, next) => {
+  const db = c.get('db');
+  const adminToken = c.req.query('adminToken')?.trim();
+  if (adminToken && adminToken.split('.').length === 3) {
+    await authenticateAdminJwt(c, db, adminToken);
+    await next();
+    return;
+  }
+
+  const authHeader = c.req.header('authorization');
+  const bearerToken =
+    authHeader && authHeader.toLowerCase().startsWith('bearer ')
+      ? authHeader.substring(7).trim()
+      : undefined;
+
+  if (bearerToken && bearerToken.split('.').length === 3) {
+    try {
+      const payloadPart = bearerToken.split('.')[1];
+      const decoded = JSON.parse(base64UrlDecode(payloadPart)) as { typ?: string };
+      if (decoded?.typ === 'ORBIT_ADMIN_JWT') {
+        await authenticateAdminJwt(c, db, bearerToken);
+        await next();
+        return;
+      }
+    } catch {
+      // Fall through to standard merchant/device auth which will reject malformed tokens
+    }
+  }
+
   const queryToken = c.req.query('token')?.trim();
-  if (queryToken && queryToken.split('.').length === 3 && !c.req.header('authorization')) {
-    const db = c.get('db');
+  if (queryToken && queryToken.split('.').length === 3 && !authHeader) {
     await authenticateJwtSession(c, db, queryToken, c.req.header('x-merchant-id')?.trim());
     await next();
     return;
@@ -32,25 +62,39 @@ const authStreamMiddleware: MiddlewareHandler<AppContextEnv> = async (c, next) =
 
 /**
  * GET /api/v1/realtime/stream
- * Tenant-scoped Server-Sent Events (SSE) live stream for Merchant Portal & Companion Apps.
+ * Server-Sent Events (SSE) live stream for Master Admin Hub (all tenants)
+ * and Merchant Portal / Companion Apps (strictly tenant-isolated).
  */
 router.get('/stream', authStreamMiddleware, async (c) => {
-  const callerMerchantId = c.get('merchantId')!;
+  const adminUserId = c.get('adminUserId');
+  const isAdminStream = Boolean(adminUserId);
+  const callerMerchantId = c.get('merchantId');
 
   return streamSSE(c, async (stream) => {
     await stream.writeSSE({
       event: 'CONNECTED',
-      data: JSON.stringify({
-        status: 'connected',
-        merchantId: callerMerchantId,
-        timestamp: new Date().toISOString(),
-        message: 'ORBIT Payment Hub Realtime SSE Stream Active',
-      }),
+      data: JSON.stringify(
+        isAdminStream
+          ? {
+              status: 'connected',
+              scope: 'admin',
+              adminUserId,
+              timestamp: new Date().toISOString(),
+              message: 'ORBIT Payment Hub Admin Realtime SSE Stream Active',
+            }
+          : {
+              status: 'connected',
+              scope: 'merchant',
+              merchantId: callerMerchantId,
+              timestamp: new Date().toISOString(),
+              message: 'ORBIT Payment Hub Realtime SSE Stream Active',
+            }
+      ),
     });
 
     const unsubscribe = realtimeHub.subscribe(async (event: RealtimeEvent) => {
-      // Strictly tenant-isolated: never emit events belonging to other merchants
-      if (event.merchantId !== callerMerchantId) {
+      // Strictly tenant-isolated for merchants; Admin stream receives all hub events
+      if (!isAdminStream && event.merchantId !== callerMerchantId) {
         return;
       }
       try {

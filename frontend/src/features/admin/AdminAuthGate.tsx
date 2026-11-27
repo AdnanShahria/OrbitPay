@@ -5,8 +5,12 @@ import {
   RiEyeLine,
   RiEyeOffLine,
   RiKey2Line,
+  RiLock2Line,
   RiLockLine,
+  RiMailLine,
+  RiShieldUserLine,
 } from '@remixicon/react';
+import { ThemeToggle } from '@/components/application/theme/theme-toggle';
 import { Button } from '@/components/base/buttons/button';
 import {
   Card,
@@ -15,25 +19,55 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/base/card/card';
-import { Input } from '@/components/base/input/input';
-import { extractApiErrorMessage } from '@/shared/utils/api';
+import { Input, InputBase, TextField } from '@/components/base/input/input';
+import { Label } from '@/components/base/input/label';
+import { Tab, TabList, TabPanel, Tabs } from '@/components/base/tabs/tabs';
+
+type AuthMode = 'account' | 'master_key';
 
 interface AdminAuthGateProps {
-  onSuccess: (key: string) => void;
+  onLoginPassword: (email: string, password: string) => Promise<unknown>;
+  onLoginMasterKey: (key: string) => Promise<unknown>;
   onExit: () => void;
 }
 
-export function AdminAuthGate({ onSuccess, onExit }: AdminAuthGateProps) {
+export function AdminAuthGate({
+  onLoginPassword,
+  onLoginMasterKey,
+  onExit,
+}: AdminAuthGateProps) {
+  const [authMode, setAuthMode] = useState<AuthMode>('account');
+
+  // Admin Account state
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+
+  // Master Security Key state
   const [keyInput, setKeyInput] = useState('');
   const [showKey, setShowKey] = useState(false);
+
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const handleSubmit = async (e?: FormEvent) => {
-    if (e) e.preventDefault();
-    const cleanKey = keyInput.trim();
-    if (!cleanKey) {
-      setErrorMessage('Master Admin Key cannot be empty');
+  const isLocalDev =
+    typeof window !== 'undefined' &&
+    (window.location.hostname === 'localhost' ||
+      window.location.hostname === '127.0.0.1' ||
+      Boolean((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV));
+
+  const handleTabChange = (nextKey: unknown) => {
+    setAuthMode(nextKey === 'master_key' ? 'master_key' : 'account');
+    setErrorMessage(null);
+  };
+
+  const handleAccountSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (isLoading) return;
+
+    const cleanEmail = email.trim();
+    if (!cleanEmail || !password) {
+      setErrorMessage('Enter both your admin email address and password.');
       return;
     }
 
@@ -41,18 +75,30 @@ export function AdminAuthGate({ onSuccess, onExit }: AdminAuthGateProps) {
     setErrorMessage(null);
 
     try {
-      const res = await fetch('/api/v1/admin/auth/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ adminKey: cleanKey }),
-      });
+      await onLoginPassword(cleanEmail, password);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Admin authentication failed';
+      setErrorMessage(message || 'Admin authentication failed');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-      const data = await res.json().catch(() => null);
-      if (!res.ok || (data && data.success === false)) {
-        throw new Error(extractApiErrorMessage(data, 'Invalid Master Admin Key'));
-      }
+  const handleMasterKeySubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (isLoading) return;
 
-      onSuccess(cleanKey);
+    const cleanKey = keyInput.trim();
+    if (!cleanKey) {
+      setErrorMessage('Master Admin Key cannot be empty.');
+      return;
+    }
+
+    setIsLoading(true);
+    setErrorMessage(null);
+
+    try {
+      await onLoginMasterKey(cleanKey);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Authentication failed';
       setErrorMessage(message || 'Authentication failed');
@@ -61,19 +107,17 @@ export function AdminAuthGate({ onSuccess, onExit }: AdminAuthGateProps) {
     }
   };
 
-  const isLocalDev =
-    typeof window !== 'undefined' &&
-    (window.location.hostname === 'localhost' ||
-      window.location.hostname === '127.0.0.1' ||
-      Boolean((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV));
-
   const handleDevQuickFill = () => {
     setKeyInput('orbit_master_admin_2026');
     setErrorMessage(null);
   };
 
   return (
-    <div className="min-h-screen bg-background-full flex flex-col items-center justify-center p-4 sm:p-6">
+    <div className="min-h-screen bg-background-full flex flex-col items-center justify-center p-4 sm:p-6 relative antialiased">
+      <div className="absolute top-4 end-4 sm:top-6 sm:end-6">
+        <ThemeToggle appearance="segmented" size="small" />
+      </div>
+
       <Card variant="default" className="w-full max-w-md">
         <CardHeader className="items-center text-center pt-8 pb-2">
           <div className="size-12 rounded-2xl border border-border-button-default bg-background-secondary-default text-foreground-icon-primary flex items-center justify-center mb-2 shadow-card">
@@ -98,74 +142,152 @@ export function AdminAuthGate({ onSuccess, onExit }: AdminAuthGateProps) {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="relative">
-              <Input
-                label="Master Admin Security Key"
-                type={showKey ? 'text' : 'password'}
-                placeholder="Enter master admin key..."
-                value={keyInput}
-                onChange={(val) => {
-                  setKeyInput(val);
-                  if (errorMessage) setErrorMessage(null);
-                }}
-                isRequired
-                leadingIcon={RiKey2Line}
-                fieldClassName="pe-10"
-                inputClassName="font-mono"
-              />
-              <button
-                type="button"
-                onClick={() => setShowKey((prev) => !prev)}
-                aria-label={showKey ? 'Hide master admin key' : 'Show master admin key'}
-                title={showKey ? 'Hide key' : 'Show key'}
-                className="absolute right-2 bottom-1.5 inline-flex size-6 items-center justify-center rounded-md text-foreground-icon-secondary transition-colors hover:text-foreground-icon-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring cursor-pointer"
-              >
-                {showKey ? (
-                  <RiEyeOffLine className="size-4" aria-hidden />
-                ) : (
-                  <RiEyeLine className="size-4" aria-hidden />
-                )}
-              </button>
-            </div>
+          <Tabs selectedKey={authMode} onSelectionChange={handleTabChange}>
+            <TabList aria-label="Admin authentication method">
+              <Tab id="account" icon={RiShieldUserLine}>
+                Admin Account
+              </Tab>
+              <Tab id="master_key" icon={RiKey2Line}>
+                Master Security Key
+              </Tab>
+            </TabList>
 
-            {isLocalDev && (
-              <div className="flex items-center justify-between text-caption-1-regular">
-                <span className="text-text-tertiary">Local dev default</span>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="xs"
-                  onClick={handleDevQuickFill}
+            <TabPanel id="account">
+              <form onSubmit={handleAccountSubmit} className="space-y-4">
+                <Input
+                  label="Admin Email"
+                  type="email"
+                  autoComplete="email"
+                  placeholder="admin@orbitsaas.cloud"
+                  value={email}
+                  onChange={(val) => {
+                    setEmail(val);
+                    if (errorMessage) setErrorMessage(null);
+                  }}
+                  leadingIcon={RiMailLine}
+                  isRequired
+                />
+
+                <TextField
+                  value={password}
+                  onChange={(val) => {
+                    setPassword(val);
+                    if (errorMessage) setErrorMessage(null);
+                  }}
+                  isRequired
                 >
-                  Fill dev key
-                </Button>
-              </div>
-            )}
+                  {({ isRequired }) => (
+                    <>
+                      <Label isRequired={isRequired}>Password</Label>
+                      <InputBase
+                        type={showPassword ? 'text' : 'password'}
+                        autoComplete="current-password"
+                        placeholder="Enter admin password"
+                        leadingIcon={RiLock2Line}
+                        trailingAddon={
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="xs"
+                            iconOnly
+                            leadingIcon={showPassword ? RiEyeOffLine : RiEyeLine}
+                            aria-label={showPassword ? 'Hide password' : 'Show password'}
+                            onClick={() => setShowPassword((prev) => !prev)}
+                          />
+                        }
+                      />
+                    </>
+                  )}
+                </TextField>
 
-            <div className="pt-1 flex flex-col gap-2.5">
-              <Button
-                type="submit"
-                variant="primary"
-                size="medium"
-                className="w-full"
-                isLoading={isLoading}
-              >
-                Authenticate & Access Command Center
-              </Button>
+                <div className="pt-1 flex flex-col gap-2.5">
+                  <Button
+                    type="submit"
+                    variant="primary"
+                    size="medium"
+                    className="w-full"
+                    isLoading={isLoading}
+                  >
+                    Sign In to Central Hub
+                  </Button>
+                </div>
+              </form>
+            </TabPanel>
 
-              <Button
-                type="button"
-                variant="ghost"
-                size="medium"
-                onClick={onExit}
-                className="w-full"
-                leadingIcon={RiArrowLeftLine}
-              >
-                Return to Storefront Portal
-              </Button>
-            </div>
-          </form>
+            <TabPanel id="master_key">
+              <form onSubmit={handleMasterKeySubmit} className="space-y-4">
+                <TextField
+                  value={keyInput}
+                  onChange={(val) => {
+                    setKeyInput(val);
+                    if (errorMessage) setErrorMessage(null);
+                  }}
+                  isRequired
+                >
+                  {({ isRequired }) => (
+                    <>
+                      <Label isRequired={isRequired}>Master Admin Security Key</Label>
+                      <InputBase
+                        type={showKey ? 'text' : 'password'}
+                        autoComplete="off"
+                        placeholder="Enter master admin key..."
+                        leadingIcon={RiKey2Line}
+                        className="font-mono"
+                        trailingAddon={
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="xs"
+                            iconOnly
+                            leadingIcon={showKey ? RiEyeOffLine : RiEyeLine}
+                            aria-label={showKey ? 'Hide master admin key' : 'Show master admin key'}
+                            onClick={() => setShowKey((prev) => !prev)}
+                          />
+                        }
+                      />
+                    </>
+                  )}
+                </TextField>
+
+                {isLocalDev && (
+                  <div className="flex items-center justify-between text-caption-1-regular">
+                    <span className="text-text-tertiary">Local dev default</span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      onClick={handleDevQuickFill}
+                    >
+                      Fill dev key
+                    </Button>
+                  </div>
+                )}
+
+                <div className="pt-1 flex flex-col gap-2.5">
+                  <Button
+                    type="submit"
+                    variant="primary"
+                    size="medium"
+                    className="w-full"
+                    isLoading={isLoading}
+                  >
+                    Authenticate &amp; Access Command Center
+                  </Button>
+                </div>
+              </form>
+            </TabPanel>
+          </Tabs>
+
+          <Button
+            type="button"
+            variant="ghost"
+            size="medium"
+            onClick={onExit}
+            className="w-full"
+            leadingIcon={RiArrowLeftLine}
+          >
+            Return to Storefront Portal
+          </Button>
 
           <p className="text-center text-caption-2-regular text-text-tertiary font-mono">
             IP audited · Timing-safe verification · Edge encrypted

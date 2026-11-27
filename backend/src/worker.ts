@@ -2,6 +2,7 @@ import { and, eq, inArray, isNotNull, lte, or } from 'drizzle-orm';
 import app from './index';
 import { getDb, type AppDb } from './db/client';
 import {
+  adminSessions,
   authSessions,
   checkoutSessions,
   merchantWallets,
@@ -262,6 +263,7 @@ async function runHourlyCleanup(db: AppDb, now: Date): Promise<void> {
       .where(and(isNotNull(routerKvStore.expiresAt), lte(routerKvStore.expiresAt, now))),
     db.delete(otpCodes).where(lte(otpCodes.expiresAt, otpCutoff)),
     db.delete(authSessions).where(lte(authSessions.expiresAt, sessionCutoff)),
+    db.delete(adminSessions).where(lte(adminSessions.expiresAt, sessionCutoff)),
     db.delete(routerProviderLogs).where(lte(routerProviderLogs.createdAt, logCutoff)),
   ]);
 }

@@ -1,5 +1,6 @@
 import { and, desc, eq } from 'drizzle-orm';
 import type { AppDb } from '../../db/client';
+import { ensureRuntimeSchema } from '../../db/bootstrap';
 import { appReleases, merchants, type AppReleaseRecord } from '../../db/schema';
 import { bufferToHex, generateSecureToken } from '../../shared/crypto';
 import { AppError, ConflictError, NotFoundError, ValidationError } from '../../shared/errors';
@@ -82,6 +83,7 @@ export async function getLatestRelease(
   currentVersionCode?: number,
   platform = 'ANDROID'
 ): Promise<LatestReleaseResponse> {
+  await ensureRuntimeSchema(db);
   const rows = await db
     .select()
     .from(appReleases)
@@ -119,6 +121,7 @@ export async function listReleases(
   db: AppDb,
   origin: string
 ): Promise<SerializedAppRelease[]> {
+  await ensureRuntimeSchema(db);
   const rows = await db
     .select()
     .from(appReleases)
@@ -131,6 +134,7 @@ export async function getReleaseByIdOrLatest(
   db: AppDb,
   idOrLatest: string
 ): Promise<AppReleaseRecord> {
+  await ensureRuntimeSchema(db);
   if (idOrLatest === 'latest') {
     const rows = await db
       .select()
@@ -219,6 +223,7 @@ export async function publishRelease(
   origin: string,
   input: PublishReleaseInput
 ): Promise<{ release: SerializedAppRelease; broadcast?: BroadcastSummary }> {
+  await ensureRuntimeSchema(db);
   if (!env.R2_BUCKET) {
     throw new AppError(
       'Cloudflare R2 bucket binding (R2_BUCKET) is not configured',
@@ -326,6 +331,7 @@ export async function updateReleaseMetadata(
     isActive?: boolean;
   }
 ): Promise<SerializedAppRelease> {
+  await ensureRuntimeSchema(db);
   const existing = await getReleaseByIdOrLatest(db, id);
 
   const nextMinSupported =
@@ -354,6 +360,7 @@ export async function deleteRelease(
   env: Env,
   id: string
 ): Promise<{ id: string; deleted: boolean }> {
+  await ensureRuntimeSchema(db);
   const existing = await getReleaseByIdOrLatest(db, id);
 
   if (env.R2_BUCKET) {

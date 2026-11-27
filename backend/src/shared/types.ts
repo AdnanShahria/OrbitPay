@@ -90,6 +90,11 @@ export interface AppVariables {
   sessionId?: string;
   userRole?: string;
   authType?: AuthType;
+  adminUserId?: string;
+  adminSessionId?: string;
+  adminRole?: string;
+  adminEmail?: string;
+  adminAuthMethod?: 'jwt' | 'master_key';
 }
 
 export type AppContextEnv = {
