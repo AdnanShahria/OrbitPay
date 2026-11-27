@@ -205,7 +205,7 @@ export function AdminAuthGate({
                     type="submit"
                     variant="primary"
                     size="medium"
-                    className="w-full"
+                    className="w-full min-h-11"
                     isLoading={isLoading}
                   >
                     Sign In to Central Hub
@@ -268,7 +268,7 @@ export function AdminAuthGate({
                     type="submit"
                     variant="primary"
                     size="medium"
-                    className="w-full"
+                    className="w-full min-h-11"
                     isLoading={isLoading}
                   >
                     Authenticate &amp; Access Command Center

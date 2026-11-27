@@ -1,0 +1,8 @@
+# Tasks: 3-Phase Checkout Hierarchy, OrbitMail Invoice Engine & All-Page UI Polish
+
+- [x] T1: Create `backend/src/features/notifications/payment-email.service.ts` with OrbitMail HTML templates (Submission Ack + Verified Official Invoice) and `routerKvStore` idempotency guard.
+- [x] T2: Wire `notifyPaymentSubmittedEmail` and `notifyPaymentVerifiedInvoiceEmail` into `checkout.service.ts`, `device.service.ts`, `payments.service.ts`, and `transactions.service.ts`, and persist/return real `customerEmail`.
+- [x] T3: Update `frontend/src/features/checkout/useCheckout.ts` to hydrate, edit, and submit `customerEmail` and pass it to `CheckoutStepper` & `PollingStatus`.
+- [x] T4: Redesign `CheckoutDisplayHeader.tsx`, `CheckoutStepper.tsx`, `PollingStatus.tsx`, `CheckoutModal.tsx`, `PublicPaymentLinkPage.tsx`, and `EmbeddedCheckoutView` in `App.tsx` with strict 3-phase hierarchy, uncluttered copy, zero awkward wrapping, and print/save invoice support.
+- [x] T5: Add pure CSS Transitions.dev / Bencho motion utilities to `frontend/src/styles/globals.css` and polish `MerchantLoginScreen.tsx`, `App.tsx` portal shell, `AnalyticsOverview.tsx`, `PaymentIntentsManager.tsx`, `PaymentLinksManager.tsx`, `OrdersManager.tsx`, `WalletManager.tsx`, `TransactionTable.tsx`, `DevicePairingQR.tsx`, `MerchantSettings.tsx`, `IntegrationGuide.tsx`, `AdminAuthGate.tsx`, `AdminDashboard.tsx`, and admin sub-panels.
+- [x] T6: Perform convergence verification across all modified backend & frontend files (imports, TypeScript types, BoardUI semantic token compliance, Apple HIG touch targets, and spec acceptance criteria).

@@ -56,20 +56,23 @@ export function OrbitMarketingBar({
         className,
       )}
     >
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="flex items-center justify-between gap-3">
         <a
           href={siteUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="group flex items-start sm:items-center gap-2.5 min-w-0"
+          className="group flex items-center gap-2.5 min-w-0 flex-1"
         >
           <span
             aria-hidden
-            className="size-7 rounded-lg bg-text-primary text-background-primary-default flex items-center justify-center shrink-0 mt-0.5 sm:mt-0"
+            className={cx(
+              'rounded-lg bg-text-primary text-background-primary-default flex items-center justify-center shrink-0',
+              compact ? 'size-6' : 'size-7',
+            )}
           >
             <svg
               viewBox="0 0 24 24"
-              className="size-3.5"
+              className={compact ? 'size-3' : 'size-3.5'}
               fill="none"
               stroke="currentColor"
               strokeWidth="2.4"
@@ -79,28 +82,28 @@ export function OrbitMarketingBar({
             </svg>
           </span>
           <div className="min-w-0">
-            <div className="flex items-center gap-1.5 text-caption-1-semibold text-text-primary">
+            <div className="flex items-center gap-1 text-caption-1-semibold text-text-primary">
               <span className="truncate">{siteHost}</span>
               <RiArrowRightUpLine
                 className="size-3.5 text-foreground-icon-tertiary group-hover:text-text-primary group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform shrink-0"
                 aria-hidden
               />
             </div>
-            <p className="text-caption-2-regular text-text-secondary truncate">
-              {config.marketingHeadline || 'Automate bKash, Nagad & Rocket payments for your business'}
+            <p className="text-caption-2-regular text-text-tertiary truncate">
+              {config.marketingHeadline || 'Automate bKash, Nagad & Rocket payments'}
             </p>
           </div>
         </a>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="shrink-0">
           {whatsappHref ? (
             <a
               href={whatsappHref}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 h-8 px-3 rounded-full border border-border-button-default bg-background-secondary-default hover:bg-background-secondary-hover text-caption-1-medium text-text-primary transition-colors"
+              className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full border border-border-button-default bg-background-secondary-default hover:bg-background-secondary-hover text-caption-1-medium text-text-primary whitespace-nowrap transition-colors"
             >
-              <WhatsAppGlyph className="size-4 text-[#25D366] shrink-0" />
+              <WhatsAppGlyph className="size-3.5 text-[#25D366] shrink-0" />
               <span>{config.marketingCtaLabel || 'Setup on WhatsApp'}</span>
             </a>
           ) : (
@@ -108,10 +111,10 @@ export function OrbitMarketingBar({
               href={siteUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full border border-border-button-default bg-background-secondary-default hover:bg-background-secondary-hover text-caption-1-medium text-text-primary transition-colors"
+              className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full border border-border-button-default bg-background-secondary-default hover:bg-background-secondary-hover text-caption-1-medium text-text-primary whitespace-nowrap transition-colors"
             >
               <RiShieldCheckLine className="size-3.5 text-status-lime-text shrink-0" aria-hidden />
-              <span>{config.marketingCtaLabel || 'Get ORBIT for your business'}</span>
+              <span>{config.marketingCtaLabel || 'Get ORBIT'}</span>
             </a>
           )}
         </div>
@@ -141,12 +144,12 @@ export function OrbitFloatingWhatsapp({
       rel="noopener noreferrer"
       aria-label="Chat on WhatsApp to set up automated payments for your business"
       title="Setup automated MFS payments for your business on WhatsApp"
-      className="fixed bottom-4 end-4 sm:bottom-6 sm:end-6 z-40 inline-flex items-center gap-2 h-11 px-3.5 rounded-full border border-border-button-default bg-background-primary-default/90 backdrop-blur-xl shadow-dropdown hover:border-border-button-hover hover:shadow-md transition-all group"
+      className="fixed bottom-4 end-4 sm:bottom-6 sm:end-6 z-40 inline-flex items-center gap-2 min-h-11 h-11 px-3.5 rounded-full border border-border-button-default bg-background-primary-default/90 backdrop-blur-xl shadow-dropdown hover:border-border-button-hover hover:shadow-md transition-all group"
     >
       <span className="size-7 rounded-full bg-[#25D366]/15 text-[#1CA650] flex items-center justify-center shrink-0">
         <WhatsAppGlyph className="size-4" />
       </span>
-      <span className="text-caption-1-medium text-text-primary hidden sm:inline">
+      <span className="text-caption-1-medium text-text-primary hidden sm:inline whitespace-nowrap">
         Setup your business
       </span>
     </a>

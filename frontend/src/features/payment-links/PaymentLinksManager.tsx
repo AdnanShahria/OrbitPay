@@ -220,26 +220,30 @@ export function PaymentLinksManager() {
     <div className="flex w-full flex-col gap-5">
       <Card>
         <CardContent className="flex flex-col justify-between gap-4 pt-5 sm:flex-row sm:items-center sm:pt-6">
-          <div className="space-y-1">
-            <h2 className="flex items-center gap-2 text-title-2-medium text-text-primary">
-              <RiLinksLine className="size-5 shrink-0 text-foreground-icon-secondary" aria-hidden />
-              <span>Shareable No-Code Payment Links</span>
-            </h2>
-            <p className="text-body-regular text-text-secondary">
-              Publish branded{' '}
-              <code className="font-mono text-text-primary">
-                /{merchantSlug}/slug-name
-              </code>{' '}
-              checkout pages and receive live payment-received alerts the moment funds settle.
-            </p>
+          <div className="flex items-start gap-3.5 min-w-0">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-border-button-default bg-background-secondary-default text-foreground-icon-primary">
+              <RiLinksLine className="size-5" aria-hidden />
+            </div>
+            <div className="space-y-0.5 min-w-0">
+              <h2 className="text-title-2-medium text-text-primary">
+                Shareable Payment Links
+              </h2>
+              <p className="text-body-regular text-text-secondary">
+                No-code{' '}
+                <code className="font-mono text-text-primary">
+                  /{merchantSlug}/slug
+                </code>{' '}
+                checkout pages with instant settlement alerts.
+              </p>
+            </div>
           </div>
 
           <Button
             variant="primary"
-            size="medium"
+            size="small"
             leadingIcon={RiAddLine}
             onClick={openCreateModal}
-            className="min-h-11 shrink-0"
+            className="min-h-11 sm:min-h-10 shrink-0"
           >
             Create Payment Link
           </Button>
@@ -295,15 +299,23 @@ export function PaymentLinksManager() {
                   <TableRow key={link.id} id={link.id}>
                     <TableCell>
                       <div className="space-y-1 min-w-0">
-                        <div className="text-body-medium text-text-primary truncate">
+                        <div
+                          title={link.title}
+                          className="text-body-medium text-text-primary truncate max-w-[260px]"
+                        >
                           {link.title}
                         </div>
                         <div className="flex items-center gap-2 text-caption-2-medium text-text-tertiary">
-                          <span className="font-mono text-text-secondary truncate max-w-xs">
+                          <span
+                            title={sharePath}
+                            className="font-mono text-text-secondary truncate max-w-[200px]"
+                          >
                             {sharePath}
                           </span>
                           <span aria-hidden>·</span>
-                          <span>{formatDate(link.createdAt)}</span>
+                          <span className="whitespace-nowrap tabular-nums tnum">
+                            {formatDate(link.createdAt)}
+                          </span>
                         </div>
                       </div>
                     </TableCell>
@@ -315,7 +327,7 @@ export function PaymentLinksManager() {
                     </TableCell>
 
                     <TableCell>
-                      <div className="font-mono tabular-nums tnum">
+                      <div className="font-mono tabular-nums tnum whitespace-nowrap">
                         {link.amountType === 'FIXED' && link.fixedAmount != null ? (
                           <span className="text-body-medium text-text-primary">
                             {formatBDT(link.fixedAmount)}
@@ -338,7 +350,7 @@ export function PaymentLinksManager() {
                     </TableCell>
 
                     <TableCell>
-                      <span className="font-mono text-caption-1-medium text-text-primary tabular-nums">
+                      <span className="font-mono text-caption-1-medium text-text-primary tabular-nums tnum whitespace-nowrap">
                         {link.usedCount}
                         {link.maxUses != null ? ` / ${link.maxUses}` : ' uses'}
                       </span>
@@ -354,7 +366,7 @@ export function PaymentLinksManager() {
                     </TableCell>
 
                     <TableCell className="text-end">
-                      <div className="flex items-center justify-end gap-1.5">
+                      <div className="shrink-0 flex items-center justify-end gap-1.5">
                         <Button
                           variant="secondary"
                           size="xs"

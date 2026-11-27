@@ -47,6 +47,7 @@ import {
   RiFlashlightLine,
   RiAdminLine,
   RiAppsLine,
+  RiSettings3Line,
   RiTelegramLine,
 } from '@remixicon/react';
 
@@ -290,7 +291,36 @@ export function MerchantSettings() {
 
   return (
     <div className="w-full space-y-6">
-      <form onSubmit={handleSaveSettings} className="space-y-6">
+      <Card>
+        <CardContent className="flex flex-col justify-between gap-4 pt-5 sm:flex-row sm:items-center sm:pt-6">
+          <div className="flex items-start gap-3.5 min-w-0">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-border-button-default bg-background-secondary-default text-foreground-icon-primary">
+              <RiSettings3Line className="size-5" aria-hidden />
+            </div>
+            <div className="space-y-0.5 min-w-0">
+              <h2 className="text-title-2-medium text-text-primary">
+                Storefront &amp; Webhook Settings
+              </h2>
+              <p className="text-body-regular text-text-secondary">
+                Verification engine, active modules, API credentials, and signed webhook delivery.
+              </p>
+            </div>
+          </div>
+
+          <Button
+            type="submit"
+            form="merchant-settings-form"
+            variant="primary"
+            size="small"
+            isLoading={updateSettingsMutation.isPending}
+            className="min-h-11 sm:min-h-10 shrink-0"
+          >
+            Save configuration
+          </Button>
+        </CardContent>
+      </Card>
+
+      <form id="merchant-settings-form" onSubmit={handleSaveSettings} className="space-y-6">
         {/* Core Store Profile */}
         <Card>
           <CardHeader>
@@ -301,7 +331,7 @@ export function MerchantSettings() {
               <div>
                 <CardTitle>Merchant Profile &amp; Verification Engine</CardTitle>
                 <CardDescription>
-                  Configure your business identity, verification strategy, receipt proof rules, and active product modules.
+                  Business identity, verification strategy, receipt proof rules, and active modules.
                 </CardDescription>
               </div>
             </div>
@@ -360,7 +390,7 @@ export function MerchantSettings() {
                     </Chip>
                   </div>
                   <p className="text-caption-1-regular text-text-secondary">
-                    Instantly verifies via Android companion SMS when online; safely queues to Admin Review if phone is offline or delayed.
+                    Instant Android SMS verification with automatic Admin Review fallback when offline.
                   </p>
                 </button>
 
@@ -384,7 +414,7 @@ export function MerchantSettings() {
                     </Chip>
                   </div>
                   <p className="text-caption-1-regular text-text-secondary">
-                    Works without an Android phone. Every submission enters Admin Review immediately for 1-click approval in Portal or your storefront admin.
+                    No Android device needed — submissions enter Admin Review for 1-click approval.
                   </p>
                 </button>
               </div>
@@ -444,7 +474,7 @@ export function MerchantSettings() {
                     Allow base amount fallback
                   </span>
                   <span className="text-caption-1-regular text-text-secondary">
-                    Auto-match when buyer forgets poisha code (e.g. sends ৳500 instead of ৳500.03) with strict TrxID + sender check.
+                    Auto-match base amount when buyer omits poisha code (strict TrxID + sender check).
                   </span>
                 </div>
                 <Switch
@@ -460,7 +490,7 @@ export function MerchantSettings() {
                     Late SMS auto-approve
                   </span>
                   <span className="text-caption-1-regular text-text-secondary">
-                    Automatically settle escalated items if the Android companion SMS arrives after the grace window.
+                    Auto-settle escalated payments if the companion SMS arrives after the grace window.
                   </span>
                 </div>
                 <Switch
@@ -837,7 +867,7 @@ export function MerchantSettings() {
             <div>
               <CardTitle>Webhook Deliveries &amp; Replay</CardTitle>
               <CardDescription>
-                Inspect outbound webhook attempts and replay failed deliveries with their original signed payload.
+                Inspect outbound attempts and replay failed signed deliveries.
               </CardDescription>
             </div>
             <Button
@@ -846,6 +876,7 @@ export function MerchantSettings() {
               leadingIcon={RiRefreshLine}
               isLoading={webhooksFetching}
               onClick={() => refetchWebhooks()}
+              className="min-h-11 sm:min-h-10 shrink-0"
             >
               Refresh
             </Button>
@@ -894,11 +925,17 @@ export function MerchantSettings() {
                   return (
                     <TableRow key={d.id} id={d.id}>
                       <TableCell>
-                        <div className="space-y-0.5">
-                          <span className="font-mono text-caption-1-semibold text-text-primary block">
+                        <div className="space-y-0.5 min-w-0">
+                          <span
+                            title={d.eventType}
+                            className="font-mono text-caption-1-semibold text-text-primary block truncate max-w-[200px]"
+                          >
                             {d.eventType}
                           </span>
-                          <span className="font-mono text-caption-2-regular text-text-tertiary block">
+                          <span
+                            title={d.externalOrderId}
+                            className="font-mono text-caption-2-regular text-text-tertiary block truncate max-w-[200px]"
+                          >
                             {d.externalOrderId}
                           </span>
                         </div>
@@ -909,30 +946,32 @@ export function MerchantSettings() {
                         </Chip>
                       </TableCell>
                       <TableCell>
-                        <span className="font-mono text-caption-1-medium text-text-primary tabular-nums">
+                        <span className="font-mono text-caption-1-medium text-text-primary tabular-nums tnum whitespace-nowrap">
                           {d.responseStatus ?? '—'}
                         </span>
                       </TableCell>
                       <TableCell>
-                        <span className="font-mono text-caption-1-regular text-text-secondary tabular-nums">
+                        <span className="font-mono text-caption-1-regular text-text-secondary tabular-nums tnum whitespace-nowrap">
                           {d.attemptCount}
                         </span>
                       </TableCell>
                       <TableCell>
-                        <span className="text-caption-2-regular text-text-secondary tabular-nums">
+                        <span className="text-caption-2-regular text-text-secondary tabular-nums tnum whitespace-nowrap">
                           {formatDate(d.lastAttemptAt)}
                         </span>
                       </TableCell>
                       <TableCell className="text-end">
-                        <Button
-                          variant="secondary"
-                          size="xs"
-                          leadingIcon={RiRefreshLine}
-                          isLoading={replayingId === d.id}
-                          onClick={() => handleReplay(d.id)}
-                        >
-                          Replay
-                        </Button>
+                        <div className="shrink-0 flex items-center justify-end gap-1.5">
+                          <Button
+                            variant="secondary"
+                            size="xs"
+                            leadingIcon={RiRefreshLine}
+                            isLoading={replayingId === d.id}
+                            onClick={() => handleReplay(d.id)}
+                          >
+                            Replay
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   );

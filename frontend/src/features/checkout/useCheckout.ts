@@ -111,6 +111,7 @@ export interface CheckoutSessionData {
   provider?: MfsProvider | null;
   verificationMode?: VerificationMode;
   receiptPolicy?: ReceiptPolicy;
+  customerEmail?: string | null;
   deviceStatus?: DeviceStatusSnapshot;
   activeWallets: ActiveWallet[];
   display?: PaymentDisplayMetadata;
@@ -138,6 +139,7 @@ export interface VerifyCheckoutResponse {
   matchType?: string | null;
   escalationReason?: string | null;
   provider: MfsProvider;
+  customerEmail?: string | null;
   deviceOnline?: boolean;
   receiptPolicy?: ReceiptPolicy;
   stateVersion?: number;
@@ -196,6 +198,12 @@ export function useCheckout(config: CheckoutConfig) {
     initialAmount > 0 ? initialAmount.toFixed(2) : '',
   );
   const [trxId, setTrxId] = useState('');
+  const [customerEmail, setCustomerEmail] = useState<string>(() =>
+    config.customerEmail?.trim() &&
+    config.customerEmail.trim().toLowerCase() !== 'buyer@orbitsaas.cloud'
+      ? config.customerEmail.trim()
+      : '',
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSessionLoading, setIsSessionLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -473,6 +481,12 @@ export function useCheckout(config: CheckoutConfig) {
         if (data.actions) setActions(data.actions);
         if (data.receiptUrl) setReceiptUrl(data.receiptUrl);
         if (data.trxId) setTrxId(data.trxId);
+        if (
+          data.customerEmail?.trim() &&
+          data.customerEmail.trim().toLowerCase() !== 'buyer@orbitsaas.cloud'
+        ) {
+          setCustomerEmail(data.customerEmail.trim());
+        }
 
         setPaidAmount(
           data.paidAmount != null
@@ -605,6 +619,7 @@ export function useCheckout(config: CheckoutConfig) {
     setErrorMessage(null);
     const cleanSender = senderNumber.trim().replace(/^\+88/, '');
     const cleanTrx = trxId.trim().toUpperCase();
+    const cleanEmail = customerEmail.trim();
     const numericPaid = Number(paidAmount);
 
     if (!activeWallet) {
@@ -623,6 +638,10 @@ export function useCheckout(config: CheckoutConfig) {
     }
     if (!cleanTrx || cleanTrx.length < 3) {
       setErrorMessage('Please enter a valid Transaction ID (TrxID).');
+      return;
+    }
+    if (cleanEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      setErrorMessage('Please enter a valid email address or leave it blank.');
       return;
     }
     if (
@@ -650,8 +669,8 @@ export function useCheckout(config: CheckoutConfig) {
         sessionToken,
       };
 
-      if (config.customerEmail?.trim()) {
-        payload.customerEmail = config.customerEmail.trim();
+      if (cleanEmail && cleanEmail.toLowerCase() !== 'buyer@orbitsaas.cloud') {
+        payload.customerEmail = cleanEmail;
       }
       if (receiptAssetId) {
         payload.receiptAssetId = receiptAssetId;
@@ -673,6 +692,12 @@ export function useCheckout(config: CheckoutConfig) {
 
       setSubmitAttempts((prev) => Math.min(MAX_SUBMIT_ATTEMPTS, prev + 1));
       if (result.paymentIntentId) setPaymentIntentId(result.paymentIntentId);
+      if (
+        result.customerEmail?.trim() &&
+        result.customerEmail.trim().toLowerCase() !== 'buyer@orbitsaas.cloud'
+      ) {
+        setCustomerEmail(result.customerEmail.trim());
+      }
 
       if (result.status === 'VERIFIED') {
         const finalAmount = Number(result.paidAmount ?? result.amount ?? numericPaid);
@@ -816,6 +841,8 @@ export function useCheckout(config: CheckoutConfig) {
     setPaidAmount,
     trxId,
     setTrxId,
+    customerEmail,
+    setCustomerEmail,
     sessionId,
     paymentIntentId,
     sessionToken,

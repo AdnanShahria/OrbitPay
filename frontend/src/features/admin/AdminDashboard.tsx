@@ -201,7 +201,7 @@ function AdminDashboardContent({
               )}
             </div>
             <p className="text-caption-1-regular text-text-tertiary hidden sm:block truncate">
-              Multi-tenant storefront orchestration &amp; fleet monitor
+              Multi-tenant orchestration &amp; fleet monitor
             </p>
           </div>
         </div>

@@ -148,22 +148,26 @@ export function OrdersManager() {
       {/* Header Summary Banner */}
       <Card>
         <CardContent className="flex flex-col justify-between gap-4 pt-5 sm:flex-row sm:items-center sm:pt-6">
-          <div className="space-y-1">
-            <div className="flex flex-wrap items-center gap-2.5">
-              <h2 className="flex items-center gap-2 text-title-2-medium text-text-primary">
-                <RiShoppingBag3Line className="size-5 shrink-0 text-foreground-icon-secondary" aria-hidden />
-                <span>Orders &amp; Bi-Directional COD Sync</span>
-              </h2>
-              {pendingCount > 0 && (
-                <Chip variant="bold" color="yellow" className="gap-1.5">
-                  <StatusDot color="yellow" />
-                  <span>{pendingCount} awaiting confirmation</span>
-                </Chip>
-              )}
+          <div className="flex items-start gap-3.5 min-w-0">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-border-button-default bg-background-secondary-default text-foreground-icon-primary">
+              <RiShoppingBag3Line className="size-5" aria-hidden />
             </div>
-            <p className="text-body-regular text-text-secondary">
-              Confirm Cash-on-Delivery, Card, and ORBIT MFS orders in real time. Every action dispatches a signed webhook back to your e-commerce admin panel.
-            </p>
+            <div className="space-y-0.5 min-w-0">
+              <div className="flex flex-wrap items-center gap-2.5">
+                <h2 className="text-title-2-medium text-text-primary">
+                  Orders &amp; COD Sync
+                </h2>
+                {pendingCount > 0 && (
+                  <Chip variant="bold" color="yellow" className="gap-1.5">
+                    <StatusDot color="yellow" />
+                    <span>{pendingCount} awaiting confirmation</span>
+                  </Chip>
+                )}
+              </div>
+              <p className="text-body-regular text-text-secondary">
+                Confirm Cash-on-Delivery, Card, and ORBIT MFS orders with signed storefront sync.
+              </p>
+            </div>
           </div>
 
           <Button
@@ -172,7 +176,7 @@ export function OrdersManager() {
             onClick={() => refetch()}
             isLoading={isFetching}
             leadingIcon={RiRefreshLine}
-            className="shrink-0"
+            className="min-h-11 sm:min-h-10 shrink-0"
           >
             Refresh Orders
           </Button>
@@ -269,17 +273,20 @@ export function OrdersManager() {
                     <TableCell>
                       <div className="space-y-0.5 min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="font-mono text-body-medium text-text-primary">
+                          <span
+                            title={order.externalOrderId}
+                            className="font-mono text-body-medium text-text-primary truncate max-w-[160px]"
+                          >
                             {order.externalOrderId}
                           </span>
-                          <span className="text-caption-2-regular text-text-tertiary tabular-nums">
+                          <span className="text-caption-2-regular text-text-tertiary whitespace-nowrap tabular-nums tnum">
                             {formatDate(order.createdAt)}
                           </span>
                         </div>
-                        <div className="text-caption-1-medium text-text-primary truncate">
+                        <div className="text-caption-1-medium text-text-primary truncate max-w-[220px]">
                           {order.customerName || 'Guest Customer'}
                         </div>
-                        <div className="text-caption-2-regular text-text-secondary font-mono tabular-nums">
+                        <div className="text-caption-2-regular text-text-secondary font-mono tabular-nums whitespace-nowrap">
                           {order.customerPhone || order.customerEmail || 'No contact'}
                         </div>
                       </div>
@@ -292,7 +299,10 @@ export function OrdersManager() {
                           {order.itemsSummary || 'Standard storefront order'}
                         </p>
                         {order.shippingAddress && (
-                          <p className="text-caption-2-regular text-text-tertiary truncate">
+                          <p
+                            title={order.shippingAddress}
+                            className="text-caption-2-regular text-text-tertiary truncate"
+                          >
                             {order.shippingAddress}
                           </p>
                         )}
@@ -302,7 +312,7 @@ export function OrdersManager() {
                     {/* Method & Payment */}
                     <TableCell>
                       <div className="flex flex-col items-start gap-1.5">
-                        <div className="flex flex-wrap items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 whitespace-nowrap">
                           <Chip variant="caption" color={methodBadge.color}>
                             {methodBadge.label}
                           </Chip>
@@ -311,7 +321,10 @@ export function OrdersManager() {
                           </Chip>
                         </div>
                         {order.trxId && (
-                          <span className="font-mono text-caption-2-medium text-text-secondary">
+                          <span
+                            title={order.trxId}
+                            className="font-mono text-caption-2-medium text-text-secondary truncate max-w-[160px]"
+                          >
                             TrxID: {order.trxId}
                           </span>
                         )}
@@ -320,7 +333,7 @@ export function OrdersManager() {
 
                     {/* Amounts */}
                     <TableCell>
-                      <div className="space-y-0.5 font-mono tabular-nums tnum">
+                      <div className="space-y-0.5 font-mono tabular-nums tnum whitespace-nowrap">
                         <div className="text-body-medium text-text-primary">
                           {formatBDT(order.paidAmount ?? order.uniqueAmount ?? order.baseAmount)}
                         </div>
@@ -350,7 +363,7 @@ export function OrdersManager() {
 
                     {/* 1-Click Bi-Directional Actions */}
                     <TableCell className="text-end">
-                      <div className="flex flex-wrap items-center justify-end gap-1.5">
+                      <div className="shrink-0 flex items-center justify-end gap-1.5">
                         {(order.orderStatus === 'NEW' ||
                           order.orderStatus === 'AWAITING_CONFIRMATION') && (
                           <Button

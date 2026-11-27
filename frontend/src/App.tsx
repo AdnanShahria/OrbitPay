@@ -727,15 +727,24 @@ function AuthenticatedMerchantPortal({ onEnterAdmin }: { onEnterAdmin: () => voi
           {activeTab === 'wallets' && <WalletManager />}
 
           {activeTab === 'transactions' && (
-            <div className="space-y-4">
-              <div>
-                <h2 className="text-title-2-medium text-text-primary">
-                  SMS Transaction Ledger &amp; Typo Resolver
-                </h2>
-                <p className="text-body-regular text-text-secondary mt-1">
-                  All captured MFS alerts from your Android companion phone. Click &quot;Rescue Typo&quot; to manually bind customer orders.
-                </p>
-              </div>
+            <div className="space-y-5">
+              <Card>
+                <CardContent className="flex flex-col justify-between gap-4 pt-5 sm:flex-row sm:items-center sm:pt-6">
+                  <div className="flex items-start gap-3">
+                    <div className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-border-button-default bg-background-secondary-default text-foreground-icon-primary">
+                      <RiFileList3Line className="size-5" aria-hidden />
+                    </div>
+                    <div className="space-y-0.5">
+                      <h2 className="text-title-2-medium text-text-primary">
+                        SMS Transaction Ledger &amp; Typo Resolver
+                      </h2>
+                      <p className="text-body-regular text-text-secondary">
+                        Captured MFS SMS alerts from your companion phone with one-click typo matching.
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
               <TransactionTable />
             </div>
           )}
@@ -747,85 +756,97 @@ function AuthenticatedMerchantPortal({ onEnterAdmin }: { onEnterAdmin: () => voi
           {activeTab === 'integration' && <IntegrationGuide />}
 
           {activeTab === 'checkout_demo' && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Interactive Standalone &amp; Embed Checkout Playground</CardTitle>
-                <CardDescription>
-                  Test the exact buyer experience your customers see when checking out on {storeName}, including automatic positive poisha (.01, .02) allocation.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <Input
-                    label="Simulated Order Amount (BDT)"
-                    type="number"
-                    value={String(demoAmount)}
-                    onChange={(val) => setDemoAmount(Number(val) || 0)}
-                    inputClassName="font-mono tabular-nums tnum"
-                  />
-                  <Input
-                    label="Simulated Order ID"
-                    value={demoOrderId}
-                    onChange={setDemoOrderId}
-                    inputClassName="font-mono"
-                  />
-                  <Input
-                    label="Customer Email (Optional)"
-                    type="email"
-                    value={demoCustomerEmail}
-                    onChange={setDemoCustomerEmail}
-                    placeholder="Optional"
-                  />
-                </div>
-
-                <div className="flex items-center gap-3">
+            <div className="space-y-5">
+              <Card>
+                <CardContent className="flex flex-col justify-between gap-4 pt-5 sm:flex-row sm:items-center sm:pt-6">
+                  <div className="flex items-start gap-3">
+                    <div className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-border-button-default bg-background-secondary-default text-foreground-icon-primary">
+                      <RiShoppingBag3Line className="size-5" aria-hidden />
+                    </div>
+                    <div className="space-y-0.5">
+                      <h2 className="text-title-2-medium text-text-primary">
+                        Checkout Widget Playground
+                      </h2>
+                      <p className="text-body-regular text-text-secondary">
+                        Preview the exact 3-phase buyer checkout and OrbitMail invoice flow for {storeName}.
+                      </p>
+                    </div>
+                  </div>
                   <Button
                     variant="primary"
                     size="medium"
                     onClick={() => setIsDemoModalOpen(true)}
                     leadingIcon={RiShoppingBag3Line}
+                    className="min-h-11 sm:min-h-10 shrink-0"
                   >
                     Launch Modal Checkout
                   </Button>
-                </div>
+                </CardContent>
+              </Card>
 
-                {demoVerifiedResult && (
-                  <div className="p-4 rounded-2xl bg-notification-success-background border border-separator-border text-notification-success-foreground space-y-1">
-                    <span className="text-body-medium block">Demo payment verified</span>
-                    <p className="text-caption-1-regular">
-                      Order #{demoVerifiedResult.orderId} was matched with TrxID{' '}
-                      <span className="font-mono">{demoVerifiedResult.trxId}</span> for{' '}
-                      <span className="font-mono tabular-nums tnum">
-                        {formatBDT(demoVerifiedResult.amount)}
-                      </span>
-                      {demoVerifiedResult.matchType ? ` (${demoVerifiedResult.matchType})` : ''}. Webhook dispatched to client store.
-                    </p>
+              <Card>
+                <CardContent className="p-5 sm:p-6 space-y-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <Input
+                      label="Simulated Order Amount (BDT)"
+                      type="number"
+                      value={String(demoAmount)}
+                      onChange={(val) => setDemoAmount(Number(val) || 0)}
+                      inputClassName="font-mono tnum"
+                    />
+                    <Input
+                      label="Simulated Order ID"
+                      value={demoOrderId}
+                      onChange={setDemoOrderId}
+                      inputClassName="font-mono"
+                    />
+                    <Input
+                      label="Customer Email (OrbitMail Invoice)"
+                      type="email"
+                      value={demoCustomerEmail}
+                      onChange={setDemoCustomerEmail}
+                      placeholder="buyer@example.com"
+                    />
                   </div>
-                )}
 
-                <div className="space-y-2.5 pt-4 border-t border-separator-border">
-                  <div className="flex items-center justify-between gap-2">
-                    <h3 className="text-body-medium text-text-primary">
-                      Storefront Script Embed Code
-                    </h3>
-                    <Button
-                      variant="secondary"
-                      size="xs"
-                      leadingIcon={RiFileCopyLine}
-                      onClick={() => {
-                        navigator.clipboard.writeText(embedSnippet);
-                        toast.success('Embed snippet copied to clipboard');
-                      }}
-                    >
-                      Copy snippet
-                    </Button>
+                  {demoVerifiedResult && (
+                    <div className="p-4 rounded-2xl bg-notification-success-background border border-separator-border text-notification-success-foreground space-y-1">
+                      <span className="text-body-medium block">Demo payment verified</span>
+                      <p className="text-caption-1-regular">
+                        Order #{demoVerifiedResult.orderId} matched with TrxID{' '}
+                        <span className="font-mono">{demoVerifiedResult.trxId}</span> for{' '}
+                        <span className="font-mono tnum">
+                          {formatBDT(demoVerifiedResult.amount)}
+                        </span>
+                        {demoVerifiedResult.matchType ? ` (${demoVerifiedResult.matchType})` : ''}. Webhook dispatched.
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="space-y-2.5 pt-4 border-t border-separator-border">
+                    <div className="flex items-center justify-between gap-2">
+                      <h3 className="text-body-medium text-text-primary">
+                        Storefront Script Embed Code
+                      </h3>
+                      <Button
+                        variant="secondary"
+                        size="xs"
+                        leadingIcon={RiFileCopyLine}
+                        onClick={() => {
+                          navigator.clipboard.writeText(embedSnippet);
+                          toast.success('Embed snippet copied to clipboard');
+                        }}
+                      >
+                        Copy snippet
+                      </Button>
+                    </div>
+                    <pre className="p-4 rounded-2xl bg-background-secondary-default border border-border-button-default text-text-primary font-mono text-caption-1-regular overflow-x-auto select-all leading-relaxed">
+                      {embedSnippet}
+                    </pre>
                   </div>
-                  <pre className="p-4 rounded-2xl bg-background-secondary-default border border-border-button-default text-text-primary font-mono text-caption-1-regular overflow-x-auto select-all leading-relaxed">
-                    {embedSnippet}
-                  </pre>
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            </div>
           )}
         </main>
       </div>
@@ -869,6 +890,8 @@ function EmbeddedCheckoutView({ config }: { config: CheckoutConfig }) {
     setPaidAmount,
     trxId,
     setTrxId,
+    customerEmail,
+    setCustomerEmail,
     sessionToken,
     merchantId,
     orderId,
@@ -907,10 +930,10 @@ function EmbeddedCheckoutView({ config }: { config: CheckoutConfig }) {
   } = useCheckout(config);
 
   return (
-    <div className="min-h-screen bg-background-full flex flex-col items-center justify-center p-4 sm:p-6">
-      <div className="w-full max-w-lg space-y-4">
+    <div className="min-h-screen bg-background-full flex flex-col items-center justify-center p-4 sm:p-6 antialiased">
+      <div className="w-full max-w-[460px] space-y-4">
         <Card variant="elevated" className="w-full">
-          <CardContent className="p-6 space-y-6">
+          <CardContent className="p-6 space-y-5">
             <div className="pb-4 border-b border-separator-border">
               <CheckoutDisplayHeader
                 storeName={storeName}
@@ -932,6 +955,10 @@ function EmbeddedCheckoutView({ config }: { config: CheckoutConfig }) {
                 trxId={verifiedData?.trxId || trxId}
                 senderNumber={senderNumber}
                 merchantId={merchantId}
+                customerEmail={customerEmail}
+                storeName={storeName}
+                baseAmount={baseAmount}
+                offsetCents={offsetCents}
                 initialVerified={currentStep === 'SUCCESS'}
                 initialMatchType={verifiedData?.matchType ?? null}
                 initialStatus={pollingStatus}
@@ -965,6 +992,8 @@ function EmbeddedCheckoutView({ config }: { config: CheckoutConfig }) {
                 onChangePaidAmount={setPaidAmount}
                 trxId={trxId}
                 onChangeTrxId={setTrxId}
+                customerEmail={customerEmail}
+                onChangeCustomerEmail={setCustomerEmail}
                 verificationMode={verificationMode}
                 receiptPolicy={receiptPolicy}
                 deviceStatus={deviceStatus}
@@ -984,12 +1013,11 @@ function EmbeddedCheckoutView({ config }: { config: CheckoutConfig }) {
               />
             )}
 
-            <div className="pt-4 border-t border-separator-border flex items-center justify-between text-caption-2-medium text-text-tertiary">
-              <span className="flex items-center gap-1.5">
-                <RiShieldCheckLine className="size-3.5 text-status-lime-text" aria-hidden />
-                <span>256-bit encrypted MFS verification</span>
+            <div className="pt-4 border-t border-separator-border flex items-center justify-center text-caption-2-medium text-text-tertiary">
+              <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+                <RiShieldCheckLine className="size-3.5 text-status-lime-text shrink-0" aria-hidden />
+                <span>ORBIT Pay Hub · 0% gateway fee</span>
               </span>
-              <span className="text-caption-2-semibold text-text-secondary">ORBIT Pay Hub</span>
             </div>
           </CardContent>
         </Card>

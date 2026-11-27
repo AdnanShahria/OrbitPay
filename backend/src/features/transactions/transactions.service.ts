@@ -15,6 +15,10 @@ import type { AppContextEnv, Env } from '../../shared/types';
 import { syncVerifiedOrderAndSession } from '../payments/verification.engine';
 import { incrementWalletVolume } from '../wallets/wallets.service';
 import { dispatchWebhook, sendPushToMerchantDevices } from '../webhooks/webhook.dispatcher';
+import {
+  notifyPaymentVerifiedInvoiceEmail,
+  resolveCustomerEmailForOrder,
+} from '../notifications/payment-email.service';
 import type { ListTransactionsQuery, ManualMatchInput } from './transactions.schema';
 
 export interface ListTransactionsResult {
@@ -212,6 +216,17 @@ export async function manualMatchTransaction(
 
   await incrementWalletVolume(db, merchant.id, row.provider, row.amount);
 
+  const resolvedCustomer = await resolveCustomerEmailForOrder(db, {
+    merchantId: merchant.id,
+    externalRefId: payload.externalOrderId,
+    paymentIntentId: intent?.id ?? null,
+    candidates: [payload.customerEmail],
+    customerJson: intent?.customerJson,
+  });
+
+  const resolutionSource =
+    ctx?.get('authType') === 'device' ? 'ORBIT_ANDROID' : 'ORBIT_DASHBOARD';
+
   const webhookData = {
     paymentIntentId: intent?.id ?? null,
     merchantId: merchant.id,
@@ -253,6 +268,31 @@ export async function manualMatchTransaction(
           status: 'MANUAL_VERIFIED',
         }
       ),
+      ...(resolvedCustomer.email && env
+        ? [
+            notifyPaymentVerifiedInvoiceEmail(db, env, {
+              merchantId: merchant.id,
+              storeName: merchant.storeName,
+              externalRefId: payload.externalOrderId,
+              paymentIntentId: intent?.id ?? null,
+              customerEmail: resolvedCustomer.email,
+              customerName: resolvedCustomer.name,
+              customerPhone: resolvedCustomer.phone || row.senderNumber,
+              baseAmount: intent?.baseAmount ?? row.amount,
+              uniqueAmount: intent?.uniqueAmount ?? row.amount,
+              paidAmount: row.amount,
+              offsetCents: intent
+                ? Math.round((intent.uniqueAmount - intent.baseAmount) * 100)
+                : 0,
+              provider: row.provider,
+              trxId: row.trxId,
+              senderNumber: row.senderNumber,
+              matchType: 'MANUAL_VERIFIED',
+              resolutionSource,
+              verifiedAt: now,
+            }),
+          ]
+        : []),
     ])
   );
 

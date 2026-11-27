@@ -128,13 +128,13 @@ export function AdminPlatformSettingsPanel() {
         <Card>
           <CardHeader>
             <div className="flex items-center gap-3">
-              <div className="size-10 rounded-xl border border-border-button-default bg-background-secondary-default flex items-center justify-center shrink-0">
-                <WhatsAppGlyph className="size-5 text-[#25D366]" />
+              <div className="size-10 rounded-xl border border-border-button-default bg-background-secondary-default text-foreground-icon-primary flex items-center justify-center shrink-0">
+                <WhatsAppGlyph className="size-5" />
               </div>
               <div>
-                <CardTitle>Growth, WhatsApp Onboarding &amp; orbitsaas.cloud CTA</CardTitle>
+                <CardTitle>Growth, WhatsApp &amp; orbitsaas.cloud CTA</CardTitle>
                 <CardDescription>
-                  Manage the global WhatsApp number and orbitsaas.cloud promotional strip shown on all public payment links and checkout pages.
+                  Global WhatsApp onboarding and promotional strip across public checkout surfaces.
                 </CardDescription>
               </div>
             </div>
@@ -225,9 +225,9 @@ export function AdminPlatformSettingsPanel() {
             </div>
           </CardContent>
 
-          <CardFooter className="flex items-center justify-between gap-3">
+          <CardFooter className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <span className="text-caption-2-medium text-text-tertiary">
-              Changes propagate immediately to all public payment links and checkout pages.
+              Updates propagate immediately across all public checkout pages.
             </span>
             <Button
               type="submit"
@@ -235,6 +235,7 @@ export function AdminPlatformSettingsPanel() {
               size="medium"
               isLoading={updateMutation.isPending}
               leadingIcon={savedJustNow ? RiCheckLine : RiCheckboxCircleLine}
+              className="min-h-11 sm:min-h-10 shrink-0"
             >
               {savedJustNow ? 'Saved' : 'Save Growth Settings'}
             </Button>

@@ -53,10 +53,10 @@ export function GlobalQueueTable({
     <div className="space-y-4">
       <div>
         <h3 className="text-title-3-semibold text-text-primary">
-          Cross-Storefront Deferred Verification Queue
+          Cross-Storefront Verification Queue
         </h3>
         <p className="text-caption-1-regular text-text-secondary mt-0.5">
-          Customer-submitted payment orders waiting for offline merchant companion phones to ingest matching SMS.
+          Submitted payment orders awaiting matching companion SMS.
         </p>
       </div>
 
@@ -109,40 +109,58 @@ export function GlobalQueueTable({
                   className="hover:bg-background-secondary-default/60"
                 >
                   <TableCell className="text-body-medium text-text-primary">
-                    {item.storeName || item.merchantId}
+                    <span
+                      title={item.storeName || item.merchantId}
+                      className="block truncate max-w-[180px]"
+                    >
+                      {item.storeName || item.merchantId}
+                    </span>
                   </TableCell>
 
                   <TableCell className="font-mono text-body-medium text-text-primary tabular-nums">
-                    {item.externalOrderId}
+                    <span
+                      title={item.externalOrderId}
+                      className="block truncate max-w-[160px]"
+                    >
+                      {item.externalOrderId}
+                    </span>
                   </TableCell>
 
-                  <TableCell className="font-mono text-body-medium text-status-lime-text tabular-nums">
+                  <TableCell className="font-mono text-body-medium text-status-lime-text tabular-nums tnum whitespace-nowrap">
                     {formatBDT(item.expectedAmount)}
                   </TableCell>
 
                   <TableCell>
-                    <div className="flex flex-col">
-                      <span className="font-mono text-caption-1-medium text-text-primary tabular-nums">
+                    <div className="flex flex-col min-w-0">
+                      <span className="font-mono text-caption-1-medium text-text-primary tabular-nums tnum whitespace-nowrap">
                         {item.submittedSender}
                       </span>
-                      <span className="text-caption-2-regular text-text-tertiary">
+                      <span
+                        title={item.customerEmail}
+                        className="text-caption-2-regular text-text-tertiary truncate max-w-[180px]"
+                      >
                         {item.customerEmail}
                       </span>
                     </div>
                   </TableCell>
 
                   <TableCell>
-                    <Chip variant="caption" color="neutral" className="font-mono">
+                    <Chip
+                      variant="caption"
+                      color="neutral"
+                      title={item.submittedTrxId}
+                      className="font-mono whitespace-nowrap"
+                    >
                       {item.submittedTrxId}
                     </Chip>
                   </TableCell>
 
-                  <TableCell className="text-caption-1-regular text-text-secondary tabular-nums">
+                  <TableCell className="text-caption-1-regular text-text-secondary tabular-nums tnum whitespace-nowrap">
                     {formatDate(new Date(item.createdAt))}
                   </TableCell>
 
                   <TableCell className="text-end">
-                    <div className="flex justify-end">
+                    <div className="shrink-0 flex items-center justify-end gap-1.5">
                       {simulatorEnabled ? (
                         <Button
                           variant="secondary"

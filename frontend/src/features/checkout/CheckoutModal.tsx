@@ -25,6 +25,8 @@ export function CheckoutModal({ isOpen, onClose, config }: CheckoutModalProps) {
     setPaidAmount,
     trxId,
     setTrxId,
+    customerEmail,
+    setCustomerEmail,
     sessionToken,
     merchantId,
     orderId,
@@ -101,6 +103,10 @@ export function CheckoutModal({ isOpen, onClose, config }: CheckoutModalProps) {
               trxId={verifiedData?.trxId || trxId}
               senderNumber={senderNumber}
               merchantId={merchantId}
+              customerEmail={customerEmail}
+              storeName={storeName}
+              baseAmount={baseAmount}
+              offsetCents={offsetCents}
               initialVerified={currentStep === 'SUCCESS'}
               initialMatchType={verifiedData?.matchType ?? null}
               initialStatus={pollingStatus}
@@ -134,6 +140,8 @@ export function CheckoutModal({ isOpen, onClose, config }: CheckoutModalProps) {
               onChangePaidAmount={setPaidAmount}
               trxId={trxId}
               onChangeTrxId={setTrxId}
+              customerEmail={customerEmail}
+              onChangeCustomerEmail={setCustomerEmail}
               verificationMode={verificationMode}
               receiptPolicy={receiptPolicy}
               deviceStatus={deviceStatus}
@@ -154,12 +162,12 @@ export function CheckoutModal({ isOpen, onClose, config }: CheckoutModalProps) {
           )}
 
           {/* Security watermark footer */}
-          <div className="pt-5 mt-5 border-t border-separator-border flex items-center justify-between text-caption-2-medium text-text-tertiary">
-            <span className="flex items-center gap-1.5">
-              <RiShieldCheckLine className="size-3.5 text-status-lime-text" aria-hidden />
-              <span>256-bit encrypted MFS verification</span>
+          <div className="pt-4 mt-5 border-t border-separator-border flex items-center justify-between gap-2 text-caption-2-medium text-text-tertiary">
+            <span className="flex items-center gap-1.5 whitespace-nowrap">
+              <RiShieldCheckLine className="size-3.5 text-status-lime-text shrink-0" aria-hidden />
+              <span>256-bit encrypted verification</span>
             </span>
-            <span className="text-caption-2-semibold text-text-secondary">ORBIT Pay Hub</span>
+            <span className="text-caption-2-semibold text-text-secondary whitespace-nowrap">ORBIT Pay Hub</span>
           </div>
         </div>
       </ModalBody>

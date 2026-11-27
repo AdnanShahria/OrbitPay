@@ -284,15 +284,21 @@ export function ProjectManagerTable({
                   className="hover:bg-background-secondary-default/60"
                 >
                   <TableCell>
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
                       <div className="size-9 rounded-xl border border-border-button-default bg-background-secondary-default text-foreground-icon-primary flex items-center justify-center shrink-0">
                         <RiStore2Line className="size-4" aria-hidden />
                       </div>
                       <div className="flex flex-col min-w-0">
-                        <span className="text-body-medium text-text-primary truncate">
+                        <span
+                          title={p.storeName}
+                          className="text-body-medium text-text-primary truncate max-w-[200px]"
+                        >
                           {p.storeName}
                         </span>
-                        <span className="text-caption-2-regular font-mono text-text-tertiary truncate">
+                        <span
+                          title={p.id}
+                          className="text-caption-2-regular font-mono text-text-tertiary truncate max-w-[200px]"
+                        >
                           {p.slug ? `/${p.slug}/... · ` : ''}{p.id}
                         </span>
                       </div>
@@ -306,13 +312,13 @@ export function ProjectManagerTable({
                   </TableCell>
 
                   <TableCell>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 whitespace-nowrap">
                       <StatusDot color={p.isOnline ? 'green' : 'yellow'} />
                       <span className="text-caption-1-medium text-text-secondary">
                         {p.isOnline ? 'Phone online' : 'Offline'}
                       </span>
                     </div>
-                    <span className="text-caption-2-regular text-text-tertiary block mt-0.5 tabular-nums">
+                    <span className="text-caption-2-regular text-text-tertiary block mt-0.5 whitespace-nowrap tabular-nums tnum">
                       {p.lastSeenAt
                         ? `Seen ${formatDate(new Date(p.lastSeenAt))}`
                         : 'No device paired'}
@@ -320,9 +326,9 @@ export function ProjectManagerTable({
                   </TableCell>
 
                   <TableCell>
-                    <div className="flex items-center gap-1.5 text-body-medium font-mono text-text-primary tabular-nums">
+                    <div className="flex items-center gap-1.5 text-body-medium font-mono text-text-primary whitespace-nowrap tabular-nums tnum">
                       <RiSmartphoneLine
-                        className="size-4 text-foreground-icon-tertiary"
+                        className="size-4 text-foreground-icon-tertiary shrink-0"
                         aria-hidden
                       />
                       <span>{p.walletsCount} SIMs</span>
@@ -330,18 +336,21 @@ export function ProjectManagerTable({
                   </TableCell>
 
                   <TableCell>
-                    <div className="text-body-medium font-mono text-status-lime-text tabular-nums">
+                    <div className="text-body-medium font-mono text-status-lime-text whitespace-nowrap tabular-nums tnum">
                       {formatBDT(p.totalVolume)}
                     </div>
-                    <span className="text-caption-2-regular text-text-tertiary block tabular-nums">
+                    <span className="text-caption-2-regular text-text-tertiary block whitespace-nowrap tabular-nums tnum">
                       {p.verifiedCount} verified / {p.unclaimedCount} unclaimed
                     </span>
                   </TableCell>
 
                   <TableCell>
                     {p.webhookUrl ? (
-                      <div className="flex items-center gap-1.5 max-w-xs">
-                        <span className="text-caption-1-medium font-mono text-text-secondary truncate">
+                      <div className="flex items-center gap-1.5 max-w-[220px]">
+                        <span
+                          title={p.webhookUrl}
+                          className="text-caption-1-medium font-mono text-text-secondary truncate"
+                        >
                           {p.webhookUrl}
                         </span>
                         <a
@@ -349,26 +358,26 @@ export function ProjectManagerTable({
                           target="_blank"
                           rel="noreferrer"
                           aria-label={`Open webhook URL for ${p.storeName}`}
-                          className="text-foreground-icon-tertiary hover:text-foreground-icon-primary transition-colors shrink-0"
+                          className="text-foreground-icon-tertiary hover:text-foreground-icon-primary transition-colors duration-150 shrink-0"
                         >
                           <RiExternalLinkLine className="size-3.5" aria-hidden />
                         </a>
                       </div>
                     ) : (
-                      <span className="text-caption-1-regular text-text-tertiary">
-                        Not configured (testing)
+                      <span className="text-caption-1-regular text-text-tertiary whitespace-nowrap">
+                        Not configured
                       </span>
                     )}
-                    <span className="text-caption-2-regular text-text-tertiary block mt-0.5 tabular-nums">
+                    <span className="text-caption-2-regular text-text-tertiary block mt-0.5 whitespace-nowrap tabular-nums tnum">
                       Grace: {p.gracePeriodMinutes} mins
                     </span>
                   </TableCell>
 
                   <TableCell className="text-end">
-                    <div className="flex flex-wrap items-center justify-end gap-1">
+                    <div className="shrink-0 flex items-center justify-end gap-1">
                       <Button
                         variant="ghost"
-                        size="small"
+                        size="xs"
                         onClick={() => setInspectedProject(p)}
                         leadingIcon={RiEyeLine}
                         title="Inspect SIM wallets, SMS ledger, and orders"
@@ -378,7 +387,7 @@ export function ProjectManagerTable({
 
                       <Button
                         variant="ghost"
-                        size="small"
+                        size="xs"
                         onClick={() => openEditModal(p)}
                         leadingIcon={RiEditLine}
                         title="Edit storefront settings"
@@ -388,17 +397,17 @@ export function ProjectManagerTable({
 
                       <Button
                         variant="ghost"
-                        size="small"
+                        size="xs"
                         onClick={() => setSelectedUsersProject(p)}
                         leadingIcon={RiShieldUserLine}
                         title="Manage provisioned client users and JWT sessions"
                       >
-                        Users &amp; Auth
+                        Users
                       </Button>
 
                       <Button
                         variant="ghost"
-                        size="small"
+                        size="xs"
                         onClick={() => setSelectedCreds(p)}
                         leadingIcon={RiShieldKeyholeLine}
                         title="View HMAC Webhook Secret & Device Key"
@@ -408,7 +417,7 @@ export function ProjectManagerTable({
 
                       <Button
                         variant="ghost"
-                        size="small"
+                        size="xs"
                         onClick={() => handleToggleActive(p)}
                         isLoading={updateMutation.isPending}
                         leadingIcon={p.isActive ? RiPauseLine : RiPlayLine}
@@ -421,7 +430,7 @@ export function ProjectManagerTable({
 
                       <Button
                         variant="ghost"
-                        size="small"
+                        size="xs"
                         onClick={() => openDeleteDialog(p)}
                         leadingIcon={RiDeleteBinLine}
                         className="text-text-destructive"

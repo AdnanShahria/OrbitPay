@@ -55,7 +55,7 @@ export function MerchantLoginScreen({ onEnterAdmin }: MerchantLoginScreenProps) 
 
   return (
     <div className="min-h-screen bg-background-full flex flex-col items-center justify-center p-4 sm:p-6 antialiased relative">
-      <div className="absolute top-4 right-4 sm:top-6 sm:right-6">
+      <div className="absolute top-4 end-4 sm:top-6 sm:end-6">
         <ThemeToggle appearance="segmented" size="small" />
       </div>
 
@@ -74,11 +74,11 @@ export function MerchantLoginScreen({ onEnterAdmin }: MerchantLoginScreenProps) 
             ORBIT Pay Hub
           </CardTitle>
           <CardDescription>
-            Sign in to your merchant payment &amp; order command portal
+            Merchant payment &amp; order command portal
           </CardDescription>
         </CardHeader>
 
-        <CardContent className="space-y-5 pt-4 pb-8">
+        <CardContent className="space-y-5 pt-4 pb-7">
           {errorMessage && (
             <div
               role="alert"
@@ -140,7 +140,7 @@ export function MerchantLoginScreen({ onEnterAdmin }: MerchantLoginScreenProps) 
               type="submit"
               variant="primary"
               size="medium"
-              className="w-full mt-2"
+              className="w-full min-h-11 mt-2"
               isLoading={isSubmitting}
             >
               Sign In to Merchant Portal
@@ -148,7 +148,7 @@ export function MerchantLoginScreen({ onEnterAdmin }: MerchantLoginScreenProps) 
           </form>
 
           {/* Provisioning notice (no public self-signup) */}
-          <div className="rounded-2xl border border-separator-border bg-background-secondary-default p-3.5 flex items-start gap-2.5">
+          <div className="rounded-2xl border border-separator-border bg-background-secondary-default p-3.5 flex items-start gap-2.5 transition-colors duration-150">
             <RiShieldCheckLine
               className="size-4 text-foreground-icon-secondary shrink-0 mt-0.5"
               aria-hidden
@@ -158,7 +158,7 @@ export function MerchantLoginScreen({ onEnterAdmin }: MerchantLoginScreenProps) 
                 Invite-only merchant access
               </p>
               <p>
-                Accounts are provisioned by ORBIT SaaS Administrators. Contact your hub administrator if you need credentials or a password reset.
+                Provisioned by ORBIT SaaS Administrators — contact your hub admin for credentials.
               </p>
             </div>
           </div>

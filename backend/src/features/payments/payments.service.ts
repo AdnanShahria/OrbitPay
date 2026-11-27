@@ -29,6 +29,10 @@ import {
   sendDynamicPushToMerchantDevices,
   sendTelegramOfficeAlert,
 } from '../webhooks/webhook.dispatcher';
+import {
+  notifyPaymentVerifiedInvoiceEmail,
+  resolveCustomerEmailForOrder,
+} from '../notifications/payment-email.service';
 import type {
   BackfillPaymentIntentInput,
   CreatePaymentIntentInput,
@@ -835,9 +839,16 @@ export async function resolvePaymentIntent(
       merchant.id
     );
 
+    const resolvedCustomer = await resolveCustomerEmailForOrder(db, {
+      merchantId: merchant.id,
+      externalRefId: updatedIntent.externalRefId,
+      paymentIntentId: updatedIntent.id,
+      customerJson: updatedIntent.customerJson,
+    });
+
     safeWaitUntil(
       authContext?.ctx,
-      Promise.all([
+      Promise.allSettled([
         sendDynamicPushToMerchantDevices(db, env, merchant, {
           event: 'payment.verified',
           paymentIntentId: updatedIntent.id,
@@ -858,6 +869,31 @@ export async function resolvePaymentIntent(
           merchant,
           `✅ Payment Verified [${display.appName || merchant.storeName}]\nRef: ${updatedIntent.externalRefId}\nAmount: ৳${updatedIntent.paidAmount ?? updatedIntent.uniqueAmount}\nTrxID: ${updatedIntent.trxId || 'Manual'}\nSource: ${resolutionSource}`
         ),
+        ...(resolvedCustomer.email && env
+          ? [
+              notifyPaymentVerifiedInvoiceEmail(db, env, {
+                merchantId: merchant.id,
+                storeName: display.appName || merchant.storeName,
+                externalRefId: updatedIntent.externalRefId,
+                paymentIntentId: updatedIntent.id,
+                customerEmail: resolvedCustomer.email,
+                customerName: resolvedCustomer.name,
+                customerPhone: resolvedCustomer.phone || updatedIntent.senderNumber,
+                baseAmount: updatedIntent.baseAmount,
+                uniqueAmount: updatedIntent.uniqueAmount,
+                paidAmount: updatedIntent.paidAmount ?? updatedIntent.uniqueAmount,
+                offsetCents: Math.round(
+                  (updatedIntent.uniqueAmount - updatedIntent.baseAmount) * 100
+                ),
+                provider: updatedIntent.provider,
+                trxId: updatedIntent.trxId,
+                senderNumber: updatedIntent.senderNumber,
+                matchType: updatedIntent.matchType,
+                resolutionSource,
+                verifiedAt: updatedIntent.verifiedAt ?? now,
+              }),
+            ]
+          : []),
       ])
     );
 

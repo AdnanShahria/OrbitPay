@@ -228,22 +228,26 @@ export function PaymentIntentsManager() {
       {/* Summary Header Card */}
       <Card>
         <CardContent className="flex flex-col justify-between gap-4 pt-5 sm:flex-row sm:items-center sm:pt-6">
-          <div className="space-y-1">
-            <div className="flex flex-wrap items-center gap-2.5">
-              <h2 className="flex items-center gap-2 text-title-2-medium text-text-primary">
-                <RiBankCardLine className="size-5 shrink-0 text-foreground-icon-secondary" aria-hidden />
-                <span>Universal Payments &amp; Manual Review</span>
-              </h2>
-              {manualReviewCount > 0 && (
-                <Chip variant="bold" color="yellow" className="gap-1.5">
-                  <StatusDot color="yellow" />
-                  <span>{manualReviewCount} awaiting review</span>
-                </Chip>
-              )}
+          <div className="flex items-start gap-3.5 min-w-0">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-border-button-default bg-background-secondary-default text-foreground-icon-primary">
+              <RiBankCardLine className="size-5" aria-hidden />
             </div>
-            <p className="text-body-regular text-text-secondary">
-              Unified payment intents across E-Commerce, Events, SaaS, and Payment Links. Inspect screenshot proofs and approve or reject with atomic CAS protection.
-            </p>
+            <div className="space-y-0.5 min-w-0">
+              <div className="flex flex-wrap items-center gap-2.5">
+                <h2 className="text-title-2-medium text-text-primary">
+                  Universal Payments &amp; Manual Review
+                </h2>
+                {manualReviewCount > 0 && (
+                  <Chip variant="bold" color="yellow" className="gap-1.5">
+                    <StatusDot color="yellow" />
+                    <span>{manualReviewCount} awaiting review</span>
+                  </Chip>
+                )}
+              </div>
+              <p className="text-body-regular text-text-secondary">
+                Unified payment intents and screenshot proof review across every storefront channel.
+              </p>
+            </div>
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
@@ -253,7 +257,7 @@ export function PaymentIntentsManager() {
               onClick={() => refetch()}
               isLoading={isFetching}
               leadingIcon={RiRefreshLine}
-              className="min-h-11 sm:min-h-8"
+              className="min-h-11 sm:min-h-10"
             >
               Refresh
             </Button>
@@ -266,7 +270,7 @@ export function PaymentIntentsManager() {
                 setNewRefId(`INV-${Math.floor(10000 + Math.random() * 90000)}`);
                 setIsCreateOpen(true);
               }}
-              className="min-h-11 sm:min-h-8"
+              className="min-h-11 sm:min-h-10"
             >
               New Payment Intent
             </Button>
@@ -357,15 +361,18 @@ export function PaymentIntentsManager() {
                   <TableRow key={intent.id} id={intent.id}>
                     <TableCell>
                       <div className="space-y-1 min-w-0">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="font-mono text-body-medium text-text-primary">
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            title={intent.externalRefId}
+                            className="font-mono text-body-medium text-text-primary truncate max-w-[160px]"
+                          >
                             {intent.externalRefId}
                           </span>
-                          <Chip variant="caption" color={verticalBadge.color}>
+                          <Chip variant="caption" color={verticalBadge.color} className="shrink-0">
                             {verticalBadge.label}
                           </Chip>
                         </div>
-                        <span className="text-caption-2-regular text-text-tertiary block tabular-nums">
+                        <span className="text-caption-2-regular text-text-tertiary block whitespace-nowrap tabular-nums tnum">
                           {formatDate(intent.createdAt)} · v{intent.stateVersion}
                         </span>
                       </div>
@@ -373,7 +380,10 @@ export function PaymentIntentsManager() {
 
                     <TableCell>
                       <div className="max-w-xs space-y-0.5">
-                        <div className="text-caption-1-medium text-text-primary truncate">
+                        <div
+                          title={intent.display?.title || intent.display?.appName || 'Payment Intent'}
+                          className="text-caption-1-medium text-text-primary truncate"
+                        >
                           {intent.display?.title || intent.display?.appName || 'Payment Intent'}
                         </div>
                         {intent.display?.subtitle && (
@@ -391,7 +401,7 @@ export function PaymentIntentsManager() {
 
                     <TableCell>
                       <div className="space-y-1">
-                        <div className="flex flex-wrap items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 whitespace-nowrap">
                           {providerMeta ? (
                             <Chip
                               variant="caption"
@@ -412,12 +422,15 @@ export function PaymentIntentsManager() {
                           )}
                         </div>
                         {intent.trxId && (
-                          <div className="font-mono text-caption-2-medium text-text-primary">
+                          <div
+                            title={intent.trxId}
+                            className="font-mono text-caption-2-medium text-text-primary truncate max-w-[160px]"
+                          >
                             {intent.trxId}
                           </div>
                         )}
                         {intent.senderNumber && (
-                          <div className="font-mono text-caption-2-regular text-text-tertiary tabular-nums">
+                          <div className="font-mono text-caption-2-regular text-text-tertiary whitespace-nowrap tabular-nums tnum">
                             {intent.senderNumber}
                           </div>
                         )}
@@ -425,7 +438,7 @@ export function PaymentIntentsManager() {
                     </TableCell>
 
                     <TableCell>
-                      <div className="font-mono tabular-nums tnum space-y-0.5">
+                      <div className="font-mono tabular-nums tnum whitespace-nowrap space-y-0.5">
                         <div className="text-body-medium text-text-primary">
                           {formatBDT(intent.paidAmount ?? intent.uniqueAmount)}
                         </div>
@@ -443,7 +456,10 @@ export function PaymentIntentsManager() {
                           {statusBadge.label}
                         </Chip>
                         {intent.escalationReason && (
-                          <div className="text-caption-2-regular text-text-tertiary max-w-[160px] truncate">
+                          <div
+                            title={intent.escalationReason}
+                            className="text-caption-2-regular text-text-tertiary max-w-[160px] truncate"
+                          >
                             {intent.escalationReason}
                           </div>
                         )}
@@ -451,7 +467,7 @@ export function PaymentIntentsManager() {
                     </TableCell>
 
                     <TableCell className="text-end">
-                      <div className="flex flex-wrap items-center justify-end gap-1.5">
+                      <div className="shrink-0 flex items-center justify-end gap-1.5">
                         <Button
                           variant="secondary"
                           size="xs"

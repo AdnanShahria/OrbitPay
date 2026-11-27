@@ -23,8 +23,8 @@ import {
   RiArrowRightLine,
   RiErrorWarningLine,
   RiLock2Line,
+  RiMailLine,
   RiShieldCheckLine,
-  RiSparklingLine,
 } from '@remixicon/react';
 
 export interface PublicPaymentLinkPageProps {
@@ -48,12 +48,13 @@ export function PublicPaymentLinkPage({ slug, merchantSlug }: PublicPaymentLinkP
   const [customerEmail, setCustomerEmail] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [referenceNote, setReferenceNote] = useState('');
-  const [showMoreFields, setShowMoreFields] = useState(false);
+  const [showReferenceNote, setShowReferenceNote] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState<MfsProvider | undefined>(undefined);
 
   const [activeSession, setActiveSession] = useState<{
     sessionId: string;
     sessionToken: string;
+    initialCustomerEmail?: string;
   } | null>(null);
 
   if (activeSession) {
@@ -61,6 +62,7 @@ export function PublicPaymentLinkPage({ slug, merchantSlug }: PublicPaymentLinkP
       <PublicLinkActiveCheckout
         sessionId={activeSession.sessionId}
         sessionToken={activeSession.sessionToken}
+        initialCustomerEmail={activeSession.initialCustomerEmail}
         sharePath={link?.sharePath || (merchantSlug ? `/${merchantSlug}/${slug}` : `/l/${slug}`)}
         platformConfig={link?.platformConfig}
         onReset={() => setActiveSession(null)}
@@ -82,7 +84,7 @@ export function PublicPaymentLinkPage({ slug, merchantSlug }: PublicPaymentLinkP
   if (error || !link) {
     return (
       <div className="min-h-screen bg-background-full flex flex-col items-center justify-center p-4 sm:p-6">
-        <div className="w-full max-w-md space-y-4">
+        <div className="w-full max-w-[460px] space-y-4">
           <div className="rounded-3xl border border-separator-border bg-background-primary-default shadow-card p-8 text-center space-y-4">
             <div className="size-12 rounded-2xl bg-notification-error-background text-notification-error-foreground flex items-center justify-center mx-auto">
               <RiErrorWarningLine className="size-6" aria-hidden />
@@ -136,12 +138,14 @@ export function PublicPaymentLinkPage({ slug, merchantSlug }: PublicPaymentLinkP
       }
     }
 
+    const trimmedEmail = customerEmail.trim();
+
     try {
       const result = await payMutation.mutateAsync({
         amount: numericAmount,
         provider: effectiveProvider,
         customerName: customerName.trim() || undefined,
-        customerEmail: customerEmail.trim() || undefined,
+        customerEmail: trimmedEmail || undefined,
         customerPhone: customerPhone.trim() || undefined,
         referenceNote: referenceNote.trim() || undefined,
       });
@@ -149,6 +153,7 @@ export function PublicPaymentLinkPage({ slug, merchantSlug }: PublicPaymentLinkP
       setActiveSession({
         sessionId: result.sessionId,
         sessionToken: result.sessionToken,
+        initialCustomerEmail: trimmedEmail || undefined,
       });
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Could not start payment session');
@@ -157,21 +162,19 @@ export function PublicPaymentLinkPage({ slug, merchantSlug }: PublicPaymentLinkP
 
   return (
     <div className="min-h-screen bg-background-full flex flex-col items-center justify-center p-4 sm:p-6 antialiased relative">
-      {/* Subtle monochrome top bar */}
-      <div className="w-full max-w-[480px] flex items-center justify-between gap-3 mb-4 px-1">
+      {/* Serene monochrome top bar */}
+      <div className="w-full max-w-[460px] flex items-center justify-between gap-3 mb-4 px-1">
         <div className="flex items-center gap-2.5 min-w-0">
           <div className="size-8 rounded-xl bg-text-primary text-background-primary-default flex items-center justify-center text-caption-1-semibold tracking-tight shrink-0">
             {monogram}
           </div>
-          <div className="min-w-0">
-            <span className="text-body-medium text-text-primary truncate block">
-              {displayStoreName}
-            </span>
-          </div>
+          <span className="text-body-medium text-text-primary truncate block">
+            {displayStoreName}
+          </span>
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-separator-border bg-background-primary-default text-caption-2-medium text-text-secondary">
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-separator-border bg-background-primary-default text-caption-2-medium text-text-secondary whitespace-nowrap">
             <StatusDot color={link.deviceStatus.online ? 'green' : 'yellow'} />
             <span>{link.deviceStatus.online ? 'Instant' : 'Safe Queue'}</span>
           </span>
@@ -179,22 +182,22 @@ export function PublicPaymentLinkPage({ slug, merchantSlug }: PublicPaymentLinkP
         </div>
       </div>
 
-      {/* Main Architectural Checkout Card */}
-      <div className="w-full max-w-[480px] space-y-4">
+      {/* Main Editorial Checkout Card */}
+      <div className="w-full max-w-[460px] space-y-4">
         <div className="rounded-3xl border border-separator-border bg-background-primary-default shadow-card overflow-hidden">
           {/* Amount & Offer Header */}
-          <div className="p-6 sm:p-7 border-b border-separator-border bg-background-secondary-default/40 space-y-4">
+          <div className="p-6 border-b border-separator-border bg-background-secondary-default/40 space-y-3.5">
             <div className="flex items-center justify-between gap-2">
               <Chip variant="caption" color="soft" className="capitalize">
                 {link.vertical.replace(/_/g, ' ')}
               </Chip>
-              <span className="inline-flex items-center gap-1 text-caption-2-medium text-text-tertiary">
-                <RiLock2Line className="size-3" aria-hidden />
+              <span className="inline-flex items-center gap-1 text-caption-2-medium text-text-tertiary whitespace-nowrap">
+                <RiLock2Line className="size-3 shrink-0" aria-hidden />
                 <span>0% gateway fee</span>
               </span>
             </div>
 
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <h1 className="text-title-2-medium text-text-primary tracking-tight">
                 {link.title}
               </h1>
@@ -208,7 +211,7 @@ export function PublicPaymentLinkPage({ slug, merchantSlug }: PublicPaymentLinkP
             {link.amountType === 'FIXED' && link.fixedAmount != null && (
               <div className="pt-1 flex items-baseline justify-between gap-3">
                 <span className="text-caption-1-medium text-text-tertiary">Total payable</span>
-                <span className="font-mono text-title-1-semibold text-text-primary tabular-nums tnum tracking-tight">
+                <span className="font-mono text-title-1-semibold text-text-primary tnum whitespace-nowrap tracking-tight">
                   {formatBDT(link.fixedAmount)}
                 </span>
               </div>
@@ -216,24 +219,22 @@ export function PublicPaymentLinkPage({ slug, merchantSlug }: PublicPaymentLinkP
           </div>
 
           {/* Interactive Payment Form */}
-          <form onSubmit={handleProceed} className="p-6 sm:p-7 space-y-5">
+          <form onSubmit={handleProceed} className="p-6 space-y-5">
             {link.amountType === 'OPEN' && (
-              <div className="space-y-2">
-                <Input
-                  label="Enter Amount (BDT)"
-                  type="number"
-                  value={openAmount}
-                  onChange={setOpenAmount}
-                  placeholder={link.minAmount ? `Min ${link.minAmount}` : '0.00'}
-                  hint={
-                    link.minAmount != null || link.maxAmount != null
-                      ? `${link.minAmount != null ? `Min ${formatBDT(link.minAmount)}` : ''}${link.minAmount != null && link.maxAmount != null ? ' · ' : ''}${link.maxAmount != null ? `Max ${formatBDT(link.maxAmount)}` : ''}`
-                      : 'Enter the exact amount in BDT'
-                  }
-                  inputClassName="font-mono text-title-3-semibold tabular-nums"
-                  isRequired
-                />
-              </div>
+              <Input
+                label="Enter Amount (BDT)"
+                type="number"
+                value={openAmount}
+                onChange={setOpenAmount}
+                placeholder={link.minAmount ? `Min ${link.minAmount}` : '0.00'}
+                hint={
+                  link.minAmount != null || link.maxAmount != null
+                    ? `${link.minAmount != null ? `Min ${formatBDT(link.minAmount)}` : ''}${link.minAmount != null && link.maxAmount != null ? ' · ' : ''}${link.maxAmount != null ? `Max ${formatBDT(link.maxAmount)}` : ''}`
+                    : 'Enter amount in BDT'
+                }
+                inputClassName="font-mono text-title-3-semibold tnum"
+                isRequired
+              />
             )}
 
             {/* Minimal MFS Method Pills */}
@@ -252,7 +253,7 @@ export function PublicPaymentLinkPage({ slug, merchantSlug }: PublicPaymentLinkP
                         type="button"
                         onClick={() => setSelectedProvider(prov)}
                         className={cx(
-                          'min-h-10 px-3.5 rounded-full border text-caption-1-semibold inline-flex items-center gap-2 transition-all cursor-pointer',
+                          'min-h-11 px-3.5 rounded-full border text-caption-1-semibold inline-flex items-center gap-2 transition-colors cursor-pointer',
                           selected
                             ? 'border-text-primary bg-background-secondary-default text-text-primary shadow-2xs'
                             : 'border-border-button-default bg-background-primary-default text-text-secondary hover:border-border-button-hover hover:text-text-primary',
@@ -270,7 +271,7 @@ export function PublicPaymentLinkPage({ slug, merchantSlug }: PublicPaymentLinkP
               </div>
             )}
 
-            {/* Minimal Buyer Details */}
+            {/* Buyer Details with Visibly Rendered Email */}
             <div className="space-y-3">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <Input
@@ -285,33 +286,34 @@ export function PublicPaymentLinkPage({ slug, merchantSlug }: PublicPaymentLinkP
                   value={customerPhone}
                   onChange={setCustomerPhone}
                   placeholder="017XXXXXXXX"
-                  inputClassName="font-mono tabular-nums"
+                  inputClassName="font-mono tnum"
                 />
               </div>
 
-              {showMoreFields ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <Input
-                    label="Email (Optional)"
-                    type="email"
-                    value={customerEmail}
-                    onChange={setCustomerEmail}
-                    placeholder="you@example.com"
-                  />
-                  <Input
-                    label="Reference / Note"
-                    value={referenceNote}
-                    onChange={setReferenceNote}
-                    placeholder="Order or note"
-                  />
-                </div>
+              <Input
+                label="Email (for receipt & invoice)"
+                type="email"
+                value={customerEmail}
+                onChange={setCustomerEmail}
+                placeholder="you@example.com"
+                leadingIcon={RiMailLine}
+                hint="Confirmation & invoice via OrbitMail"
+              />
+
+              {showReferenceNote ? (
+                <Input
+                  label="Reference / Note (Optional)"
+                  value={referenceNote}
+                  onChange={setReferenceNote}
+                  placeholder="Order ID or note"
+                />
               ) : (
                 <button
                   type="button"
-                  onClick={() => setShowMoreFields(true)}
+                  onClick={() => setShowReferenceNote(true)}
                   className="text-caption-1-medium text-text-tertiary hover:text-text-primary transition-colors cursor-pointer"
                 >
-                  + Add email or reference note
+                  + Add reference note
                 </button>
               )}
             </div>
@@ -322,26 +324,23 @@ export function PublicPaymentLinkPage({ slug, merchantSlug }: PublicPaymentLinkP
               size="medium"
               isLoading={payMutation.isPending}
               trailingIcon={RiArrowRightLine}
-              className="w-full min-h-12 rounded-2xl"
+              className="w-full min-h-11 rounded-2xl"
             >
               {resolvedAmountPreview
                 ? `Continue to Pay ${formatBDT(resolvedAmountPreview)}`
                 : 'Continue to Payment'}
             </Button>
 
-            <div className="flex items-center justify-between text-caption-2-medium text-text-tertiary pt-1">
-              <span className="inline-flex items-center gap-1.5">
-                <RiShieldCheckLine className="size-3.5 text-status-lime-text" aria-hidden />
-                <span>Verified edge settlement</span>
+            <div className="flex items-center justify-between gap-2 text-caption-2-medium text-text-tertiary pt-1">
+              <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+                <RiShieldCheckLine className="size-3.5 text-status-lime-text shrink-0" aria-hidden />
+                <span>ORBIT Pay Hub</span>
               </span>
-              <span className="font-mono truncate max-w-44">
-                {link.sharePath || `/${link.merchantSlug}/${link.slug}`}
-              </span>
+              <span className="whitespace-nowrap">0% gateway fee</span>
             </div>
           </form>
         </div>
 
-        {/* Marketing & WhatsApp CTA for orbitsaas.cloud */}
         <OrbitMarketingBar initialConfig={link.platformConfig} compact />
       </div>
 
@@ -353,12 +352,14 @@ export function PublicPaymentLinkPage({ slug, merchantSlug }: PublicPaymentLinkP
 function PublicLinkActiveCheckout({
   sessionId,
   sessionToken,
+  initialCustomerEmail,
   sharePath,
   platformConfig,
   onReset,
 }: {
   sessionId: string;
   sessionToken: string;
+  initialCustomerEmail?: string;
   sharePath: string;
   platformConfig?: PlatformPublicConfig;
   onReset: () => void;
@@ -376,6 +377,8 @@ function PublicLinkActiveCheckout({
     setPaidAmount,
     trxId,
     setTrxId,
+    customerEmail,
+    setCustomerEmail,
     merchantId,
     orderId,
     storeName,
@@ -412,30 +415,32 @@ function PublicLinkActiveCheckout({
   } = useCheckout({
     sessionId,
     sessionToken,
+    customerEmail: initialCustomerEmail,
   });
 
   return (
     <div className="min-h-screen bg-background-full flex flex-col items-center justify-center p-4 sm:p-6 antialiased">
-      <div className="w-full max-w-[500px] flex items-center justify-between gap-3 mb-4 px-1">
+      <div className="w-full max-w-[460px] flex items-center justify-between gap-3 mb-4 px-1">
         <Button
           variant="ghost"
           size="xs"
           leadingIcon={RiArrowLeftLine}
           onClick={onReset}
+          className="min-h-11 sm:min-h-8"
         >
           Back to details
         </Button>
 
         <div className="flex items-center gap-2">
-          <span className="font-mono text-caption-2-medium text-text-tertiary hidden sm:inline">
+          <span className="font-mono text-caption-2-medium text-text-tertiary hidden sm:inline truncate max-w-44">
             {sharePath}
           </span>
           <ThemeToggle appearance="segmented" size="small" />
         </div>
       </div>
 
-      <div className="w-full max-w-[500px] space-y-4">
-        <div className="rounded-3xl border border-separator-border bg-background-primary-default shadow-card p-6 sm:p-7 space-y-6">
+      <div className="w-full max-w-[460px] space-y-4">
+        <div className="rounded-3xl border border-separator-border bg-background-primary-default shadow-card p-6 space-y-5">
           <div className="pb-4 border-b border-separator-border">
             <CheckoutDisplayHeader
               storeName={storeName}
@@ -457,6 +462,10 @@ function PublicLinkActiveCheckout({
               trxId={verifiedData?.trxId || trxId}
               senderNumber={senderNumber}
               merchantId={merchantId}
+              customerEmail={customerEmail}
+              storeName={storeName}
+              baseAmount={baseAmount}
+              offsetCents={offsetCents}
               initialVerified={currentStep === 'SUCCESS'}
               initialMatchType={verifiedData?.matchType ?? null}
               initialStatus={pollingStatus}
@@ -489,6 +498,8 @@ function PublicLinkActiveCheckout({
               onChangePaidAmount={setPaidAmount}
               trxId={trxId}
               onChangeTrxId={setTrxId}
+              customerEmail={customerEmail}
+              onChangeCustomerEmail={setCustomerEmail}
               verificationMode={verificationMode}
               receiptPolicy={receiptPolicy}
               deviceStatus={deviceStatus}
@@ -508,12 +519,11 @@ function PublicLinkActiveCheckout({
             />
           )}
 
-          <div className="pt-4 border-t border-separator-border flex items-center justify-between text-caption-2-medium text-text-tertiary">
-            <span className="flex items-center gap-1.5">
-              <RiSparklingLine className="size-3.5 text-status-lime-text" aria-hidden />
-              <span>Instant SMS auto-reconciliation</span>
+          <div className="pt-4 border-t border-separator-border flex items-center justify-center text-caption-2-medium text-text-tertiary">
+            <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+              <RiShieldCheckLine className="size-3.5 text-status-lime-text shrink-0" aria-hidden />
+              <span>ORBIT Pay Hub · 0% gateway fee</span>
             </span>
-            <span>0% fee</span>
           </div>
         </div>
 

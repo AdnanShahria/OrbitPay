@@ -17,6 +17,8 @@ import {
   RiErrorWarningLine,
   RiAdminLine,
   RiExternalLinkLine,
+  RiPrinterLine,
+  RiMailCheckLine,
 } from '@remixicon/react';
 
 export interface PollingStatusProps {
@@ -26,6 +28,10 @@ export interface PollingStatusProps {
   trxId: string;
   senderNumber: string;
   merchantId: string;
+  customerEmail?: string | null;
+  storeName?: string;
+  baseAmount?: number;
+  offsetCents?: number;
   initialVerified?: boolean;
   initialMatchType?: string | null;
   initialStatus?: CheckoutPollStatus;
@@ -57,7 +63,23 @@ interface CheckoutStatusResponse {
   matchType?: string | null;
   escalationReason?: string | null;
   receiptUrl?: string | null;
+  customerEmail?: string | null;
   verifiedAt?: string | number | null;
+}
+
+function isRealCustomerEmail(email?: string | null): email is string {
+  if (!email) return false;
+  const trimmed = email.trim();
+  return Boolean(trimmed && trimmed.toLowerCase() !== 'buyer@orbitsaas.cloud');
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function formatMatchTypeLabel(matchType?: string | null): string {
@@ -105,6 +127,200 @@ function computeGraceSeconds(graceExpiresAt?: string | null): number {
   return Math.max(0, Math.floor((target - Date.now()) / 1000));
 }
 
+function buildPrintableInvoiceHtml(params: {
+  invoiceNumber: string;
+  storeName: string;
+  orderId: string;
+  trxId: string;
+  providerName: string;
+  senderNumber: string;
+  matchLabel: string;
+  confirmedAtText: string;
+  customerEmail: string | null;
+  baseAmount: number;
+  offsetBdt: number;
+  totalPaid: number;
+}): string {
+  const {
+    invoiceNumber,
+    storeName,
+    orderId,
+    trxId,
+    providerName,
+    senderNumber,
+    matchLabel,
+    confirmedAtText,
+    customerEmail,
+    baseAmount,
+    offsetBdt,
+    totalPaid,
+  } = params;
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Invoice ${escapeHtml(invoiceNumber)} — ${escapeHtml(storeName)}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+      background: #fafafa;
+      color: #09090b;
+      padding: 32px 16px;
+      -webkit-font-smoothing: antialiased;
+    }
+    .sheet {
+      max-width: 640px;
+      margin: 0 auto;
+      background: #ffffff;
+      border: 1px solid #e4e4e7;
+      border-radius: 16px;
+      overflow: hidden;
+    }
+    .header {
+      padding: 28px 32px;
+      border-bottom: 1px solid #e4e4e7;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+    }
+    .brand { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+    .sub { font-size: 12px; color: #71717a; margin-top: 4px; font-family: ui-monospace, monospace; }
+    .badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: #ecfccb;
+      color: #3f6212;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .hero {
+      padding: 24px 32px;
+      background: #f4f4f6;
+      border-bottom: 1px solid #e4e4e7;
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 16px;
+    }
+    .hero-label { font-size: 12px; color: #71717a; font-weight: 500; }
+    .hero-amount {
+      font-size: 28px;
+      font-weight: 600;
+      font-family: ui-monospace, monospace;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -0.02em;
+    }
+    .section { padding: 24px 32px; }
+    .section + .section { border-top: 1px solid #e4e4e7; }
+    .row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      padding: 8px 0;
+      font-size: 13px;
+    }
+    .row-label { color: #71717a; white-space: nowrap; }
+    .row-val {
+      color: #09090b;
+      font-weight: 500;
+      text-align: right;
+      word-break: break-all;
+      font-variant-numeric: tabular-nums;
+    }
+    .mono { font-family: ui-monospace, monospace; }
+    .total-row {
+      border-top: 1px solid #e4e4e7;
+      margin-top: 8px;
+      padding-top: 14px;
+      font-weight: 600;
+      font-size: 14px;
+    }
+    .footer {
+      padding: 20px 32px;
+      border-top: 1px solid #e4e4e7;
+      background: #fafafa;
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: #71717a;
+    }
+    @media print {
+      body { background: #ffffff; padding: 0; }
+      .sheet { border: none; border-radius: 0; max-width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="sheet">
+    <div class="header">
+      <div>
+        <div class="brand">${escapeHtml(storeName)}</div>
+        <div class="sub">${escapeHtml(invoiceNumber)}</div>
+      </div>
+      <span class="badge">Paid &amp; Verified</span>
+    </div>
+
+    <div class="hero">
+      <span class="hero-label">Total Paid</span>
+      <span class="hero-amount">${escapeHtml(formatBDT(totalPaid))}</span>
+    </div>
+
+    <div class="section">
+      <div class="row">
+        <span class="row-label">Reference ID</span>
+        <span class="row-val mono">${escapeHtml(orderId)}</span>
+      </div>
+      <div class="row">
+        <span class="row-label">Payment Method</span>
+        <span class="row-val">${escapeHtml(providerName)}</span>
+      </div>
+      ${trxId ? `<div class="row"><span class="row-label">Transaction ID (TrxID)</span><span class="row-val mono">${escapeHtml(trxId)}</span></div>` : ''}
+      ${senderNumber ? `<div class="row"><span class="row-label">Sender Number</span><span class="row-val mono">${escapeHtml(senderNumber)}</span></div>` : ''}
+      <div class="row">
+        <span class="row-label">Verification Mode</span>
+        <span class="row-val">${escapeHtml(matchLabel)}</span>
+      </div>
+      <div class="row">
+        <span class="row-label">Confirmed At</span>
+        <span class="row-val">${escapeHtml(confirmedAtText)}</span>
+      </div>
+      ${customerEmail ? `<div class="row"><span class="row-label">Receipt Email</span><span class="row-val">${escapeHtml(customerEmail)}</span></div>` : ''}
+    </div>
+
+    <div class="section">
+      <div class="row">
+        <span class="row-label">Order Base Amount</span>
+        <span class="row-val mono">${escapeHtml(formatBDT(baseAmount))}</span>
+      </div>
+      ${offsetBdt > 0 ? `<div class="row"><span class="row-label">Unique Poisha Code</span><span class="row-val mono">+${escapeHtml(formatBDT(offsetBdt))}</span></div>` : ''}
+      <div class="row">
+        <span class="row-label">Gateway Fee</span>
+        <span class="row-val mono">${escapeHtml(formatBDT(0))}</span>
+      </div>
+      <div class="row total-row">
+        <span>Total Settled</span>
+        <span class="mono">${escapeHtml(formatBDT(totalPaid))}</span>
+      </div>
+    </div>
+
+    <div class="footer">
+      <span>Verified by ORBIT Payment Hub</span>
+      <span>0% Gateway Fee</span>
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
 export function PollingStatus({
   orderId,
   expectedAmount,
@@ -112,6 +328,10 @@ export function PollingStatus({
   trxId,
   senderNumber,
   merchantId,
+  customerEmail = null,
+  storeName,
+  baseAmount,
+  offsetCents = 0,
   initialVerified = false,
   initialMatchType = null,
   initialStatus = 'PENDING_VERIFICATION',
@@ -135,9 +355,19 @@ export function PollingStatus({
   const [matchType, setMatchType] = useState<string | null>(initialMatchType);
   const [escalationReason, setEscalationReason] = useState<string | null>(initialEscalationReason);
   const [activeReceiptUrl, setActiveReceiptUrl] = useState<string | null>(receiptUrl);
+  const [resolvedEmail, setResolvedEmail] = useState<string | null>(
+    isRealCustomerEmail(customerEmail) ? customerEmail.trim() : null,
+  );
+  const [confirmedAt, setConfirmedAt] = useState<Date>(() => new Date());
   const [copiedReceipt, setCopiedReceipt] = useState(false);
 
   const hasNotifiedVerifiedRef = useRef(initialVerified);
+
+  useEffect(() => {
+    if (isRealCustomerEmail(customerEmail)) {
+      setResolvedEmail(customerEmail.trim());
+    }
+  }, [customerEmail]);
 
   useEffect(() => {
     if (initialVerified) {
@@ -171,6 +401,14 @@ export function PollingStatus({
     return () => clearInterval(timer);
   }, [pollStatus, secondsLeft]);
 
+  const meta = MFS_METADATA[provider] || {
+    name: provider,
+    color: 'currentColor',
+    bgSoft: 'var(--color-background-secondary-default)',
+    textClass: 'text-text-primary',
+    borderClass: 'border-border-button-default',
+  };
+
   // Genuine backend polling loop (every 2.5s)
   useEffect(() => {
     if (pollStatus === 'VERIFIED' || pollStatus === 'REJECTED' || pollStatus === 'EXPIRED') {
@@ -189,12 +427,16 @@ export function PollingStatus({
         if (data?.receiptUrl) {
           setActiveReceiptUrl(data.receiptUrl);
         }
+        if (isRealCustomerEmail(data?.customerEmail)) {
+          setResolvedEmail(data.customerEmail.trim());
+        }
 
         if (data?.status === 'VERIFIED') {
           const finalAmount = Number(data.amount ?? expectedAmount);
           const resolvedMatchType = data.matchType ?? null;
           setVerifiedAmount(finalAmount);
           setMatchType(resolvedMatchType);
+          setConfirmedAt(data.verifiedAt ? new Date(data.verifiedAt) : new Date());
           setPollStatus('VERIFIED');
           if (!hasNotifiedVerifiedRef.current) {
             hasNotifiedVerifiedRef.current = true;
@@ -245,20 +487,12 @@ export function PollingStatus({
     }, 2500);
 
     return () => clearInterval(interval);
-  }, [merchantId, orderId, trxId, expectedAmount, pollStatus, onVerified, onStatusChange]);
+  }, [merchantId, orderId, trxId, expectedAmount, pollStatus, meta.name, onVerified, onStatusChange]);
 
   const formatTimer = (sec: number) => {
     const mins = Math.floor(sec / 60);
     const s = sec % 60;
     return `${mins.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-  };
-
-  const meta = MFS_METADATA[provider] || {
-    name: provider,
-    color: 'currentColor',
-    bgSoft: 'var(--color-background-secondary-default)',
-    textClass: 'text-text-primary',
-    borderClass: 'border-border-button-default',
   };
 
   const canEditTrx = Boolean(onEditSubmission) && submitAttempts < maxSubmitAttempts;
@@ -273,14 +507,69 @@ export function PollingStatus({
     }
   };
 
+  const handlePrintOrSaveInvoice = () => {
+    const offsetBdt = offsetCents > 0 ? offsetCents / 100 : 0;
+    const computedBase =
+      typeof baseAmount === 'number' && baseAmount > 0
+        ? baseAmount
+        : Math.max(0, Number((verifiedAmount - offsetBdt).toFixed(2)));
+    const cleanRef = (orderId || 'RECEIPT').replace(/[^a-zA-Z0-9_-]/g, '');
+    const invoiceNumber = `ORB-INV-${cleanRef.slice(0, 12).toUpperCase()}`;
+
+    const html = buildPrintableInvoiceHtml({
+      invoiceNumber,
+      storeName: storeName || 'ORBIT Pay Hub',
+      orderId,
+      trxId,
+      providerName: meta.name,
+      senderNumber,
+      matchLabel: formatMatchTypeLabel(matchType),
+      confirmedAtText: formatDate(confirmedAt),
+      customerEmail: resolvedEmail,
+      baseAmount: computedBase,
+      offsetBdt,
+      totalPaid: verifiedAmount,
+    });
+
+    const popup = window.open('', '_blank', 'width=820,height=920');
+    if (popup && popup.document) {
+      popup.document.open();
+      popup.document.write(html);
+      popup.document.close();
+      popup.focus();
+      setTimeout(() => {
+        try {
+          popup.print();
+        } catch {
+          // User can print manually from opened tab
+        }
+      }, 150);
+      return;
+    }
+
+    // Popup blocked fallback: download standalone HTML invoice file
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `orbit-invoice-${cleanRef || 'receipt'}.html`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(url);
+    toast.success('Invoice downloaded');
+  };
+
   if (pollStatus === 'VERIFIED') {
+    const hasPrimaryContinue = Boolean(onClose || returnUrl);
+
     return (
-      <div className="py-4 flex flex-col items-center text-center space-y-6">
-        <div className="size-16 rounded-full bg-notification-success-background text-notification-success-foreground flex items-center justify-center">
-          <RiCheckboxCircleLine className="size-9" aria-hidden />
+      <div className="orbit-step-enter py-3 flex flex-col items-center text-center space-y-5">
+        <div className="size-14 rounded-full bg-notification-success-background text-notification-success-foreground flex items-center justify-center">
+          <RiCheckboxCircleLine className="size-8" aria-hidden />
         </div>
 
-        <div className="space-y-2">
+        <div className="space-y-1.5">
           <div className="flex items-center justify-center">
             <Chip
               variant="caption"
@@ -293,84 +582,139 @@ export function PollingStatus({
             Payment verified
           </h3>
           <p className="text-body-regular text-text-secondary">
-            Your transaction has been confirmed by ORBIT Payment Hub.
+            Confirmed by ORBIT Payment Hub.
           </p>
         </div>
 
-        {/* Receipt Box */}
-        <div className="w-full p-5 rounded-2xl bg-background-secondary-default border border-border-button-default text-start space-y-3">
-          <div className="flex items-center justify-between pb-3 border-b border-separator-border">
-            <span className="text-caption-1-medium text-text-tertiary">
+        {/* Receipt Card */}
+        <div className="w-full p-4 sm:p-5 rounded-2xl bg-background-secondary-default border border-border-button-default text-start space-y-3">
+          <div className="flex items-center justify-between gap-4 pb-3 border-b border-separator-border">
+            <span className="text-caption-1-medium text-text-tertiary whitespace-nowrap shrink-0">
               Amount paid
             </span>
-            <span className="text-title-2-medium text-text-primary font-mono tabular-nums tnum">
+            <span className="text-title-2-medium text-text-primary font-mono tnum whitespace-nowrap">
               {formatBDT(verifiedAmount)}
             </span>
           </div>
 
-          <div className="space-y-2 text-caption-1-regular">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-text-tertiary">Reference ID</span>
-              <span className="font-mono text-caption-1-medium text-text-primary">{orderId}</span>
-            </div>
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-text-tertiary">Payment method</span>
-              <Chip
-                variant="caption"
-                style={{ backgroundColor: meta.bgSoft, color: meta.color }}
+          <div className="divide-y divide-separator-border/50 text-caption-1-regular">
+            <div className="flex items-center justify-between gap-4 py-1.5">
+              <span className="text-text-tertiary whitespace-nowrap shrink-0">
+                Reference ID
+              </span>
+              <span
+                title={orderId}
+                className="font-mono text-caption-1-medium text-text-primary truncate max-w-[190px] sm:max-w-[260px] text-end min-w-0"
               >
-                {meta.name}
-              </Chip>
+                {orderId}
+              </span>
             </div>
+
+            <div className="flex items-center justify-between gap-4 py-1.5">
+              <span className="text-text-tertiary whitespace-nowrap shrink-0">
+                Payment method
+              </span>
+              <span className="text-end min-w-0">
+                <Chip
+                  variant="caption"
+                  style={{ backgroundColor: meta.bgSoft, color: meta.color }}
+                >
+                  {meta.name}
+                </Chip>
+              </span>
+            </div>
+
             {trxId && (
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-text-tertiary">Transaction ID</span>
-                <span className="font-mono text-caption-1-medium text-text-primary">{trxId}</span>
+              <div className="flex items-center justify-between gap-4 py-1.5">
+                <span className="text-text-tertiary whitespace-nowrap shrink-0">
+                  Transaction ID
+                </span>
+                <span className="font-mono text-caption-1-medium text-text-primary truncate text-end min-w-0">
+                  {trxId}
+                </span>
               </div>
             )}
+
             {senderNumber && (
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-text-tertiary">Sender number</span>
-                <span className="font-mono text-text-secondary tabular-nums">{senderNumber}</span>
+              <div className="flex items-center justify-between gap-4 py-1.5">
+                <span className="text-text-tertiary whitespace-nowrap shrink-0">
+                  Sender number
+                </span>
+                <span className="font-mono text-text-secondary tnum whitespace-nowrap text-end min-w-0">
+                  {senderNumber}
+                </span>
               </div>
             )}
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-text-tertiary">Verification mode</span>
-              <span className="text-text-primary font-medium">{formatMatchTypeLabel(matchType)}</span>
+
+            <div className="flex items-center justify-between gap-4 py-1.5">
+              <span className="text-text-tertiary whitespace-nowrap shrink-0">
+                Verification mode
+              </span>
+              <span className="text-text-primary font-medium truncate text-end min-w-0">
+                {formatMatchTypeLabel(matchType)}
+              </span>
             </div>
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-text-tertiary">Confirmed at</span>
-              <span className="text-text-secondary tabular-nums">{formatDate(new Date())}</span>
+
+            <div className="flex items-center justify-between gap-4 py-1.5">
+              <span className="text-text-tertiary whitespace-nowrap shrink-0">
+                Confirmed at
+              </span>
+              <span className="text-text-secondary tnum whitespace-nowrap text-end min-w-0">
+                {formatDate(confirmedAt)}
+              </span>
             </div>
           </div>
         </div>
 
-        {/* Action Buttons */}
-        <div className="w-full flex flex-col sm:flex-row items-center gap-3">
-          <Button
-            variant="secondary"
-            size="medium"
-            onClick={() => {
-              navigator.clipboard.writeText(
-                `Ref ${orderId}: Paid ${formatBDT(verifiedAmount)} via ${meta.name} (TrxID: ${trxId})`,
-              );
-              setCopiedReceipt(true);
-              toast.success('Receipt copied to clipboard');
-              setTimeout(() => setCopiedReceipt(false), 2000);
-            }}
-            leadingIcon={copiedReceipt ? RiCheckLine : RiFileCopyLine}
-            className="w-full sm:flex-1 min-h-11"
-          >
-            {copiedReceipt ? 'Copied' : 'Copy Receipt'}
-          </Button>
+        {/* OrbitMail Confirmation Pill */}
+        {resolvedEmail && (
+          <div className="w-full px-3.5 py-2.5 rounded-xl bg-background-secondary-default border border-separator-border flex items-center gap-2 text-caption-1-medium text-text-secondary text-start">
+            <RiMailCheckLine className="size-4 text-status-lime-text shrink-0" aria-hidden />
+            <span className="truncate">
+              OrbitMail receipt &amp; invoice sent to{' '}
+              <span className="text-text-primary font-medium">{resolvedEmail}</span>
+            </span>
+          </div>
+        )}
 
-          {(onClose || returnUrl) && (
+        {/* Action Buttons */}
+        <div className="w-full space-y-2.5">
+          <div className="w-full grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <Button
+              variant="secondary"
+              size="medium"
+              onClick={() => {
+                navigator.clipboard.writeText(
+                  `Ref ${orderId}: Paid ${formatBDT(verifiedAmount)} via ${meta.name} (TrxID: ${trxId})`,
+                );
+                setCopiedReceipt(true);
+                toast.success('Receipt copied to clipboard');
+                setTimeout(() => setCopiedReceipt(false), 2000);
+              }}
+              leadingIcon={copiedReceipt ? RiCheckLine : RiFileCopyLine}
+              className="w-full min-h-11"
+            >
+              {copiedReceipt ? 'Copied' : 'Copy Receipt'}
+            </Button>
+
+            <Button
+              variant="secondary"
+              size="medium"
+              onClick={handlePrintOrSaveInvoice}
+              leadingIcon={RiPrinterLine}
+              className="w-full min-h-11"
+            >
+              Save / Print Invoice
+            </Button>
+          </div>
+
+          {hasPrimaryContinue && (
             <Button
               variant="primary"
               size="medium"
               onClick={handleContinue}
               trailingIcon={RiArrowRightLine}
-              className="w-full sm:flex-1 min-h-11"
+              className="w-full min-h-11"
             >
               Continue to Store
             </Button>
@@ -383,7 +727,7 @@ export function PollingStatus({
   if (pollStatus === 'REJECTED' || pollStatus === 'EXPIRED') {
     const isRejected = pollStatus === 'REJECTED';
     return (
-      <div className="py-5 flex flex-col items-center text-center space-y-5">
+      <div className="orbit-step-enter py-5 flex flex-col items-center text-center space-y-5">
         <div className="size-16 rounded-full bg-notification-error-background text-notification-error-foreground flex items-center justify-center">
           <RiErrorWarningLine className="size-8" aria-hidden />
         </div>
@@ -435,18 +779,18 @@ export function PollingStatus({
   const isManualReview = pollStatus === 'MANUAL_REVIEW_REQUIRED';
 
   return (
-    <div className="py-5 flex flex-col items-center text-center space-y-5">
+    <div className="orbit-step-enter py-4 flex flex-col items-center text-center space-y-5">
       {isManualReview ? (
-        <div className="size-16 rounded-full bg-status-yellow-background text-status-yellow-text flex items-center justify-center">
-          <RiAdminLine className="size-8" aria-hidden />
+        <div className="size-14 rounded-full bg-status-yellow-background text-status-yellow-text flex items-center justify-center">
+          <RiAdminLine className="size-7" aria-hidden />
         </div>
       ) : (
-        <div className="size-16 rounded-full bg-background-secondary-default border border-border-button-default flex items-center justify-center">
+        <div className="size-14 rounded-full bg-background-secondary-default border border-border-button-default flex items-center justify-center">
           <Spinner size="lg" aria-label="Listening for payment confirmation" className="text-text-primary" />
         </div>
       )}
 
-      <div className="space-y-2 max-w-md">
+      <div className="space-y-1.5 max-w-md">
         <div className="flex items-center justify-center">
           <Chip variant="caption" color={isManualReview ? 'yellow' : 'blue'}>
             {isManualReview ? 'Queued for Admin Review' : 'Awaiting SMS Match'}
@@ -454,13 +798,13 @@ export function PollingStatus({
         </div>
         <h3 className="text-title-3-semibold text-text-primary">
           {isManualReview
-            ? 'Payment submitted — under admin review'
-            : 'Listening for payment confirmation'}
+            ? 'Payment submitted — under review'
+            : 'Listening for confirmation'}
         </h3>
         <p className="text-body-regular text-text-secondary">
           {isManualReview
-            ? `${formatEscalationLabel(escalationReason)}. You do not need to pay again — this page updates automatically once approved.`
-            : `Waiting for incoming SMS from your ${meta.name} transfer. Automated edge reconciler will verify as soon as the SMS arrives.`}
+            ? `${formatEscalationLabel(escalationReason)}. This page updates automatically once approved.`
+            : `Waiting for incoming ${meta.name} SMS confirmation.`}
         </p>
       </div>
 
@@ -473,9 +817,9 @@ export function PollingStatus({
 
       {!isManualReview && (
         <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-background-secondary-default border border-border-button-default text-caption-1-medium">
-          <RiTimeLine className="size-4 text-foreground-icon-secondary" aria-hidden />
-          <span className="text-text-secondary">Auto-verification window</span>
-          <span className="font-mono text-text-primary tabular-nums tnum">
+          <RiTimeLine className="size-4 text-foreground-icon-secondary shrink-0" aria-hidden />
+          <span className="text-text-secondary whitespace-nowrap">Auto-verification window</span>
+          <span className="font-mono text-text-primary tnum whitespace-nowrap">
             {formatTimer(secondsLeft)}
           </span>
         </div>
@@ -491,26 +835,37 @@ export function PollingStatus({
         </div>
         <div className="min-w-0 border-x border-separator-border px-2">
           <span className="text-caption-2-medium text-text-tertiary block">Amount</span>
-          <span className="font-mono text-caption-1-semibold text-text-primary tabular-nums tnum block">
+          <span className="font-mono text-caption-1-semibold text-text-primary tnum whitespace-nowrap block">
             {formatBDT(expectedAmount)}
           </span>
         </div>
         <div className="min-w-0">
           <span className="text-caption-2-medium text-text-tertiary block">Sender</span>
-          <span className="font-mono text-caption-1-medium text-text-secondary tabular-nums truncate block">
+          <span className="font-mono text-caption-1-medium text-text-secondary tnum truncate block">
             {senderNumber || '—'}
           </span>
         </div>
       </div>
 
+      {/* OrbitMail Pending Notification */}
+      {resolvedEmail && (
+        <div className="w-full px-3.5 py-2.5 rounded-xl bg-background-secondary-default border border-separator-border flex items-center gap-2 text-caption-1-medium text-text-secondary text-start">
+          <RiMailCheckLine className="size-4 text-foreground-icon-secondary shrink-0" aria-hidden />
+          <span className="truncate">
+            OrbitMail receipt &amp; invoice will be sent to{' '}
+            <span className="text-text-primary font-medium">{resolvedEmail}</span> once confirmed
+          </span>
+        </div>
+      )}
+
       {activeReceiptUrl && (
-        <div className="w-full px-3.5 py-2.5 rounded-xl bg-background-secondary-default border border-separator-border flex items-center justify-between text-caption-1-medium">
-          <span className="text-text-secondary">Screenshot proof attached</span>
+        <div className="w-full px-3.5 py-2.5 rounded-xl bg-background-secondary-default border border-separator-border flex items-center justify-between gap-2 text-caption-1-medium">
+          <span className="text-text-secondary whitespace-nowrap">Screenshot proof attached</span>
           <a
             href={activeReceiptUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 text-text-primary underline underline-offset-2"
+            className="inline-flex items-center gap-1 text-text-primary underline underline-offset-2 shrink-0"
           >
             <span>View proof</span>
             <RiExternalLinkLine className="size-3.5" aria-hidden />
@@ -530,14 +885,14 @@ export function PollingStatus({
           >
             Edit TrxID / Re-submit
           </Button>
-          <span className="text-caption-2-medium text-text-tertiary tabular-nums">
+          <span className="text-caption-2-medium text-text-tertiary tnum whitespace-nowrap">
             Mistyped TrxID? ({maxSubmitAttempts - submitAttempts} attempt{maxSubmitAttempts - submitAttempts === 1 ? '' : 's'} left)
           </span>
         </div>
       )}
 
       <div className="flex items-center gap-1.5 text-caption-2-medium text-text-tertiary">
-        <RiShieldCheckLine className="size-3.5 text-status-lime-text" aria-hidden />
+        <RiShieldCheckLine className="size-3.5 text-status-lime-text shrink-0" aria-hidden />
         <span>Safe &amp; encrypted 256-bit edge reconciliation</span>
       </div>
     </div>

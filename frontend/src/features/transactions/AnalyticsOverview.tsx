@@ -74,5 +74,9 @@ export function AnalyticsOverview({ merchantId }: { merchantId?: string }) {
     },
   ];
 
-  return <StatCards variant="footer" stats={metrics} />;
+  return (
+    <div className="w-full">
+      <StatCards variant="footer" stats={metrics} />
+    </div>
+  );
 }

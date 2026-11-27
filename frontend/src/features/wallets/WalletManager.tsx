@@ -68,21 +68,26 @@ export function WalletManager() {
       {/* Top Banner & Add Action */}
       <Card>
         <CardContent className="flex flex-col justify-between gap-4 pt-5 sm:flex-row sm:items-center sm:pt-6">
-          <div>
-            <h2 className="flex items-center gap-2 text-title-2-medium text-text-primary">
-              <RiSmartphoneLine className="size-5 shrink-0 text-foreground-icon-secondary" aria-hidden />
-              <span>MFS SIM rotation pool</span>
-            </h2>
-            <p className="mt-1 text-body-regular text-text-secondary">
-              Manage multi-SIM numbers across bKash, Nagad, Rocket, Upay, and Cellfin. When monthly limits approach ৳250k, the hub automatically rotates to standby SIMs.
-            </p>
+          <div className="flex items-start gap-3.5 min-w-0">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-border-button-default bg-background-secondary-default text-foreground-icon-primary">
+              <RiSmartphoneLine className="size-5" aria-hidden />
+            </div>
+            <div className="space-y-0.5 min-w-0">
+              <h2 className="text-title-2-medium text-text-primary">
+                MFS SIM Rotation Pool
+              </h2>
+              <p className="text-body-regular text-text-secondary">
+                Automatic standby rotation across bKash, Nagad, Rocket, Upay, and Cellfin near ৳250k.
+              </p>
+            </div>
           </div>
 
           <Button
             variant="primary"
+            size="small"
             onClick={() => setIsAddOpen(true)}
             leadingIcon={RiAddLine}
-            className="shrink-0"
+            className="min-h-11 sm:min-h-10 shrink-0"
           >
             Add new SIM
           </Button>
@@ -132,9 +137,9 @@ export function WalletManager() {
           wallets.map((wallet) => {
             const meta = MFS_METADATA[wallet.provider] || {
               name: wallet.provider,
-              color: '#52525B',
-              hoverColor: '#3F3F46',
-              bgSoft: 'rgba(82, 82, 91, 0.1)',
+              color: 'var(--color-text-secondary)',
+              hoverColor: 'var(--color-text-primary)',
+              bgSoft: 'var(--color-background-secondary-default)',
               textClass: 'text-text-primary',
               borderClass: 'border-border-button-default',
             };
@@ -143,13 +148,13 @@ export function WalletManager() {
               <Card
                 key={wallet.id}
                 variant={wallet.isActive ? 'default' : 'inset'}
-                className={cx(!wallet.isActive && 'opacity-70')}
+                className={cx('hover:border-border-button-hover', !wallet.isActive && 'opacity-70')}
               >
                 <CardHeader className="pb-2">
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2.5">
                       <div
-                        className="flex size-8 shrink-0 items-center justify-center rounded-lg text-caption-1-semibold text-white shadow-xs"
+                        className="flex size-8 shrink-0 items-center justify-center rounded-lg text-caption-1-semibold text-text-white shadow-xs"
                         style={{ backgroundColor: meta.color }}
                       >
                         {wallet.provider.slice(0, 1)}
@@ -186,7 +191,7 @@ export function WalletManager() {
                 <CardContent className="space-y-4">
                   {/* Phone Number Box */}
                   <div className="flex items-center justify-between rounded-xl border border-separator-border bg-background-secondary-default px-3 py-2.5">
-                    <span className="font-mono text-title-3-semibold text-text-primary tabular-nums">
+                    <span className="font-mono text-title-3-semibold text-text-primary tabular-nums tnum">
                       {wallet.walletNumber}
                     </span>
                     <Button

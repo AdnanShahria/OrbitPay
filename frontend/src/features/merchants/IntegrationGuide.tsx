@@ -2,9 +2,6 @@ import { useState } from 'react';
 import {
   Card,
   CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
 } from '@/components/base/card/card';
 import { Button } from '@/components/base/buttons/button';
 import { Chip } from '@/components/base/badges/chip';
@@ -157,29 +154,37 @@ const result = await response.json();
 // -> { success: true, data: { order, notifiedAndroid: true } }`;
 
   return (
-    <div className="w-full space-y-6">
+    <div className="w-full space-y-5">
       <Card>
-        <CardHeader>
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-border-button-default bg-background-secondary-default text-foreground-icon-primary">
-                <RiCodeSSlashLine className="size-5" aria-hidden />
-              </div>
-              <div>
-                <CardTitle>Storefront Integration Guide</CardTitle>
-                <CardDescription>
-                  Copy-ready integration snippets pre-configured for{' '}
-                  <strong className="font-medium text-text-primary">{storeName}</strong>.
-                </CardDescription>
-              </div>
+        <CardContent className="flex flex-col justify-between gap-4 pt-5 sm:flex-row sm:items-center sm:pt-6">
+          <div className="flex items-start gap-3.5 min-w-0">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-border-button-default bg-background-secondary-default text-foreground-icon-primary">
+              <RiCodeSSlashLine className="size-5" aria-hidden />
             </div>
-            <Chip variant="caption" color="gray" className="font-mono self-start sm:self-center">
-              {merchantId}
-            </Chip>
+            <div className="space-y-0.5 min-w-0">
+              <h2 className="text-title-2-medium text-text-primary">
+                Storefront Integration Guide
+              </h2>
+              <p className="text-body-regular text-text-secondary">
+                Copy-ready SDK and webhook snippets pre-configured for{' '}
+                <strong className="font-medium text-text-primary">{storeName}</strong>.
+              </p>
+            </div>
           </div>
-        </CardHeader>
 
-        <CardContent>
+          <Chip
+            variant="caption"
+            color="gray"
+            title={merchantId}
+            className="font-mono self-start sm:self-center max-w-[240px] truncate shrink-0"
+          >
+            {merchantId}
+          </Chip>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="pt-5 sm:pt-6">
           <Tabs defaultSelectedKey="frontend">
             <TabList aria-label="Integration steps" className="overflow-x-auto">
               <Tab id="frontend" icon={RiShoppingBag3Line}>
@@ -193,14 +198,14 @@ const result = await response.json();
               </Tab>
             </TabList>
 
-            <TabPanel id="frontend" className="space-y-4 pt-2">
+            <TabPanel id="frontend" className="space-y-4 pt-3">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="space-y-0.5">
                   <h3 className="text-body-medium text-text-primary">
                     Standard amount checkout widget
                   </h3>
                   <p className="text-caption-1-regular text-text-secondary">
-                    Pass your normal order total (e.g. <code className="font-mono text-text-primary">50</code>). ORBIT automatically allocates a unique positive poisha code (<code className="font-mono text-text-primary">50.01</code>, <code className="font-mono text-text-primary">50.02</code>, ...) so concurrent buyers never collide.
+                    Pass your base order total — ORBIT assigns a unique poisha code automatically.
                   </p>
                 </div>
                 <Button
@@ -208,7 +213,7 @@ const result = await response.json();
                   size="small"
                   onClick={() => copySnippet('frontend', 'Frontend checkout snippet', frontendSnippet)}
                   leadingIcon={copiedId === 'frontend' ? RiCheckLine : RiFileCopyLine}
-                  className="shrink-0"
+                  className="min-h-11 sm:min-h-10 shrink-0"
                 >
                   {copiedId === 'frontend' ? 'Copied' : 'Copy snippet'}
                 </Button>
@@ -219,14 +224,16 @@ const result = await response.json();
               </pre>
             </TabPanel>
 
-            <TabPanel id="webhook" className="space-y-4 pt-2">
+            <TabPanel id="webhook" className="space-y-4 pt-3">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="space-y-0.5">
                   <h3 className="text-body-medium text-text-primary">
-                    Signed webhook handler (Payments + Bi-directional Orders)
+                    Signed webhook handler (Payments + Orders)
                   </h3>
                   <p className="text-caption-1-regular text-text-secondary">
-                    Verifies <code className="font-mono text-text-primary">X-Orbit-Signature</code> and handles both <code className="font-mono text-text-primary">payment.verified</code> (including <code className="font-mono text-text-primary">baseAmount</code>, <code className="font-mono text-text-primary">uniqueAmount</code>, <code className="font-mono text-text-primary">paidAmount</code>, <code className="font-mono text-text-primary">matchType</code>) and <code className="font-mono text-text-primary">order.*</code> lifecycle events.
+                    Verifies <code className="font-mono text-text-primary">X-Orbit-Signature</code> for{' '}
+                    <code className="font-mono text-text-primary">payment.verified</code> and{' '}
+                    <code className="font-mono text-text-primary">order.*</code> events.
                   </p>
                 </div>
                 <Button
@@ -234,7 +241,7 @@ const result = await response.json();
                   size="small"
                   onClick={() => copySnippet('webhook', 'Webhook receiver code', webhookSnippet)}
                   leadingIcon={copiedId === 'webhook' ? RiCheckLine : RiFileCopyLine}
-                  className="shrink-0"
+                  className="min-h-11 sm:min-h-10 shrink-0"
                 >
                   {copiedId === 'webhook' ? 'Copied' : 'Copy snippet'}
                 </Button>
@@ -245,14 +252,14 @@ const result = await response.json();
               </pre>
             </TabPanel>
 
-            <TabPanel id="notify" className="space-y-4 pt-2">
+            <TabPanel id="notify" className="space-y-4 pt-3">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="space-y-0.5">
                   <h3 className="text-body-medium text-text-primary">
-                    Push COD, Card &amp; non-ORBIT orders to Android &amp; Web Portal
+                    Push COD, Card &amp; non-ORBIT orders
                   </h3>
                   <p className="text-caption-1-regular text-text-secondary">
-                    Send new orders to <code className="font-mono text-text-primary">POST /api/v1/orders/notify</code> so your Android companion app rings immediately and lets you confirm or ship from your phone.
+                    Send new orders to <code className="font-mono text-text-primary">POST /api/v1/orders/notify</code> for instant mobile &amp; portal alerts.
                   </p>
                 </div>
                 <Button
@@ -260,7 +267,7 @@ const result = await response.json();
                   size="small"
                   onClick={() => copySnippet('notify', 'Order notify snippet', orderNotifySnippet)}
                   leadingIcon={copiedId === 'notify' ? RiCheckLine : RiFileCopyLine}
-                  className="shrink-0"
+                  className="min-h-11 sm:min-h-10 shrink-0"
                 >
                   {copiedId === 'notify' ? 'Copied' : 'Copy snippet'}
                 </Button>

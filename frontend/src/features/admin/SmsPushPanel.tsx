@@ -336,10 +336,10 @@ export function SmsPushPanel() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h3 className="text-title-3-semibold text-text-primary">
-            SMS Failover, Email OTP Fallback &amp; 3-Tier Push
+            SMS Failover, Email OTP &amp; 3-Tier Push
           </h3>
           <p className="text-caption-1-regular text-text-secondary mt-0.5">
-            Inspect gateway readiness, 3-tier instant push delivery, 24-hour OTP throughput, and dispatch live tests.
+            Gateway readiness, instant push delivery, 24h OTP throughput, and live diagnostics.
           </p>
         </div>
 
@@ -349,6 +349,7 @@ export function SmsPushPanel() {
           onClick={() => refetch()}
           isLoading={isFetching && !isLoading}
           leadingIcon={RiRefreshLine}
+          className="min-h-11 sm:min-h-10 shrink-0"
         >
           Refresh Status
         </Button>
@@ -573,7 +574,7 @@ export function SmsPushPanel() {
               <div>
                 <CardTitle>Email OTP Fallback Providers</CardTitle>
                 <CardDescription>
-                  Free Email OTP backup via routeEmail when SMS credits are unavailable or SMS delivery fails.
+                  Email OTP backup via routeEmail when SMS is unavailable.
                 </CardDescription>
               </div>
             </div>
@@ -814,9 +815,9 @@ export function SmsPushPanel() {
                 <RiPulseLine className="size-4" aria-hidden />
               </span>
               <div>
-                <CardTitle>Test Instant Push (Self-Hosted WS + FCM)</CardTitle>
+                <CardTitle>Test Instant Push (WebSocket + FCM)</CardTitle>
                 <CardDescription>
-                  Dispatches a high-priority push via Tier-1 Self-Hosted WebSocket and Tier-2 optional FCM v1.
+                  Dispatches a push via Tier-1 WebSocket and optional FCM v1.
                 </CardDescription>
               </div>
             </div>

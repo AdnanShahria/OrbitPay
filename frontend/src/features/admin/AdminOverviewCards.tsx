@@ -117,7 +117,7 @@ export function AdminOverviewCards({ stats, isLoading }: AdminOverviewCardsProps
         return (
           <section
             key={metric.label}
-            className="flex min-w-0 flex-col rounded-3xl border border-border-button-default bg-background-primary-default p-2 shadow-card"
+            className="flex min-w-0 flex-col rounded-3xl border border-border-button-default bg-background-primary-default p-2 shadow-card transition-colors duration-150 hover:border-border-button-hover"
           >
             <div className="flex w-full items-start justify-between gap-2.5 p-2.5">
               <span className="flex size-9 shrink-0 items-center justify-center rounded-2lg border border-border-button-default bg-background-primary-default text-foreground-icon-primary shadow-card">
@@ -131,7 +131,7 @@ export function AdminOverviewCards({ stats, isLoading }: AdminOverviewCardsProps
               </p>
               <p
                 title={metric.value}
-                className="truncate text-title-2-medium text-text-primary tabular-nums"
+                className="truncate whitespace-nowrap text-title-2-medium text-text-primary tabular-nums tnum"
               >
                 {metric.value}
               </p>

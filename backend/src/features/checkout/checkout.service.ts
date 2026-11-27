@@ -54,6 +54,12 @@ import {
   sendDynamicPushToMerchantDevices,
   sendTelegramOfficeAlert,
 } from '../webhooks/webhook.dispatcher';
+import {
+  extractCustomerFromJson,
+  extractRealCustomerEmail,
+  notifyPaymentSubmittedEmail,
+  notifyPaymentVerifiedInvoiceEmail,
+} from '../notifications/payment-email.service';
 import type { VerifyCheckoutInput } from './checkout.schema';
 
 const OPEN_SESSION_TTL_MS = 15 * 60 * 1000;
@@ -74,6 +80,7 @@ export interface CheckoutSessionResult {
   expiresAt: Date;
   verificationMode: 'AUTO' | 'PURE_MANUAL';
   receiptPolicy: string;
+  customerEmail?: string | null;
   deviceStatus: DeviceStatusSnapshot;
   activeWallets: {
     provider: MfsProvider;
@@ -93,6 +100,7 @@ export interface VerifyResult {
   paidAmount?: number;
   matchType?: MatchType;
   provider?: string;
+  customerEmail?: string | null;
   escalationReason?: EscalationReason | null;
   deviceOnline?: boolean;
   receiptPolicy?: string;
@@ -307,6 +315,7 @@ export async function createCheckoutSession(
     expiresAt,
     verificationMode: merchant.verificationMode,
     receiptPolicy: merchant.receiptPolicy,
+    customerEmail: extractRealCustomerEmail(customerEmail, reusable?.customerEmail, effectiveEmail),
     deviceStatus,
     activeWallets: wallets.map((w) => ({
       provider: w.provider,
@@ -365,6 +374,8 @@ export async function getPublicCheckoutSession(
   ]);
 
   const intent = intentRows[0];
+  const intentCustomer = extractCustomerFromJson(intent?.customerJson);
+  const customerEmail = extractRealCustomerEmail(intentCustomer.email, session.customerEmail);
 
   return {
     sessionId: session.id,
@@ -382,6 +393,7 @@ export async function getPublicCheckoutSession(
     provider: intent?.provider ?? session.provider,
     verificationMode: intent?.verificationMode ?? merchant.verificationMode,
     receiptPolicy: merchant.receiptPolicy,
+    customerEmail,
     deviceStatus,
     activeWallets: wallets.map((w) => ({
       provider: w.provider,
@@ -575,6 +587,7 @@ async function escalatePaymentToManualReview(
     effectiveBaseAmount: number;
     effectiveUniqueAmount: number;
     customerEmail: string;
+    customerName?: string;
     receiptAssetId?: string | null;
     receiptUrl?: string | null;
     deviceOnline: boolean;
@@ -625,11 +638,14 @@ async function escalatePaymentToManualReview(
     )
     .limit(1);
 
+  const realCustomerEmail = extractRealCustomerEmail(params.customerEmail);
+
   if (existingQueue[0]) {
     await db
       .update(verificationQueue)
       .set({
         provider: params.provider,
+        ...(realCustomerEmail ? { customerEmail: realCustomerEmail } : {}),
         submittedAmount: params.submittedAmount,
         submittedTrxId: params.submittedTrxId,
         submittedSender: params.submittedSender,
@@ -759,6 +775,19 @@ async function escalatePaymentToManualReview(
         merchant,
         `⚠️ Manual Review Required [${display.appName || merchant.storeName}]\nRef: ${updatedIntent.externalRefId}\nReason: ${params.escalationReason}\nAmount: ৳${params.submittedAmount} (${params.provider})\nTrxID: ${params.submittedTrxId}`
       ),
+      notifyPaymentSubmittedEmail(db, env, {
+        merchantId: merchant.id,
+        storeName: display.appName || merchant.storeName,
+        externalRefId: updatedIntent.externalRefId,
+        customerEmail: realCustomerEmail,
+        customerName: params.customerName,
+        amount: params.submittedAmount,
+        provider: params.provider,
+        trxId: params.submittedTrxId,
+        senderNumber: params.submittedSender,
+        status: 'MANUAL_REVIEW_REQUIRED',
+        submittedAt: now,
+      }),
     ])
   );
 
@@ -771,6 +800,7 @@ async function escalatePaymentToManualReview(
     uniqueAmount: params.effectiveUniqueAmount,
     paidAmount: params.submittedAmount,
     provider: params.provider,
+    customerEmail: realCustomerEmail,
     escalationReason: params.escalationReason,
     deviceOnline: params.deviceOnline,
     receiptPolicy: merchant.receiptPolicy,
@@ -882,8 +912,15 @@ export async function verifyCheckoutPayment(
     intent?.baseAmount ?? activeSession?.baseAmount ?? payload.baseAmount ?? submittedAmount;
   const effectiveUniqueAmount =
     intent?.uniqueAmount ?? activeSession?.uniqueAmount ?? submittedAmount;
+  const intentCustomer = extractCustomerFromJson(intent?.customerJson);
+  const payloadRealEmail = extractRealCustomerEmail(payload.customerEmail);
+  const realCustomerEmail = extractRealCustomerEmail(
+    payload.customerEmail,
+    intentCustomer.email,
+    activeSession?.customerEmail
+  );
   const effectiveCustomerEmail =
-    payload.customerEmail?.trim() || activeSession?.customerEmail || 'buyer@orbitsaas.cloud';
+    realCustomerEmail || activeSession?.customerEmail || 'buyer@orbitsaas.cloud';
 
   if (intent) {
     if (intent.status === 'VERIFIED') {
@@ -897,6 +934,7 @@ export async function verifyCheckoutPayment(
         paidAmount: intent.paidAmount ?? intent.uniqueAmount,
         matchType: intent.matchType ?? 'EXACT_UNIQUE',
         provider: intent.provider ?? payload.provider,
+        customerEmail: realCustomerEmail,
         stateVersion: intent.stateVersion,
       };
     }
@@ -909,10 +947,19 @@ export async function verifyCheckoutPayment(
       );
     }
 
+    const updatedCustomerJson = payloadRealEmail
+      ? JSON.stringify({
+          ...intentCustomer,
+          email: payloadRealEmail,
+          ...(intentCustomer.phone ? {} : { phone: submittedSender }),
+        })
+      : undefined;
+
     const bumped = await db
       .update(paymentIntents)
       .set({
         submitAttempts: intent.submitAttempts + 1,
+        ...(updatedCustomerJson ? { customerJson: updatedCustomerJson } : {}),
         updatedAt: now,
       })
       .where(eq(paymentIntents.id, intent.id))
@@ -950,6 +997,26 @@ export async function verifyCheckoutPayment(
         .set({ paymentIntentId: intentId })
         .where(eq(checkoutSessions.id, activeSession.id));
     }
+  }
+
+  if (payloadRealEmail) {
+    await Promise.all([
+      activeSession
+        ? db
+            .update(checkoutSessions)
+            .set({ customerEmail: payloadRealEmail })
+            .where(eq(checkoutSessions.id, activeSession.id))
+        : Promise.resolve(),
+      db
+        .update(merchantOrders)
+        .set({ customerEmail: payloadRealEmail, updatedAt: now })
+        .where(
+          and(
+            eq(merchantOrders.merchantId, merchant.id),
+            eq(merchantOrders.externalOrderId, payload.orderId)
+          )
+        ),
+    ]);
   }
 
   // Global cross-mode TrxID single-use check
@@ -990,6 +1057,7 @@ export async function verifyCheckoutPayment(
       effectiveBaseAmount,
       effectiveUniqueAmount,
       customerEmail: effectiveCustomerEmail,
+      customerName: intentCustomer.name,
       receiptAssetId: effectiveReceiptAssetId,
       receiptUrl: effectiveReceiptUrl,
       deviceOnline: deviceStatus.online,
@@ -1036,6 +1104,7 @@ export async function verifyCheckoutPayment(
         effectiveBaseAmount,
         effectiveUniqueAmount,
         customerEmail: effectiveCustomerEmail,
+        customerName: intentCustomer.name,
         receiptAssetId: effectiveReceiptAssetId,
         receiptUrl: effectiveReceiptUrl,
         deviceOnline: deviceStatus.online,
@@ -1151,6 +1220,27 @@ export async function verifyCheckoutPayment(
           merchant,
           `✅ Auto-Verified [${display.appName || merchant.storeName}]\nRef: ${payload.orderId}\nAmount: ৳${matchedSms.amount} (${matchedSms.provider})\nTrxID: ${submittedTrxId}`
         ),
+        notifyPaymentVerifiedInvoiceEmail(db, env, {
+          merchantId: merchant.id,
+          storeName: display.appName || merchant.storeName,
+          externalRefId: payload.orderId,
+          paymentIntentId: intent.id,
+          customerEmail: realCustomerEmail,
+          customerName: intentCustomer.name,
+          customerPhone: intentCustomer.phone || submittedSender,
+          baseAmount: effectiveBaseAmount,
+          uniqueAmount: effectiveUniqueAmount,
+          paidAmount: matchedSms.amount,
+          offsetCents:
+            activeSession?.offsetCents ??
+            Math.round((effectiveUniqueAmount - effectiveBaseAmount) * 100),
+          provider: matchedSms.provider,
+          trxId: submittedTrxId,
+          senderNumber: matchedSms.senderNumber,
+          matchType: sixFactor.matchType,
+          resolutionSource: 'AUTO_SMS',
+          verifiedAt: now,
+        }),
       ])
     );
 
@@ -1164,6 +1254,7 @@ export async function verifyCheckoutPayment(
       paidAmount: matchedSms.amount,
       matchType: sixFactor.matchType,
       provider: matchedSms.provider,
+      customerEmail: realCustomerEmail,
       deviceOnline: deviceStatus.online,
       receiptPolicy: merchant.receiptPolicy,
       stateVersion: updatedIntent?.stateVersion ?? intent.stateVersion + 1,
@@ -1184,10 +1275,17 @@ export async function verifyCheckoutPayment(
     .limit(1);
 
   if (existingQueue[0]) {
+    if (payloadRealEmail) {
+      await db
+        .update(verificationQueue)
+        .set({ customerEmail: payloadRealEmail })
+        .where(eq(verificationQueue.id, existingQueue[0].id));
+    }
     return {
       status: 'PENDING_VERIFICATION',
       paymentIntentId: intent.id,
       trxId: submittedTrxId,
+      customerEmail: realCustomerEmail,
       deviceOnline: deviceStatus.online,
       receiptPolicy: merchant.receiptPolicy,
       message: 'Verification already queued. Confirmation will dispatch automatically.',
@@ -1322,6 +1420,19 @@ export async function verifyCheckoutPayment(
         merchant,
         `🕒 Payment Submitted [${display.appName || merchant.storeName}]\nRef: ${payload.orderId}\nAmount: ৳${submittedAmount} (${payload.provider})\nTrxID: ${submittedTrxId}\nDevice Online: ${deviceStatus.online ? 'Yes' : 'Offline'}`
       ),
+      notifyPaymentSubmittedEmail(db, env, {
+        merchantId: merchant.id,
+        storeName: display.appName || merchant.storeName,
+        externalRefId: payload.orderId,
+        customerEmail: realCustomerEmail,
+        customerName: intentCustomer.name,
+        amount: submittedAmount,
+        provider: payload.provider,
+        trxId: submittedTrxId,
+        senderNumber: submittedSender,
+        status: 'PENDING_VERIFICATION',
+        submittedAt: now,
+      }),
     ])
   );
 
@@ -1333,6 +1444,7 @@ export async function verifyCheckoutPayment(
     uniqueAmount: effectiveUniqueAmount,
     paidAmount: submittedAmount,
     provider: payload.provider,
+    customerEmail: realCustomerEmail,
     deviceOnline: deviceStatus.online,
     receiptPolicy: merchant.receiptPolicy,
     stateVersion: updatedIntent.stateVersion,
@@ -1358,6 +1470,7 @@ export async function getCheckoutStatus(
   matchType?: string | null;
   escalationReason?: string | null;
   receiptUrl?: string | null;
+  customerEmail?: string | null;
   verifiedAt?: Date;
 }> {
   const intentRows = await db
@@ -1368,6 +1481,9 @@ export async function getCheckoutStatus(
 
   const intent = intentRows[0];
   if (intent) {
+    const customerEmail = extractRealCustomerEmail(
+      extractCustomerFromJson(intent.customerJson).email
+    );
     if (intent.status === 'VERIFIED') {
       return {
         status: 'VERIFIED',
@@ -1376,6 +1492,7 @@ export async function getCheckoutStatus(
         amount: intent.paidAmount ?? intent.uniqueAmount,
         matchType: intent.matchType,
         receiptUrl: intent.receiptUrl,
+        customerEmail,
         verifiedAt: intent.verifiedAt || undefined,
       };
     }
@@ -1387,6 +1504,7 @@ export async function getCheckoutStatus(
         amount: intent.paidAmount ?? intent.uniqueAmount,
         escalationReason: intent.escalationReason,
         receiptUrl: intent.receiptUrl,
+        customerEmail,
       };
     }
     if (intent.status === 'WAITING_FOR_SMS') {
@@ -1396,6 +1514,7 @@ export async function getCheckoutStatus(
         trxId: intent.trxId || undefined,
         amount: intent.paidAmount ?? intent.uniqueAmount,
         receiptUrl: intent.receiptUrl,
+        customerEmail,
       };
     }
     if (intent.status === 'REJECTED' || intent.status === 'EXPIRED') {
@@ -1403,6 +1522,7 @@ export async function getCheckoutStatus(
         status: intent.status,
         paymentIntentId: intent.id,
         trxId: intent.trxId || undefined,
+        customerEmail,
       };
     }
   }
@@ -1439,23 +1559,25 @@ export async function getCheckoutStatus(
     .limit(1);
 
   if (queueItem[0]) {
+    const queueEmail = extractRealCustomerEmail(queueItem[0].customerEmail);
     if (queueItem[0].status === 'MATCHED' || queueItem[0].status === 'MANUALLY_APPROVED') {
-      return { status: 'VERIFIED' };
+      return { status: 'VERIFIED', customerEmail: queueEmail };
     }
     if (queueItem[0].status === 'MANUAL_REVIEW_REQUIRED') {
       return {
         status: 'MANUAL_REVIEW_REQUIRED',
         escalationReason: queueItem[0].escalationReason,
         receiptUrl: queueItem[0].receiptUrl,
+        customerEmail: queueEmail,
       };
     }
     if (queueItem[0].status === 'MANUALLY_REJECTED') {
-      return { status: 'REJECTED' };
+      return { status: 'REJECTED', customerEmail: queueEmail };
     }
     if (queueItem[0].status === 'EXPIRED') {
-      return { status: 'EXPIRED' };
+      return { status: 'EXPIRED', customerEmail: queueEmail };
     }
-    return { status: 'PENDING_VERIFICATION' };
+    return { status: 'PENDING_VERIFICATION', customerEmail: queueEmail };
   }
 
   return { status: 'UNINITIALIZED' };

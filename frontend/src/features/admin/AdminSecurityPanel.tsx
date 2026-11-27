@@ -349,7 +349,7 @@ export function AdminSecurityPanel({
               <div>
                 <CardTitle>Current Admin Session</CardTitle>
                 <CardDescription>
-                  Active Root Hub authentication identity, token lifecycle, and emergency session controls.
+                  Active Root Hub identity, token lifecycle, and emergency controls.
                 </CardDescription>
               </div>
             </div>
@@ -459,7 +459,7 @@ export function AdminSecurityPanel({
               <div>
                 <CardTitle>System Health &amp; D1 Schema Diagnostics</CardTitle>
                 <CardDescription>
-                  Runtime environment bindings, Durable Objects, R2 storage, and Cloudflare D1 table integrity.
+                  Runtime bindings, Durable Objects, R2 storage, and D1 table integrity.
                 </CardDescription>
               </div>
             </div>
@@ -584,7 +584,7 @@ export function AdminSecurityPanel({
               <div>
                 <CardTitle>Bootstrap First Super Admin Account</CardTitle>
                 <CardDescription>
-                  No password-based admin accounts exist yet. Create the first SUPER_ADMIN so you can sign in without exposing the Master Security Key.
+                  Create the first SUPER_ADMIN to sign in without exposing the Master Key.
                 </CardDescription>
               </div>
             </div>
@@ -732,7 +732,7 @@ export function AdminSecurityPanel({
                     <TableRow key={u.id} id={u.id}>
                       <TableCell>
                         <div className="flex flex-col min-w-0">
-                          <span className="text-body-medium text-text-primary truncate">
+                          <span title={u.email} className="text-body-medium text-text-primary truncate max-w-[200px]">
                             {u.email}
                           </span>
                           <span className="text-caption-2-regular text-text-tertiary truncate">
@@ -756,11 +756,11 @@ export function AdminSecurityPanel({
                           {u.isActive !== false ? 'Active' : 'Disabled'}
                         </Chip>
                       </TableCell>
-                      <TableCell className="text-caption-1-regular text-text-secondary tabular-nums">
+                      <TableCell className="text-caption-1-regular text-text-secondary whitespace-nowrap tabular-nums tnum">
                         {u.lastLoginAt ? formatDate(u.lastLoginAt) : 'Never'}
                       </TableCell>
                       <TableCell className="text-end">
-                        <div className="flex items-center justify-end gap-1.5">
+                        <div className="shrink-0 flex items-center justify-end gap-1.5">
                           <Button
                             variant="ghost"
                             size="xs"
@@ -836,11 +836,14 @@ export function AdminSecurityPanel({
                     <TableRow key={ses.id} id={ses.id}>
                       <TableCell>
                         <div className="flex items-center gap-1.5">
-                          <span className="font-mono text-caption-1-medium text-text-primary truncate max-w-36">
+                          <span
+                            title={ses.id}
+                            className="font-mono text-caption-1-medium text-text-primary truncate max-w-36"
+                          >
                             {ses.id}
                           </span>
                           {isCurrent && (
-                            <Chip variant="caption" color="cyan">
+                            <Chip variant="caption" color="cyan" className="shrink-0">
                               Current
                             </Chip>
                           )}
@@ -848,10 +851,13 @@ export function AdminSecurityPanel({
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-col min-w-0">
-                          <span className="text-caption-1-medium text-text-primary truncate">
+                          <span
+                            title={ses.email || 'Master Key Session'}
+                            className="text-caption-1-medium text-text-primary truncate max-w-[180px]"
+                          >
                             {ses.email || 'Master Key Session'}
                           </span>
-                          <span className="text-caption-2-regular text-text-tertiary">
+                          <span className="text-caption-2-regular text-text-tertiary whitespace-nowrap">
                             {ses.authMethod || 'JWT'}
                           </span>
                         </div>
@@ -861,7 +867,7 @@ export function AdminSecurityPanel({
                           {ses.role || 'ADMIN'}
                         </Chip>
                       </TableCell>
-                      <TableCell className="font-mono text-caption-1-regular text-text-secondary tabular-nums">
+                      <TableCell className="font-mono text-caption-1-regular text-text-secondary whitespace-nowrap tabular-nums tnum">
                         {ses.ipAddress || '—'}
                       </TableCell>
                       <TableCell>
@@ -878,22 +884,24 @@ export function AdminSecurityPanel({
                         </Chip>
                       </TableCell>
                       <TableCell className="text-end">
-                        {statusMeta.label === 'Active' ? (
-                          <Button
-                            variant="ghost"
-                            size="xs"
-                            leadingIcon={RiDeleteBinLine}
-                            className="text-text-destructive"
-                            isLoading={revokeSessionMutation.isPending}
-                            onClick={() => handleRevokeSession(ses.id)}
-                          >
-                            Revoke
-                          </Button>
-                        ) : (
-                          <span className="text-caption-2-regular text-text-tertiary">
-                            —
-                          </span>
-                        )}
+                        <div className="shrink-0 flex items-center justify-end gap-1.5">
+                          {statusMeta.label === 'Active' ? (
+                            <Button
+                              variant="ghost"
+                              size="xs"
+                              leadingIcon={RiDeleteBinLine}
+                              className="text-text-destructive"
+                              isLoading={revokeSessionMutation.isPending}
+                              onClick={() => handleRevokeSession(ses.id)}
+                            >
+                              Revoke
+                            </Button>
+                          ) : (
+                            <span className="text-caption-2-regular text-text-tertiary">
+                              —
+                            </span>
+                          )}
+                        </div>
                       </TableCell>
                     </TableRow>
                   );
@@ -941,36 +949,50 @@ export function AdminSecurityPanel({
               </TableHeader>
               <TableBody>
                 {auditLogs.map((log) => (
-                  <TableRow key={log.id} id={log.id}>
-                    <TableCell className="text-caption-1-regular text-text-secondary tabular-nums">
-                      {formatDate(log.createdAt)}
-                    </TableCell>
-                    <TableCell>
-                      <Chip
-                        variant="caption"
-                        color={
-                          log.action.includes('FAILED') || log.action.includes('DELETE') || log.action.includes('REVOKE')
-                            ? 'rose'
-                            : log.action.includes('LOGIN') || log.action.includes('CREATE')
-                              ? 'lime'
-                              : 'neutral'
-                        }
-                      >
-                        {log.action}
-                      </Chip>
-                    </TableCell>
-                    <TableCell className="text-caption-1-medium text-text-primary">
-                      {log.actorEmail || log.actorId || 'System'}
-                    </TableCell>
-                    <TableCell className="font-mono text-caption-2-regular text-text-secondary">
-                      {log.targetId
-                        ? `${log.targetType ? `${log.targetType}: ` : ''}${log.targetId}`
-                        : log.targetType || '—'}
-                    </TableCell>
-                    <TableCell className="font-mono text-caption-1-regular text-text-tertiary tabular-nums">
-                      {log.ipAddress || '—'}
-                    </TableCell>
-                  </TableRow>
+                    <TableRow key={log.id} id={log.id}>
+                      <TableCell className="text-caption-1-regular text-text-secondary whitespace-nowrap tabular-nums tnum">
+                        {formatDate(log.createdAt)}
+                      </TableCell>
+                      <TableCell>
+                        <Chip
+                          variant="caption"
+                          color={
+                            log.action.includes('FAILED') || log.action.includes('DELETE') || log.action.includes('REVOKE')
+                              ? 'rose'
+                              : log.action.includes('LOGIN') || log.action.includes('CREATE')
+                                ? 'lime'
+                                : 'neutral'
+                          }
+                        >
+                          {log.action}
+                        </Chip>
+                      </TableCell>
+                      <TableCell className="text-caption-1-medium text-text-primary">
+                        <span
+                          title={log.actorEmail || log.actorId || 'System'}
+                          className="block truncate max-w-[180px]"
+                        >
+                          {log.actorEmail || log.actorId || 'System'}
+                        </span>
+                      </TableCell>
+                      <TableCell className="font-mono text-caption-2-regular text-text-secondary">
+                        <span
+                          title={
+                            log.targetId
+                              ? `${log.targetType ? `${log.targetType}: ` : ''}${log.targetId}`
+                              : log.targetType || '—'
+                          }
+                          className="block truncate max-w-[200px]"
+                        >
+                          {log.targetId
+                            ? `${log.targetType ? `${log.targetType}: ` : ''}${log.targetId}`
+                            : log.targetType || '—'}
+                        </span>
+                      </TableCell>
+                      <TableCell className="font-mono text-caption-1-regular text-text-tertiary whitespace-nowrap tabular-nums tnum">
+                        {log.ipAddress || '—'}
+                      </TableCell>
+                    </TableRow>
                 ))}
               </TableBody>
             </Table>

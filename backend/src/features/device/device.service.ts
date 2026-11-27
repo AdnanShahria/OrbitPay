@@ -40,6 +40,10 @@ import {
   sendDynamicPushToMerchantDevices,
   sendTelegramOfficeAlert,
 } from '../webhooks/webhook.dispatcher';
+import {
+  notifyPaymentVerifiedInvoiceEmail,
+  resolveCustomerEmailForOrder,
+} from '../notifications/payment-email.service';
 import { realtimeHub } from '../realtime/realtime.service';
 import type { IngestMessageDTO, PreflightCheckDTO } from './device.schema';
 
@@ -472,6 +476,14 @@ export async function ingestDeviceSmsBatch(
 
       await incrementWalletVolume(db, merchant.id, msg.provider, msg.amount);
 
+      const resolvedCustomer = await resolveCustomerEmailForOrder(db, {
+        merchantId: merchant.id,
+        externalRefId: pendingQueueRecord.externalOrderId,
+        paymentIntentId: intent?.id ?? pendingQueueRecord.paymentIntentId,
+        candidates: [pendingQueueRecord.customerEmail],
+        customerJson: intent?.customerJson,
+      });
+
       const display = parseDisplayMetadata(
         intent?.displayJson,
         merchant.storeName,
@@ -533,6 +545,30 @@ export async function ingestDeviceSmsBatch(
             merchant,
             `✅ Reconciled [${display.appName || merchant.storeName}]\nRef: ${pendingQueueRecord.externalOrderId}\nAmount: ৳${msg.amount} (${msg.provider})\nTrxID: ${normalizedTrxId}`
           ),
+          ...(resolvedCustomer.email && env
+            ? [
+                notifyPaymentVerifiedInvoiceEmail(db, env, {
+                  merchantId: merchant.id,
+                  storeName: display.appName || merchant.storeName,
+                  externalRefId: pendingQueueRecord.externalOrderId,
+                  paymentIntentId: intent?.id ?? pendingQueueRecord.paymentIntentId,
+                  customerEmail: resolvedCustomer.email,
+                  customerName: resolvedCustomer.name,
+                  customerPhone:
+                    resolvedCustomer.phone || pendingQueueRecord.submittedSender,
+                  baseAmount: effectiveBaseAmount,
+                  uniqueAmount: effectiveUniqueAmount,
+                  paidAmount: msg.amount,
+                  offsetCents: Math.round((effectiveUniqueAmount - effectiveBaseAmount) * 100),
+                  provider: msg.provider,
+                  trxId: normalizedTrxId,
+                  senderNumber: normalizedSender,
+                  matchType: sixFactor.matchType,
+                  resolutionSource,
+                  verifiedAt: verifiedTime,
+                }),
+              ]
+            : []),
         ])
       );
 

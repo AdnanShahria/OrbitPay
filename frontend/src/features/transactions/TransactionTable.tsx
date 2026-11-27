@@ -18,6 +18,7 @@ import { Chip } from '@/components/base/badges/chip';
 import { StatusDot } from '@/components/base/badges/status-dot';
 import { Skeleton } from '@/components/base/skeleton/skeleton';
 import { toast } from '@/components/base/toast/toast';
+import { cx } from '@/utils/cx';
 import { formatBDT, formatDate, MfsProvider, MFS_METADATA } from '@/shared/utils/format';
 import {
   RiToolsLine,
@@ -172,7 +173,7 @@ export function TransactionTable() {
               {transactions.map((tx) => {
                 const meta = MFS_METADATA[tx.provider] || {
                   name: tx.provider,
-                  color: '#52525B',
+                  color: 'var(--color-text-secondary)',
                   textClass: 'text-text-primary',
                   borderClass: 'border-border-button-default',
                 };
@@ -181,9 +182,13 @@ export function TransactionTable() {
                   <TableRow key={tx.id} id={tx.id}>
                     {/* Provider & TrxID */}
                     <TableCell>
-                      <div className="flex items-center gap-2.5">
+                      <div className="flex items-center gap-2.5 whitespace-nowrap">
                         <span
-                          className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-caption-1-medium bg-background-secondary-default ${meta.borderClass} ${meta.textClass}`}
+                          className={cx(
+                            'inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-caption-1-medium bg-background-secondary-default shrink-0',
+                            meta.borderClass,
+                            meta.textClass,
+                          )}
                         >
                           <span
                             aria-hidden
@@ -193,7 +198,9 @@ export function TransactionTable() {
                           <span>{meta.name}</span>
                         </span>
                         <div className="flex items-center gap-1 font-mono text-body-medium text-text-primary">
-                          <span className="tabular-nums">{tx.trxId}</span>
+                          <span className="tabular-nums tnum truncate max-w-[140px]" title={tx.trxId}>
+                            {tx.trxId}
+                          </span>
                           <Button
                             variant="ghost"
                             size="xs"
@@ -201,11 +208,12 @@ export function TransactionTable() {
                             leadingIcon={copiedId === tx.trxId ? RiCheckLine : RiFileCopyLine}
                             aria-label={`Copy TrxID ${tx.trxId}`}
                             onClick={() => handleCopy(tx.trxId)}
-                            className={
+                            className={cx(
+                              'transition-colors duration-150',
                               copiedId === tx.trxId
                                 ? 'text-notification-success-foreground'
-                                : 'text-foreground-icon-tertiary'
-                            }
+                                : 'text-foreground-icon-tertiary',
+                            )}
                           />
                         </div>
                       </div>
@@ -213,14 +221,14 @@ export function TransactionTable() {
 
                     {/* Amount */}
                     <TableCell>
-                      <span className="text-body-medium text-text-primary tabular-nums">
+                      <span className="font-mono text-body-medium text-text-primary tabular-nums tnum whitespace-nowrap">
                         {formatBDT(tx.amount)}
                       </span>
                     </TableCell>
 
                     {/* Sender Number */}
                     <TableCell>
-                      <span className="font-mono text-body-regular text-text-secondary tabular-nums">
+                      <span className="font-mono text-body-regular text-text-secondary tabular-nums tnum whitespace-nowrap">
                         {tx.senderNumber}
                       </span>
                     </TableCell>
@@ -269,11 +277,16 @@ export function TransactionTable() {
                     {/* Order Reference */}
                     <TableCell>
                       {tx.externalOrderId ? (
-                        <Chip variant="caption" color="gray" className="font-mono tabular-nums">
+                        <Chip
+                          variant="caption"
+                          color="gray"
+                          title={tx.externalOrderId}
+                          className="font-mono tabular-nums max-w-[160px] truncate"
+                        >
                           {tx.externalOrderId}
                         </Chip>
                       ) : (
-                        <span className="text-caption-1-regular text-text-tertiary">
+                        <span className="text-caption-1-regular text-text-tertiary whitespace-nowrap">
                           Unlinked
                         </span>
                       )}
@@ -281,27 +294,29 @@ export function TransactionTable() {
 
                     {/* Timestamp */}
                     <TableCell>
-                      <span className="whitespace-nowrap text-caption-1-regular text-text-secondary tabular-nums">
+                      <span className="whitespace-nowrap text-caption-1-regular text-text-secondary tabular-nums tnum">
                         {formatDate(tx.smsReceivedAt)}
                       </span>
                     </TableCell>
 
                     {/* Action */}
                     <TableCell className="text-end">
-                      {tx.status === 'UNCLAIMED' ? (
-                        <Button
-                          variant="secondary"
-                          size="small"
-                          leadingIcon={RiToolsLine}
-                          onClick={() => setSelectedUnclaimed(tx)}
-                        >
-                          Rescue typo
-                        </Button>
-                      ) : (
-                        <span className="text-caption-1-medium text-notification-success-foreground">
-                          Reconciled
-                        </span>
-                      )}
+                      <div className="shrink-0 flex items-center justify-end gap-1.5">
+                        {tx.status === 'UNCLAIMED' ? (
+                          <Button
+                            variant="secondary"
+                            size="small"
+                            leadingIcon={RiToolsLine}
+                            onClick={() => setSelectedUnclaimed(tx)}
+                          >
+                            Rescue typo
+                          </Button>
+                        ) : (
+                          <span className="text-caption-1-medium text-notification-success-foreground whitespace-nowrap">
+                            Reconciled
+                          </span>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 );

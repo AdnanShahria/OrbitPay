@@ -78,9 +78,7 @@ export function GlobalWebhookTable({
             Cross-Storefront Webhook Audit Trail
           </h3>
           <p className="text-caption-1-regular text-text-secondary mt-0.5">
-            Real-time delivery status of HMAC-signed{' '}
-            <code className="font-mono text-text-primary">payment.verified</code>{' '}
-            callbacks to client storefronts.
+            Delivery status of HMAC-signed callbacks across all storefronts.
           </p>
         </div>
 
@@ -90,6 +88,7 @@ export function GlobalWebhookTable({
           onClick={handleRetry}
           isLoading={retryMutation.isPending}
           leadingIcon={RiRefreshLine}
+          className="min-h-11 sm:min-h-10 shrink-0"
         >
           Dispatch Pending Retries
         </Button>
@@ -146,17 +145,28 @@ export function GlobalWebhookTable({
                   >
                     <TableCell>
                       <div className="flex flex-col min-w-0">
-                        <span className="text-body-medium text-text-primary truncate">
+                        <span
+                          title={w.storeName || w.merchantId}
+                          className="text-body-medium text-text-primary truncate max-w-[180px]"
+                        >
                           {w.storeName || w.merchantId}
                         </span>
-                        <span className="text-caption-2-regular font-mono text-text-tertiary truncate max-w-xs">
+                        <span
+                          title={w.webhookUrl || 'No webhook URL'}
+                          className="text-caption-2-regular font-mono text-text-tertiary truncate max-w-[220px]"
+                        >
                           {w.webhookUrl || 'No webhook URL'}
                         </span>
                       </div>
                     </TableCell>
 
                     <TableCell className="font-mono text-body-medium text-text-primary tabular-nums">
-                      {w.externalOrderId}
+                      <span
+                        title={w.externalOrderId}
+                        className="block truncate max-w-[160px]"
+                      >
+                        {w.externalOrderId}
+                      </span>
                     </TableCell>
 
                     <TableCell>
@@ -174,7 +184,7 @@ export function GlobalWebhookTable({
                       {w.responseStatus ? (
                         <span
                           className={cx(
-                            'font-mono text-caption-1-medium tabular-nums',
+                            'font-mono text-caption-1-medium tabular-nums tnum whitespace-nowrap',
                             w.responseStatus >= 200 && w.responseStatus < 300
                               ? 'text-status-lime-text'
                               : 'text-status-rose-text',
@@ -183,24 +193,24 @@ export function GlobalWebhookTable({
                           HTTP {w.responseStatus}
                         </span>
                       ) : (
-                        <span className="text-caption-1-regular text-text-tertiary">
+                        <span className="text-caption-1-regular text-text-tertiary whitespace-nowrap">
                           No response
                         </span>
                       )}
                     </TableCell>
 
-                    <TableCell className="font-mono text-caption-1-medium text-text-secondary tabular-nums">
+                    <TableCell className="font-mono text-caption-1-medium text-text-secondary tabular-nums tnum whitespace-nowrap">
                       {w.attemptCount} / 5
                     </TableCell>
 
-                    <TableCell className="text-caption-1-regular text-text-secondary tabular-nums">
+                    <TableCell className="text-caption-1-regular text-text-secondary tabular-nums tnum whitespace-nowrap">
                       {w.lastAttemptAt
                         ? formatDate(new Date(w.lastAttemptAt))
                         : 'Queued'}
                     </TableCell>
 
                     <TableCell className="text-end">
-                      <div className="flex justify-end">
+                      <div className="shrink-0 flex items-center justify-end gap-1.5">
                         <Button
                           variant="ghost"
                           size="small"

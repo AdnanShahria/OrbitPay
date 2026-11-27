@@ -218,14 +218,14 @@ export function AppReleasesPanel() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h3 className="text-title-3-semibold text-text-primary">
-            Android Companion Self-Update &amp; APK Releases
+            Android Companion OTA &amp; APK Releases
           </h3>
           <p className="text-caption-1-regular text-text-secondary mt-0.5">
-            Upload signed release APKs to Cloudflare R2 and trigger instant OTA update prompts on connected merchant phones.
+            Upload signed APKs to R2 and broadcast OTA updates to companion devices.
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <Chip
             variant="caption"
             color={r2Configured ? 'lime' : 'yellow'}
@@ -241,6 +241,7 @@ export function AppReleasesPanel() {
             onClick={() => refetch()}
             isLoading={isFetching && !isLoading}
             leadingIcon={RiRefreshLine}
+            className="min-h-11 sm:min-h-10"
           >
             Refresh
           </Button>
@@ -257,7 +258,7 @@ export function AppReleasesPanel() {
             <div>
               <CardTitle>Publish New Android Release</CardTitle>
               <CardDescription>
-                Every update APK must be signed with the same release keystore and use a strictly higher versionCode.
+                Signed with the same release keystore and a strictly higher versionCode.
               </CardDescription>
             </div>
           </div>
@@ -315,7 +316,7 @@ export function AppReleasesPanel() {
                     const file = e.target.files?.[0] ?? null;
                     setSelectedFile(file);
                   }}
-                  className="text-caption-1-regular text-text-secondary file:mr-3 file:rounded-xl file:border file:border-border-button-default file:bg-background-primary-default file:px-3 file:py-1.5 file:text-caption-1-medium file:text-text-primary hover:file:bg-background-secondary-hover"
+                  className="text-caption-1-regular text-text-secondary file:me-3 file:rounded-xl file:border file:border-border-button-default file:bg-background-primary-default file:px-3 file:py-1.5 file:text-caption-1-medium file:text-text-primary hover:file:bg-background-secondary-hover transition-colors duration-150"
                 />
                 {selectedFile && (
                   <Chip variant="caption" color="cyan">
@@ -453,7 +454,7 @@ export function AppReleasesPanel() {
                           </Chip>
                         )}
 
-                        <span className="text-caption-2-regular text-text-tertiary tabular-nums">
+                        <span className="text-caption-2-regular text-text-tertiary whitespace-nowrap tabular-nums tnum">
                           {formatApkSize(release.sizeBytes)} · minBuild {release.minSupportedVersionCode} ·{' '}
                           {formatDate(release.createdAt)}
                         </span>

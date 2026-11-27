@@ -21,15 +21,14 @@ import {
   RiCheckLine,
   RiSmartphoneLine,
   RiArrowRightLine,
-  RiShieldCheckLine,
   RiErrorWarningLine,
-  RiQuestionLine,
   RiHashtag,
   RiMoneyDollarCircleLine,
   RiTimeLine,
   RiWifiOffLine,
   RiImageAddLine,
   RiExternalLinkLine,
+  RiMailLine,
 } from '@remixicon/react';
 
 export interface CheckoutStepperProps {
@@ -49,6 +48,8 @@ export interface CheckoutStepperProps {
   onChangePaidAmount: (val: string) => void;
   trxId: string;
   onChangeTrxId: (val: string) => void;
+  customerEmail?: string;
+  onChangeCustomerEmail?: (val: string) => void;
   verificationMode?: VerificationMode;
   receiptPolicy?: ReceiptPolicy;
   deviceStatus?: DeviceStatusSnapshot;
@@ -82,7 +83,7 @@ function formatCountdown(totalSeconds: number): string {
 
 export function CheckoutStepper({
   initialStep = 1,
-  baseAmount,
+  baseAmount: _baseAmount,
   uniqueAmount,
   offsetCents,
   expiresAt,
@@ -96,6 +97,8 @@ export function CheckoutStepper({
   onChangePaidAmount,
   trxId,
   onChangeTrxId,
+  customerEmail,
+  onChangeCustomerEmail,
   verificationMode = 'AUTO',
   receiptPolicy = 'OFFLINE_OPTIONAL',
   deviceStatus,
@@ -116,6 +119,7 @@ export function CheckoutStepper({
   const [activeStep, setActiveStep] = useState<1 | 2 | 3>(initialStep);
   const [copiedNumber, setCopiedNumber] = useState(false);
   const [copiedAmount, setCopiedAmount] = useState(false);
+  const [localEmail, setLocalEmail] = useState(customerEmail ?? '');
   const [secondsLeft, setSecondsLeft] = useState<number>(() =>
     computeSecondsRemaining(expiresAt),
   );
@@ -123,6 +127,12 @@ export function CheckoutStepper({
   useEffect(() => {
     setActiveStep(initialStep);
   }, [initialStep]);
+
+  useEffect(() => {
+    if (customerEmail !== undefined) {
+      setLocalEmail(customerEmail);
+    }
+  }, [customerEmail]);
 
   useEffect(() => {
     setSecondsLeft(computeSecondsRemaining(expiresAt));
@@ -137,7 +147,7 @@ export function CheckoutStepper({
 
   const isDeviceOffline = deviceStatus?.online === false;
   const isPureManual = verificationMode === 'PURE_MANUAL';
-  const showOfflineOrManualBanner = isDeviceOffline || isPureManual;
+  const showManualPill = isDeviceOffline || isPureManual;
   const allowReceiptUpload =
     receiptPolicy !== 'DISABLED' || isDeviceOffline || isPureManual;
   const isReceiptRequired =
@@ -145,11 +155,20 @@ export function CheckoutStepper({
 
   const isMerchantWallet = activeWallet?.accountType === 'MERCHANT';
   const mfsActionLabel = isMerchantWallet ? 'Payment' : 'Send Money';
-  const walletTypeLabel = isMerchantWallet
-    ? 'Merchant Account'
+  const walletTypeChip = isMerchantWallet
+    ? 'Merchant'
     : activeWallet?.accountType === 'PRA'
-      ? 'Personal Retail (PRA)'
-      : 'Personal Account';
+      ? 'PRA'
+      : 'Personal';
+
+  const emailValue = onChangeCustomerEmail ? (customerEmail ?? '') : localEmail;
+  const handleEmailChange = (val: string) => {
+    if (onChangeCustomerEmail) {
+      onChangeCustomerEmail(val);
+    } else {
+      setLocalEmail(val);
+    }
+  };
 
   const handleCopyNumber = () => {
     if (!activeWallet?.walletNumber) return;
@@ -179,12 +198,12 @@ export function CheckoutStepper({
 
   return (
     <div className="w-full space-y-5">
-      {/* 3-Step Pill Stepper Navigation + Session Countdown */}
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-separator-border pb-3.5">
-        <div className="flex items-center gap-4 sm:gap-5">
+      {/* Single-Row Stepper Navigation + Inline Countdown Pill */}
+      <div className="flex items-center justify-between gap-2 border-b border-separator-border pb-3">
+        <div className="flex items-center gap-3 sm:gap-5 min-w-0">
           {[
-            { step: 1, label: '1. Provider' },
-            { step: 2, label: `2. ${mfsActionLabel}` },
+            { step: 1, label: '1. Method' },
+            { step: 2, label: '2. Send' },
             { step: 3, label: '3. Verify' },
           ].map((s) => {
             const isCurrent = activeStep === s.step;
@@ -197,7 +216,7 @@ export function CheckoutStepper({
                 disabled={isBlocked}
                 onClick={() => setActiveStep(s.step as 1 | 2 | 3)}
                 className={cx(
-                  'min-h-11 flex items-center gap-1.5 text-caption-1-semibold transition-colors cursor-pointer select-none border-b-2 -mb-3.5 pb-1 disabled:opacity-50 disabled:cursor-not-allowed',
+                  'min-h-11 flex items-center text-caption-1-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer select-none border-b-2 -mb-3 pb-1 disabled:opacity-45 disabled:cursor-not-allowed',
                   isCurrent
                     ? 'border-text-primary text-text-primary'
                     : isCompleted
@@ -205,104 +224,36 @@ export function CheckoutStepper({
                       : 'border-transparent text-text-tertiary hover:text-text-secondary',
                 )}
               >
-                <span>{s.label}</span>
+                {s.label}
               </button>
             );
           })}
         </div>
 
         <div
-          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-background-secondary-default border border-border-button-default text-caption-2-medium text-text-secondary tabular-nums"
+          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-background-secondary-default border border-border-button-default text-caption-2-medium text-text-secondary tabular-nums tnum shrink-0 whitespace-nowrap"
           title="Remaining time for unique poisha reservation"
         >
-          <RiTimeLine className="size-3.5 text-foreground-icon-secondary" aria-hidden />
+          <RiTimeLine className="size-3.5 text-foreground-icon-secondary shrink-0" aria-hidden />
           <span className="font-mono text-text-primary">
             {formatCountdown(secondsLeft)}
           </span>
         </div>
       </div>
 
-      {/* Calm Informational Banner for Offline Phone or Manual Verification */}
-      {showOfflineOrManualBanner && (
-        <div
-          role="status"
-          className="p-3.5 rounded-2xl bg-background-secondary-default border border-border-button-default flex items-start gap-3"
-        >
-          <div className="size-8 rounded-xl bg-status-yellow-background text-status-yellow-text flex items-center justify-center shrink-0 mt-0.5">
-            {isDeviceOffline ? (
-              <RiWifiOffLine className="size-4" aria-hidden />
-            ) : (
-              <StatusDot color="yellow" />
-            )}
-          </div>
-          <div className="space-y-0.5 min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-caption-1-semibold text-text-primary">
-                {isPureManual
-                  ? 'Manual Admin Verification Mode'
-                  : 'Verification Phone Offline — Safe Submission Active'}
-              </span>
-              <Chip variant="caption" color="yellow">
-                {isPureManual ? 'Admin Review' : 'Queued Safe'}
-              </Chip>
-            </div>
-            <p className="text-caption-1-regular text-text-secondary leading-relaxed">
-              Verification phone is offline or in manual mode — you can still complete payment normally and optionally attach a screenshot proof; the admin panel already receives your submission.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Unique Amount Callout Banner */}
-      <div className="p-3.5 rounded-2xl bg-background-secondary-default border border-border-button-default flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-        <div className="space-y-0.5 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-caption-1-medium text-text-secondary">
-              Exact amount to send
-            </span>
-            {offsetCents > 0 && (
-              <Chip variant="caption" color="lime">
-                Unique code +{formatBDT(offsetBdt)}
-              </Chip>
-            )}
-          </div>
-          <p className="text-caption-2-medium text-text-tertiary tabular-nums">
-            {offsetCents > 0
-              ? `Base ${formatBDT(baseAmount)} + ${formatBDT(offsetBdt)} unique verification code`
-              : `Standard order total ${formatBDT(baseAmount)}`}
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2 shrink-0">
-          <span className="font-mono text-title-2-medium text-text-primary tabular-nums tnum">
-            {isSessionLoading ? '...' : formatBDT(uniqueAmount)}
-          </span>
-          <Button
-            variant="secondary"
-            size="small"
-            onClick={handleCopyAmount}
-            leadingIcon={copiedAmount ? RiCheckLine : RiFileCopyLine}
-            className="min-h-11 sm:min-h-8"
-          >
-            {copiedAmount ? 'Copied' : 'Copy'}
-          </Button>
-        </div>
-      </div>
-
-      {/* STEP 1: SELECT MFS & COPY NUMBER */}
+      {/* PHASE 1: METHOD SELECTION ONLY */}
       {activeStep === 1 && (
-        <div className="space-y-5">
+        <div key="step-1" className="orbit-step-enter space-y-5">
           <div className="space-y-1">
-            <h4 className="text-body-medium text-text-primary">
-              Choose your payment method
+            <h4 className="text-headline-medium text-text-primary">
+              Select payment method
             </h4>
             <p className="text-caption-1-regular text-text-secondary">
-              Select an active mobile financial service to view the receiver number.
+              Choose your mobile wallet to continue.
             </p>
           </div>
 
-          {/* Provider Tiles */}
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
             {providers.map((p) => {
               const pMeta = MFS_METADATA[p];
               const isSelected = selectedProvider === p;
@@ -314,11 +265,11 @@ export function CheckoutStepper({
                   type="button"
                   onClick={() => onSelectProvider(p)}
                   className={cx(
-                    'min-h-11 p-3 rounded-2xl border flex flex-col items-center justify-center gap-1.5 transition-colors cursor-pointer',
+                    'min-h-11 px-3 py-3 rounded-2xl border flex items-center gap-2.5 text-start transition-colors cursor-pointer',
                     isSelected
                       ? cx('border-2 shadow-card', pMeta.borderClass)
                       : 'border-border-button-default bg-background-primary-default text-text-secondary hover:border-border-button-hover',
-                    !hasWallet && !isSelected && 'opacity-70',
+                    !hasWallet && !isSelected && 'opacity-65',
                   )}
                   style={{
                     backgroundColor: isSelected ? pMeta.bgSoft : undefined,
@@ -326,73 +277,45 @@ export function CheckoutStepper({
                   }}
                 >
                   <span
-                    className="size-4 rounded-full shadow-2xs"
+                    className="size-3.5 rounded-full shrink-0 shadow-2xs"
                     style={{ backgroundColor: pMeta.color }}
                   />
-                  <span
-                    className={cx(
-                      'text-body-medium',
-                      isSelected ? pMeta.textClass : 'text-text-primary',
-                    )}
-                  >
-                    {pMeta.name}
-                  </span>
-                  <span className="text-caption-2-medium text-text-tertiary">
-                    {hasWallet ? 'Active' : 'Standby'}
-                  </span>
+                  <div className="min-w-0">
+                    <span
+                      className={cx(
+                        'text-body-medium block truncate',
+                        isSelected ? pMeta.textClass : 'text-text-primary',
+                      )}
+                    >
+                      {pMeta.name}
+                    </span>
+                    <span className="text-caption-2-medium text-text-tertiary block">
+                      {hasWallet ? 'Active' : 'Standby'}
+                    </span>
+                  </div>
                 </button>
               );
             })}
           </div>
 
-          {/* High-Contrast Number Capsule */}
-          {activeWallet ? (
-            <div className="p-4 rounded-2xl bg-background-secondary-default border border-border-button-default space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-caption-1-medium text-text-secondary">
-                    Receiver {meta.name} number
-                  </span>
-                  <Chip variant="caption" color={isMerchantWallet ? 'blue' : 'soft'}>
-                    {walletTypeLabel}
-                  </Chip>
-                </div>
-                <Chip
-                  variant="caption"
-                  className="rounded-full px-2"
-                  style={{ backgroundColor: meta.bgSoft, color: meta.color }}
-                >
-                  Use {mfsActionLabel}
-                </Chip>
-              </div>
+          {!activeWallet && !isSessionLoading && (
+            <p className="text-caption-1-regular text-text-secondary flex items-center gap-1.5">
+              <RiErrorWarningLine className="size-4 text-foreground-icon-secondary shrink-0" aria-hidden />
+              <span>{meta.name} is on standby. Select an active wallet above.</span>
+            </p>
+          )}
 
-              <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-background-primary-default border border-border-button-default">
-                <span className="font-mono text-title-2-medium text-text-primary tabular-nums tnum">
-                  {isSessionLoading ? 'Loading...' : activeWallet.walletNumber}
-                </span>
-                <Button
-                  variant="secondary"
-                  size="medium"
-                  onClick={handleCopyNumber}
-                  leadingIcon={copiedNumber ? RiCheckLine : RiFileCopyLine}
-                  disabled={isSessionLoading}
-                  className="min-h-11 shrink-0"
-                >
-                  {copiedNumber ? 'Copied' : 'Copy'}
-                </Button>
-              </div>
-            </div>
-          ) : (
+          {showManualPill && (
             <div
-              role="alert"
-              className="p-4 rounded-2xl bg-background-secondary-default border border-border-button-default text-caption-1-regular text-text-secondary flex items-center gap-2.5"
+              role="status"
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-background-secondary-default border border-border-button-default text-caption-1-medium text-text-secondary"
             >
-              <RiErrorWarningLine className="size-4 shrink-0 text-foreground-icon-secondary" aria-hidden />
-              <span>
-                {isSessionLoading
-                  ? 'Loading active payment numbers...'
-                  : `${meta.name} is currently on standby. Please select an Active payment method above.`}
-              </span>
+              {isDeviceOffline ? (
+                <RiWifiOffLine className="size-3.5 text-status-yellow-text shrink-0" aria-hidden />
+              ) : (
+                <StatusDot color="yellow" />
+              )}
+              <span>Manual review active — screenshot proof accepted</span>
             </div>
           )}
 
@@ -404,70 +327,94 @@ export function CheckoutStepper({
             onClick={() => setActiveStep(2)}
             trailingIcon={RiArrowRightLine}
           >
-            Next: {mfsActionLabel} Instructions
+            Continue with {meta.name}
           </Button>
         </div>
       )}
 
-      {/* STEP 2: TRANSFER INSTRUCTIONS (MERCHANT Payment vs PERSONAL Send Money) */}
+      {/* PHASE 2: SEND MONEY / MERCHANT PAYMENT ONLY */}
       {activeStep === 2 && (
-        <div className="space-y-5">
-          <div className="space-y-1">
-            <h4 className="text-body-medium text-text-primary">
-              How to pay via {meta.name} ({mfsActionLabel})
+        <div key="step-2" className="orbit-step-enter space-y-5">
+          <div className="flex items-center justify-between gap-2">
+            <h4 className="text-headline-medium text-text-primary">
+              {mfsActionLabel} via {meta.name}
             </h4>
-            <p className="text-caption-1-regular text-text-secondary">
-              Follow these steps in your {meta.name} app using{' '}
-              <strong className="text-text-primary">{mfsActionLabel}</strong>:
-            </p>
+            <Chip variant="caption" color={isMerchantWallet ? 'blue' : 'soft'}>
+              {walletTypeChip}
+            </Chip>
           </div>
 
+          {/* Two Architectural Summary Boxes */}
           <div className="space-y-3">
-            {[
-              {
-                num: '1',
-                title: `Open your ${meta.name} App`,
-                desc: isMerchantWallet
-                  ? `Log into your ${meta.name} account and tap 'Payment' (Merchant Payment).`
-                  : `Log into your ${meta.name} account and tap 'Send Money'.`,
-              },
-              {
-                num: '2',
-                title: `Enter ${isMerchantWallet ? 'Merchant' : 'Receiver'} Number: ${activeWallet?.walletNumber || 'Unavailable'}`,
-                desc: `Paste the ${walletTypeLabel.toLowerCase()} number into the recipient field.`,
-              },
-              {
-                num: '3',
-                title: `Enter Exact Amount: ${formatBDT(uniqueAmount)}`,
-                desc:
-                  offsetCents > 0
-                    ? `Send ${exactAmountText} BDT (includes +${formatBDT(offsetBdt)} unique verification code) for instant matching.`
-                    : 'Transfer the exact amount shown. No extra fee required.',
-              },
-              {
-                num: '4',
-                title: 'Copy the Transaction ID (TrxID)',
-                desc: 'After confirming, copy the 8 to 10-character TrxID from your confirmation SMS or app screen.',
-              },
-            ].map((st) => (
-              <div
-                key={st.num}
-                className="p-3.5 rounded-2xl border border-border-button-default bg-background-primary-default flex items-start gap-3"
-              >
-                <div
-                  className="size-7 rounded-full flex items-center justify-center text-caption-1-semibold tabular-nums shrink-0 mt-0.5"
-                  style={{ backgroundColor: meta.bgSoft, color: meta.color }}
-                >
-                  {st.num}
-                </div>
-                <div className="min-w-0">
-                  <h5 className="text-body-medium text-text-primary">{st.title}</h5>
-                  <p className="text-caption-1-regular text-text-secondary mt-0.5">
-                    {st.desc}
-                  </p>
-                </div>
+            <div className="p-4 rounded-2xl bg-background-secondary-default border border-border-button-default flex items-center justify-between gap-3">
+              <div className="min-w-0 space-y-0.5">
+                <span className="text-caption-1-medium text-text-tertiary block">
+                  Receiver {meta.name} number
+                </span>
+                <span className="font-mono text-title-2-medium text-text-primary tnum block truncate">
+                  {isSessionLoading ? '...' : activeWallet?.walletNumber || 'Unavailable'}
+                </span>
               </div>
-            ))}
+              <Button
+                variant="secondary"
+                size="medium"
+                onClick={handleCopyNumber}
+                leadingIcon={copiedNumber ? RiCheckLine : RiFileCopyLine}
+                disabled={isSessionLoading || !activeWallet?.walletNumber}
+                className="min-h-11 shrink-0"
+              >
+                {copiedNumber ? 'Copied' : 'Copy'}
+              </Button>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-background-secondary-default border border-border-button-default flex items-center justify-between gap-3">
+              <div className="min-w-0 space-y-0.5">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-caption-1-medium text-text-tertiary">
+                    Exact amount to send
+                  </span>
+                  {offsetCents > 0 && (
+                    <Chip variant="caption" color="lime" className="tnum">
+                      +{formatBDT(offsetBdt)} code
+                    </Chip>
+                  )}
+                </div>
+                <span className="font-mono text-title-2-medium text-text-primary tnum block">
+                  {isSessionLoading ? '...' : formatBDT(uniqueAmount)}
+                </span>
+              </div>
+              <Button
+                variant="secondary"
+                size="medium"
+                onClick={handleCopyAmount}
+                leadingIcon={copiedAmount ? RiCheckLine : RiFileCopyLine}
+                disabled={isSessionLoading}
+                className="min-h-11 shrink-0"
+              >
+                {copiedAmount ? 'Copied' : 'Copy'}
+              </Button>
+            </div>
+          </div>
+
+          {/* Compact Scannable 3-Step Micro-Checklist */}
+          <div className="p-4 rounded-2xl bg-background-primary-default border border-separator-border">
+            <ol className="space-y-2.5 text-caption-1-regular text-text-secondary">
+              {[
+                `Open ${meta.name} app and select ${mfsActionLabel}`,
+                `Send ${formatBDT(uniqueAmount)} to the number above`,
+                'Save the Transaction ID (TrxID) from confirmation',
+              ].map((stepText, idx) => (
+                <li key={idx} className="flex items-start gap-2.5">
+                  <span
+                    className="size-5 rounded-full flex items-center justify-center text-caption-2-semibold tnum shrink-0 mt-0.5"
+                    style={{ backgroundColor: meta.bgSoft, color: meta.color }}
+                  >
+                    {idx + 1}
+                  </span>
+                  <span className="text-text-primary leading-snug">{stepText}</span>
+                </li>
+              ))}
+            </ol>
           </div>
 
           <div className="flex items-center gap-3">
@@ -486,53 +433,52 @@ export function CheckoutStepper({
               trailingIcon={RiArrowRightLine}
               className="w-2/3 min-h-11"
             >
-              Next: I Have Sent the Money
+              I Have Sent the Money
             </Button>
           </div>
         </div>
       )}
 
-      {/* STEP 3: 3-FIELD VERIFICATION + OPTIONAL RECEIPT UPLOAD */}
+      {/* PHASE 3: VERIFY TRANSFER ONLY */}
       {activeStep === 3 && (
-        <div className="space-y-5">
+        <div key="step-3" className="orbit-step-enter space-y-5">
           <div className="flex items-start justify-between gap-2">
-            <div className="space-y-1">
-              <h4 className="text-body-medium text-text-primary">
-                Verify your payment
+            <div className="space-y-0.5 min-w-0">
+              <h4 className="text-headline-medium text-text-primary">
+                Confirm your transfer
               </h4>
               <p className="text-caption-1-regular text-text-secondary">
-                Enter your sender phone number, exact amount sent, and TrxID.
+                Enter your {meta.name} sender details and TrxID.
               </p>
             </div>
             {submitAttempts > 0 && (
-              <Chip variant="caption" color="neutral">
+              <Chip variant="caption" color="neutral" className="shrink-0 tnum">
                 Attempt {Math.min(submitAttempts + 1, maxSubmitAttempts)}/{maxSubmitAttempts}
               </Chip>
             )}
           </div>
 
-          <div className="space-y-4">
+          <div className="space-y-3.5">
             <Input
               label="Sender Mobile Number"
               type="tel"
-              placeholder="e.g. 017XXXXXXXX"
+              placeholder="017XXXXXXXX"
               value={senderNumber}
               onChange={onChangeSenderNumber}
               leadingIcon={RiSmartphoneLine}
-              hint="The phone number you used to send the payment"
-              inputClassName="font-mono tabular-nums"
+              inputClassName="font-mono tnum"
               isRequired
             />
 
             <TextField
               value={paidAmount}
               onChange={onChangePaidAmount}
-              inputClassName="font-mono tabular-nums tnum"
+              inputClassName="font-mono tnum"
               isRequired
             >
               {({ isRequired }) => (
                 <>
-                  <Label isRequired={isRequired}>Payment Total Amount Sent (BDT)</Label>
+                  <Label isRequired={isRequired}>Amount Sent (BDT)</Label>
                   <InputBase
                     type="number"
                     step="0.01"
@@ -540,46 +486,53 @@ export function CheckoutStepper({
                     placeholder={exactAmountText}
                     leadingIcon={RiMoneyDollarCircleLine}
                   />
-                  <HintText>
-                    {`Enter the exact amount you sent — e.g. ${exactAmountText} or ${baseAmount.toFixed(2)} if you sent the base amount`}
-                  </HintText>
+                  <HintText className="tnum">Exact: {formatBDT(uniqueAmount)}</HintText>
                 </>
               )}
             </TextField>
 
             <Input
               label={`${meta.name} Transaction ID (TrxID)`}
-              placeholder="e.g. BLM4918239 or 72J49281"
+              placeholder="e.g. DKS43RJ1P4"
               value={trxId}
               onChange={(val) => onChangeTrxId(val.toUpperCase())}
               leadingIcon={RiHashtag}
-              hint="Auto-capitalized alphanumeric ID from your MFS confirmation"
               inputClassName="font-mono uppercase"
               isRequired
             />
 
-            {/* Optional / Required Receipt Screenshot Upload */}
+            <Input
+              label="Email for Receipt & Invoice (Optional)"
+              type="email"
+              placeholder="you@example.com"
+              value={emailValue}
+              onChange={handleEmailChange}
+              leadingIcon={RiMailLine}
+              hint="Confirmation & invoice via OrbitMail"
+            />
+
+            {/* Compact Screenshot Proof Upload */}
             {allowReceiptUpload && onUploadReceipt && (
-              <div className="space-y-2.5 pt-1">
+              <div className="pt-1 space-y-2">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="flex items-center gap-1.5 text-body-medium text-text-primary">
-                    <RiImageAddLine className="size-4 text-foreground-icon-secondary" aria-hidden />
+                  <span className="inline-flex items-center gap-1.5 text-caption-1-medium text-text-primary">
+                    <RiImageAddLine className="size-4 text-foreground-icon-secondary shrink-0" aria-hidden />
                     <span>
                       Payment screenshot proof{' '}
-                      <span className="text-caption-1-regular text-text-tertiary">
+                      <span className="text-text-tertiary">
                         ({isReceiptRequired ? 'Required' : 'Optional'})
                       </span>
                     </span>
                   </span>
                   {receiptUploadCount > 0 && (
-                    <span className="text-caption-2-medium text-text-tertiary tabular-nums">
-                      {receiptUploadCount}/{receiptMaxUploads} uploaded
+                    <span className="text-caption-2-medium text-text-tertiary tnum">
+                      {receiptUploadCount}/{receiptMaxUploads}
                     </span>
                   )}
                 </div>
 
                 {receiptUrl && (
-                  <div className="p-3 rounded-xl bg-notification-success-background text-notification-success-foreground flex items-center justify-between gap-2">
+                  <div className="px-3 py-2 rounded-xl bg-notification-success-background text-notification-success-foreground flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">
                       <RiCheckLine className="size-4 shrink-0" aria-hidden />
                       <span className="text-caption-1-medium truncate">
@@ -638,17 +591,6 @@ export function CheckoutStepper({
               <span>{errorMessage}</span>
             </div>
           )}
-
-          <div className="flex items-center justify-between text-caption-2-medium text-text-tertiary">
-            <span className="flex items-center gap-1.5">
-              <RiShieldCheckLine className="size-3.5 text-status-lime-text" aria-hidden />
-              <span>Automated 0-fee edge reconciliation</span>
-            </span>
-            <span className="flex items-center gap-1.5">
-              <RiQuestionLine className="size-3.5" aria-hidden />
-              <span>Typo protection active</span>
-            </span>
-          </div>
 
           <div className="flex items-center gap-3">
             <Button
