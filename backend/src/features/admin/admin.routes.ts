@@ -154,6 +154,7 @@ router.post('/auth/bootstrap', requireAdminAuth, requireSuperAdminMiddleware, as
 router.post('/auth/logout', requireAdminAuth, async (c) => {
   const db = c.get('db');
   const result = await logoutAdminSession(db, c.get('adminSessionId'), extractAdminActor(c));
+  c.header('Clear-Site-Data', '"cache"');
   return c.json({ success: true, data: result });
 });
 
@@ -168,6 +169,9 @@ router.post('/auth/logout-all', requireAdminAuth, requireSuperAdminMiddleware, a
   const exceptSessionId = input.includeCurrent ? undefined : c.get('adminSessionId');
 
   const result = await logoutAllAdminSessions(db, exceptSessionId, extractAdminActor(c));
+  if (input.includeCurrent) {
+    c.header('Clear-Site-Data', '"cache"');
+  }
   return c.json({ success: true, data: result });
 });
 

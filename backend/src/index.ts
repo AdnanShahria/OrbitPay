@@ -51,8 +51,20 @@ app.use('*', async (c, next) => {
   return corsMiddleware(c, next);
 });
 
-// 2. Attach Drizzle D1 Database Client
+// 2. Attach Drizzle D1 Database Client & prevent HTTP/edge caching on auth/admin APIs
 app.use('*', dbMiddleware);
+app.use('/api/v1/admin/*', async (c, next) => {
+  await next();
+  c.header('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  c.header('Pragma', 'no-cache');
+  c.header('Expires', '0');
+});
+app.use('/api/v1/auth/*', async (c, next) => {
+  await next();
+  c.header('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  c.header('Pragma', 'no-cache');
+  c.header('Expires', '0');
+});
 
 // 3. Global Error Handling
 app.onError(errorHandler);

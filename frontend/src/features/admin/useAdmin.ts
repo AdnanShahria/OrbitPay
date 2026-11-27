@@ -242,13 +242,13 @@ export async function adminFetch(input: RequestInfo | URL, init: RequestInit = {
 
   if (adminToken && !headers.has('Authorization')) {
     headers.set('Authorization', `Bearer ${adminToken}`);
-  }
-  if (adminKey && !headers.has('x-admin-key')) {
+  } else if (adminKey && !headers.has('x-admin-key')) {
     headers.set('x-admin-key', adminKey);
   }
 
   const res = await fetch(input, {
     ...init,
+    cache: 'no-store',
     headers,
   });
 
@@ -347,12 +347,14 @@ export function useAdminAuth() {
     if (storedKey) {
       const res = await fetch('/api/v1/admin/auth/verify', {
         method: 'POST',
+        cache: 'no-store',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ adminKey: storedKey }),
       });
       const json = await res.json().catch(() => null);
       if (res.ok && json?.success) {
-        applyVerifiedPayload(json.data as AdminAuthVerifyPayload, storedKey);
+        applyVerifiedPayload(json.data as AdminAuthVerifyPayload);
+        clearStoredAdminKey();
         return true;
       }
     }
@@ -389,14 +391,40 @@ export function useAdminAuth() {
       clearAdminSession();
     };
 
+    const handlePageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) {
+        if (!hasAdminCredentials()) {
+          clearAdminSession();
+        } else {
+          void refreshAuth();
+        }
+      }
+    };
+
+    const handleStorage = (event: StorageEvent) => {
+      if (
+        (event.key === ADMIN_TOKEN_STORAGE || event.key === ADMIN_KEY_STORAGE) &&
+        !hasAdminCredentials()
+      ) {
+        clearAdminSession();
+      }
+    };
+
     window.addEventListener(ADMIN_UNAUTHORIZED_EVENT, handleUnauthorized);
-    return () => window.removeEventListener(ADMIN_UNAUTHORIZED_EVENT, handleUnauthorized);
-  }, [clearAdminSession]);
+    window.addEventListener('pageshow', handlePageShow);
+    window.addEventListener('storage', handleStorage);
+    return () => {
+      window.removeEventListener(ADMIN_UNAUTHORIZED_EVENT, handleUnauthorized);
+      window.removeEventListener('pageshow', handlePageShow);
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, [clearAdminSession, refreshAuth]);
 
   const loginWithPassword = useCallback(
     async (email: string, password: string) => {
       const res = await fetch('/api/v1/admin/auth/login', {
         method: 'POST',
+        cache: 'no-store',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.trim(), password }),
       });
@@ -418,6 +446,7 @@ export function useAdminAuth() {
       const cleanKey = key.trim();
       const res = await fetch('/api/v1/admin/auth/verify', {
         method: 'POST',
+        cache: 'no-store',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ adminKey: cleanKey }),
       });
@@ -425,8 +454,15 @@ export function useAdminAuth() {
         res,
         'Invalid Master Admin Key',
       );
-      setStoredAdminKey(cleanKey);
-      applyVerifiedPayload(data, cleanKey);
+      // Do not persist raw Master Key once a server-tracked JWT is issued so logout/revocation is absolute
+      if (data?.accessToken ?? data?.token) {
+        clearStoredAdminKey();
+        setAdminKey(null);
+        applyVerifiedPayload(data);
+      } else {
+        setStoredAdminKey(cleanKey);
+        applyVerifiedPayload(data, cleanKey);
+      }
       queryClient.invalidateQueries({ queryKey: ['admin'] });
       return data;
     },
@@ -448,23 +484,48 @@ export function useAdminAuth() {
 
   const logout = useCallback(async () => {
     setIsLoggingOut(true);
+    const token = getStoredAdminToken()?.trim();
+    const key = getStoredAdminKey()?.trim();
+
+    await queryClient.cancelQueries({ queryKey: ['admin'] }).catch(() => null);
+    clearAdminSession();
+
     try {
-      if (hasAdminCredentials()) {
-        await adminFetch('/api/v1/admin/auth/logout', { method: 'POST' }).catch(() => null);
+      if (token || key) {
+        const headers = new Headers();
+        if (token) headers.set('Authorization', `Bearer ${token}`);
+        else if (key) headers.set('x-admin-key', key);
+
+        await fetch('/api/v1/admin/auth/logout', {
+          method: 'POST',
+          cache: 'no-store',
+          keepalive: true,
+          headers,
+        }).catch(() => null);
       }
     } finally {
-      clearAdminSession();
       setIsLoggingOut(false);
     }
-  }, [clearAdminSession]);
+  }, [clearAdminSession, queryClient]);
 
   const logoutAll = useCallback(async () => {
     setIsLoggingOut(true);
+    const token = getStoredAdminToken()?.trim();
+    const key = getStoredAdminKey()?.trim();
+
+    await queryClient.cancelQueries({ queryKey: ['admin'] }).catch(() => null);
+
     try {
-      if (hasAdminCredentials()) {
-        await adminFetch('/api/v1/admin/auth/logout-all', {
+      if (token || key) {
+        const headers = new Headers({ 'Content-Type': 'application/json' });
+        if (token) headers.set('Authorization', `Bearer ${token}`);
+        else if (key) headers.set('x-admin-key', key);
+
+        await fetch('/api/v1/admin/auth/logout-all', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          cache: 'no-store',
+          keepalive: true,
+          headers,
           body: JSON.stringify({ includeCurrent: true }),
         }).catch(() => null);
       }
@@ -472,7 +533,7 @@ export function useAdminAuth() {
       clearAdminSession();
       setIsLoggingOut(false);
     }
-  }, [clearAdminSession]);
+  }, [clearAdminSession, queryClient]);
 
   return {
     adminKey,
