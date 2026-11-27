@@ -768,7 +768,7 @@ function AuthenticatedMerchantPortal({ onEnterAdmin }: { onEnterAdmin: () => voi
                         Checkout Widget Playground
                       </h2>
                       <p className="text-body-regular text-text-secondary">
-                        Preview the exact 3-phase buyer checkout and OrbitMail invoice flow for {storeName}.
+                        Preview the minimal buyer checkout flow for {storeName}.
                       </p>
                     </div>
                   </div>
@@ -950,7 +950,7 @@ function EmbeddedCheckoutView({ config }: { config: CheckoutConfig }) {
             {currentStep === 'POLLING' || currentStep === 'SUCCESS' ? (
               <PollingStatus
                 orderId={orderId || config.orderId || ''}
-                expectedAmount={verifiedData?.amount ?? (Number(paidAmount) || uniqueAmount)}
+                expectedAmount={verifiedData?.amount ?? (baseAmount > 0 ? baseAmount : uniqueAmount)}
                 provider={selectedProvider}
                 trxId={verifiedData?.trxId || trxId}
                 senderNumber={senderNumber}

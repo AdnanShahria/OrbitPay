@@ -1,10 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/base/buttons/button';
-import { Input, InputBase, TextField } from '@/components/base/input/input';
-import { Label } from '@/components/base/input/label';
-import { HintText } from '@/components/base/input/hint-text';
-import { Chip } from '@/components/base/badges/chip';
-import { StatusDot } from '@/components/base/badges/status-dot';
+import { Input } from '@/components/base/input/input';
 import { FileUpload } from '@/components/base/file-upload/file-upload';
 import { toast } from '@/components/base/toast/toast';
 import { cx } from '@/utils/cx';
@@ -23,12 +19,8 @@ import {
   RiArrowRightLine,
   RiErrorWarningLine,
   RiHashtag,
-  RiMoneyDollarCircleLine,
-  RiTimeLine,
-  RiWifiOffLine,
   RiImageAddLine,
   RiExternalLinkLine,
-  RiMailLine,
 } from '@remixicon/react';
 
 export interface CheckoutStepperProps {
@@ -68,40 +60,21 @@ export interface CheckoutStepperProps {
   errorMessage: string | null;
 }
 
-function computeSecondsRemaining(expiresAt?: string): number {
-  if (!expiresAt) return 15 * 60;
-  const target = new Date(expiresAt).getTime();
-  if (Number.isNaN(target)) return 15 * 60;
-  return Math.max(0, Math.floor((target - Date.now()) / 1000));
-}
-
-function formatCountdown(totalSeconds: number): string {
-  const mins = Math.floor(totalSeconds / 60);
-  const secs = totalSeconds % 60;
-  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-}
+const ALL_PROVIDERS: MfsProvider[] = ['BKASH', 'NAGAD', 'ROCKET', 'UPAY', 'CELLFIN'];
 
 export function CheckoutStepper({
   initialStep = 1,
-  baseAmount: _baseAmount,
+  baseAmount,
   uniqueAmount,
-  offsetCents,
-  expiresAt,
   selectedProvider,
   onSelectProvider,
   activeWallet,
   activeWallets,
   senderNumber,
   onChangeSenderNumber,
-  paidAmount,
-  onChangePaidAmount,
   trxId,
   onChangeTrxId,
-  customerEmail,
-  onChangeCustomerEmail,
-  verificationMode = 'AUTO',
   receiptPolicy = 'OFFLINE_OPTIONAL',
-  deviceStatus,
   sessionToken,
   receiptUrl,
   receiptUploadCount = 0,
@@ -109,79 +82,38 @@ export function CheckoutStepper({
   isUploadingReceipt = false,
   receiptError,
   onUploadReceipt,
-  submitAttempts = 0,
-  maxSubmitAttempts = 3,
   onSubmit,
   isSubmitting,
   isSessionLoading = false,
   errorMessage,
 }: CheckoutStepperProps) {
-  const [activeStep, setActiveStep] = useState<1 | 2 | 3>(initialStep);
+  const [activeStep, setActiveStep] = useState<1 | 2>(initialStep >= 2 ? 2 : 1);
   const [copiedNumber, setCopiedNumber] = useState(false);
   const [copiedAmount, setCopiedAmount] = useState(false);
-  const [localEmail, setLocalEmail] = useState(customerEmail ?? '');
-  const [secondsLeft, setSecondsLeft] = useState<number>(() =>
-    computeSecondsRemaining(expiresAt),
-  );
 
   useEffect(() => {
-    setActiveStep(initialStep);
+    setActiveStep(initialStep >= 2 ? 2 : 1);
   }, [initialStep]);
 
-  useEffect(() => {
-    if (customerEmail !== undefined) {
-      setLocalEmail(customerEmail);
-    }
-  }, [customerEmail]);
-
-  useEffect(() => {
-    setSecondsLeft(computeSecondsRemaining(expiresAt));
-    const timer = setInterval(() => {
-      setSecondsLeft(computeSecondsRemaining(expiresAt));
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [expiresAt]);
-
-  const exactAmountText = uniqueAmount.toFixed(2);
-  const offsetBdt = offsetCents / 100;
-
-  const isDeviceOffline = deviceStatus?.online === false;
-  const isPureManual = verificationMode === 'PURE_MANUAL';
-  const showManualPill = isDeviceOffline || isPureManual;
-  const allowReceiptUpload =
-    receiptPolicy !== 'DISABLED' || isDeviceOffline || isPureManual;
-  const isReceiptRequired =
-    receiptPolicy === 'ALWAYS_REQUIRED' || receiptPolicy === 'REQUIRED_ON_MANUAL';
+  const payAmount = baseAmount > 0 ? baseAmount : uniqueAmount;
+  const exactAmountText = payAmount.toFixed(2);
+  const isReceiptRequired = receiptPolicy === 'ALWAYS_REQUIRED';
 
   const isMerchantWallet = activeWallet?.accountType === 'MERCHANT';
   const mfsActionLabel = isMerchantWallet ? 'Payment' : 'Send Money';
-  const walletTypeChip = isMerchantWallet
-    ? 'Merchant'
-    : activeWallet?.accountType === 'PRA'
-      ? 'PRA'
-      : 'Personal';
-
-  const emailValue = onChangeCustomerEmail ? (customerEmail ?? '') : localEmail;
-  const handleEmailChange = (val: string) => {
-    if (onChangeCustomerEmail) {
-      onChangeCustomerEmail(val);
-    } else {
-      setLocalEmail(val);
-    }
-  };
 
   const handleCopyNumber = () => {
     if (!activeWallet?.walletNumber) return;
     navigator.clipboard.writeText(activeWallet.walletNumber);
     setCopiedNumber(true);
-    toast.success('Receiver number copied');
+    toast.success('Number copied');
     setTimeout(() => setCopiedNumber(false), 2000);
   };
 
   const handleCopyAmount = () => {
     navigator.clipboard.writeText(exactAmountText);
     setCopiedAmount(true);
-    toast.success(`Exact amount ${formatBDT(uniqueAmount)} copied`);
+    toast.success(`Amount ${formatBDT(payAmount)} copied`);
     setTimeout(() => setCopiedAmount(false), 2000);
   };
 
@@ -194,67 +126,57 @@ export function CheckoutStepper({
     borderClass: 'border-border-button-active',
   };
 
-  const providers: MfsProvider[] = ['BKASH', 'NAGAD', 'ROCKET', 'UPAY', 'CELLFIN'];
+  const visibleProviders =
+    activeWallets.length > 0
+      ? ALL_PROVIDERS.filter((p) => activeWallets.some((w) => w.provider === p))
+      : ALL_PROVIDERS;
 
   return (
     <div className="w-full space-y-5">
-      {/* Single-Row Stepper Navigation + Inline Countdown Pill */}
-      <div className="flex items-center justify-between gap-2 border-b border-separator-border pb-3">
-        <div className="flex items-center gap-3 sm:gap-5 min-w-0">
-          {[
-            { step: 1, label: '1. Method' },
-            { step: 2, label: '2. Send' },
-            { step: 3, label: '3. Verify' },
-          ].map((s) => {
-            const isCurrent = activeStep === s.step;
-            const isCompleted = activeStep > s.step;
-            const isBlocked = s.step > 1 && !activeWallet;
-            return (
-              <button
-                key={s.step}
-                type="button"
-                disabled={isBlocked}
-                onClick={() => setActiveStep(s.step as 1 | 2 | 3)}
-                className={cx(
-                  'min-h-11 flex items-center text-caption-1-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer select-none border-b-2 -mb-3 pb-1 disabled:opacity-45 disabled:cursor-not-allowed',
-                  isCurrent
-                    ? 'border-text-primary text-text-primary'
-                    : isCompleted
-                      ? 'border-status-lime-text text-status-lime-text'
-                      : 'border-transparent text-text-tertiary hover:text-text-secondary',
-                )}
-              >
-                {s.label}
-              </button>
-            );
-          })}
-        </div>
-
-        <div
-          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-background-secondary-default border border-border-button-default text-caption-2-medium text-text-secondary tabular-nums tnum shrink-0 whitespace-nowrap"
-          title="Remaining time for unique poisha reservation"
-        >
-          <RiTimeLine className="size-3.5 text-foreground-icon-secondary shrink-0" aria-hidden />
-          <span className="font-mono text-text-primary">
-            {formatCountdown(secondsLeft)}
-          </span>
-        </div>
+      {/* Minimal 2-Step Indicator */}
+      <div className="flex items-center gap-5 border-b border-separator-border pb-3">
+        {[
+          { step: 1 as const, label: '1. Method' },
+          { step: 2 as const, label: '2. Pay & Verify' },
+        ].map((s) => {
+          const isCurrent = activeStep === s.step;
+          const isCompleted = activeStep > s.step;
+          const isBlocked = s.step > 1 && !activeWallet;
+          return (
+            <button
+              key={s.step}
+              type="button"
+              disabled={isBlocked}
+              onClick={() => setActiveStep(s.step)}
+              className={cx(
+                'min-h-10 flex items-center text-caption-1-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer select-none border-b-2 -mb-3 pb-1 disabled:opacity-45 disabled:cursor-not-allowed',
+                isCurrent
+                  ? 'border-text-primary text-text-primary'
+                  : isCompleted
+                    ? 'border-status-lime-text text-status-lime-text'
+                    : 'border-transparent text-text-tertiary hover:text-text-secondary',
+              )}
+            >
+              {s.label}
+            </button>
+          );
+        })}
       </div>
 
-      {/* PHASE 1: METHOD SELECTION ONLY */}
+      {/* STEP 1: SELECT PAYMENT METHOD */}
       {activeStep === 1 && (
-        <div key="step-1" className="orbit-step-enter space-y-5">
-          <div className="space-y-1">
+        <div key="step-1" className="orbit-step-enter space-y-4">
+          <div className="space-y-0.5">
             <h4 className="text-headline-medium text-text-primary">
               Select payment method
             </h4>
             <p className="text-caption-1-regular text-text-secondary">
-              Choose your mobile wallet to continue.
+              Choose a mobile wallet to pay {formatBDT(payAmount)}.
             </p>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-            {providers.map((p) => {
+          <div className="grid grid-cols-2 gap-2.5">
+            {visibleProviders.map((p) => {
               const pMeta = MFS_METADATA[p];
               const isSelected = selectedProvider === p;
               const hasWallet = activeWallets.some((w) => w.provider === p);
@@ -265,7 +187,7 @@ export function CheckoutStepper({
                   type="button"
                   onClick={() => onSelectProvider(p)}
                   className={cx(
-                    'min-h-11 px-3 py-3 rounded-2xl border flex items-center gap-2.5 text-start transition-colors cursor-pointer',
+                    'min-h-12 px-3.5 py-3 rounded-2xl border flex items-center gap-2.5 text-start transition-colors cursor-pointer',
                     isSelected
                       ? cx('border-2 shadow-card', pMeta.borderClass)
                       : 'border-border-button-default bg-background-primary-default text-text-secondary hover:border-border-button-hover',
@@ -277,22 +199,17 @@ export function CheckoutStepper({
                   }}
                 >
                   <span
-                    className="size-3.5 rounded-full shrink-0 shadow-2xs"
+                    className="size-3 rounded-full shrink-0"
                     style={{ backgroundColor: pMeta.color }}
                   />
-                  <div className="min-w-0">
-                    <span
-                      className={cx(
-                        'text-body-medium block truncate',
-                        isSelected ? pMeta.textClass : 'text-text-primary',
-                      )}
-                    >
-                      {pMeta.name}
-                    </span>
-                    <span className="text-caption-2-medium text-text-tertiary block">
-                      {hasWallet ? 'Active' : 'Standby'}
-                    </span>
-                  </div>
+                  <span
+                    className={cx(
+                      'text-body-medium truncate',
+                      isSelected ? pMeta.textClass : 'text-text-primary',
+                    )}
+                  >
+                    {pMeta.name}
+                  </span>
                 </button>
               );
             })}
@@ -301,22 +218,8 @@ export function CheckoutStepper({
           {!activeWallet && !isSessionLoading && (
             <p className="text-caption-1-regular text-text-secondary flex items-center gap-1.5">
               <RiErrorWarningLine className="size-4 text-foreground-icon-secondary shrink-0" aria-hidden />
-              <span>{meta.name} is on standby. Select an active wallet above.</span>
+              <span>{meta.name} is currently unavailable. Please choose another method.</span>
             </p>
-          )}
-
-          {showManualPill && (
-            <div
-              role="status"
-              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-background-secondary-default border border-border-button-default text-caption-1-medium text-text-secondary"
-            >
-              {isDeviceOffline ? (
-                <RiWifiOffLine className="size-3.5 text-status-yellow-text shrink-0" aria-hidden />
-              ) : (
-                <StatusDot color="yellow" />
-              )}
-              <span>Manual review active — screenshot proof accepted</span>
-            </div>
           )}
 
           <Button
@@ -332,135 +235,77 @@ export function CheckoutStepper({
         </div>
       )}
 
-      {/* PHASE 2: SEND MONEY / MERCHANT PAYMENT ONLY */}
+      {/* STEP 2: SEND & VERIFY (MOBILE NUMBER + TRX ID ONLY) */}
       {activeStep === 2 && (
-        <div key="step-2" className="orbit-step-enter space-y-5">
+        <div key="step-2" className="orbit-step-enter space-y-4">
           <div className="flex items-center justify-between gap-2">
-            <h4 className="text-headline-medium text-text-primary">
-              {mfsActionLabel} via {meta.name}
-            </h4>
-            <Chip variant="caption" color={isMerchantWallet ? 'blue' : 'soft'}>
-              {walletTypeChip}
-            </Chip>
+            <div className="flex items-center gap-2 min-w-0">
+              <span
+                className="size-2.5 rounded-full shrink-0"
+                style={{ backgroundColor: meta.color }}
+              />
+              <h4 className="text-headline-medium text-text-primary truncate">
+                {meta.name} · {mfsActionLabel}
+              </h4>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveStep(1)}
+              className="text-caption-1-semibold text-text-secondary hover:text-text-primary transition-colors cursor-pointer shrink-0"
+            >
+              Change
+            </button>
           </div>
 
-          {/* Two Architectural Summary Boxes */}
-          <div className="space-y-3">
-            <div className="p-4 rounded-2xl bg-background-secondary-default border border-border-button-default flex items-center justify-between gap-3">
-              <div className="min-w-0 space-y-0.5">
-                <span className="text-caption-1-medium text-text-tertiary block">
-                  Receiver {meta.name} number
+          {/* Clean Receiver Number & Amount Box */}
+          <div className="rounded-2xl bg-background-secondary-default border border-border-button-default divide-y divide-separator-border">
+            <div className="px-4 py-3 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <span className="text-caption-2-medium text-text-tertiary block">
+                  {meta.name} Number ({mfsActionLabel})
                 </span>
-                <span className="font-mono text-title-2-medium text-text-primary tnum block truncate">
+                <span className="font-mono text-title-3-medium text-text-primary tnum block truncate">
                   {isSessionLoading ? '...' : activeWallet?.walletNumber || 'Unavailable'}
                 </span>
               </div>
               <Button
                 variant="secondary"
-                size="medium"
+                size="small"
                 onClick={handleCopyNumber}
                 leadingIcon={copiedNumber ? RiCheckLine : RiFileCopyLine}
                 disabled={isSessionLoading || !activeWallet?.walletNumber}
-                className="min-h-11 shrink-0"
+                className="shrink-0"
               >
                 {copiedNumber ? 'Copied' : 'Copy'}
               </Button>
             </div>
 
-            <div className="p-4 rounded-2xl bg-background-secondary-default border border-border-button-default flex items-center justify-between gap-3">
-              <div className="min-w-0 space-y-0.5">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-caption-1-medium text-text-tertiary">
-                    Exact amount to send
-                  </span>
-                  {offsetCents > 0 && (
-                    <Chip variant="caption" color="lime" className="tnum">
-                      +{formatBDT(offsetBdt)} code
-                    </Chip>
-                  )}
-                </div>
-                <span className="font-mono text-title-2-medium text-text-primary tnum block">
-                  {isSessionLoading ? '...' : formatBDT(uniqueAmount)}
+            <div className="px-4 py-3 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <span className="text-caption-2-medium text-text-tertiary block">
+                  Amount to Send
+                </span>
+                <span className="font-mono text-title-3-medium text-text-primary tnum block">
+                  {isSessionLoading ? '...' : formatBDT(payAmount)}
                 </span>
               </div>
               <Button
                 variant="secondary"
-                size="medium"
+                size="small"
                 onClick={handleCopyAmount}
                 leadingIcon={copiedAmount ? RiCheckLine : RiFileCopyLine}
                 disabled={isSessionLoading}
-                className="min-h-11 shrink-0"
+                className="shrink-0"
               >
                 {copiedAmount ? 'Copied' : 'Copy'}
               </Button>
             </div>
           </div>
 
-          {/* Compact Scannable 3-Step Micro-Checklist */}
-          <div className="p-4 rounded-2xl bg-background-primary-default border border-separator-border">
-            <ol className="space-y-2.5 text-caption-1-regular text-text-secondary">
-              {[
-                `Open ${meta.name} app and select ${mfsActionLabel}`,
-                `Send ${formatBDT(uniqueAmount)} to the number above`,
-                'Save the Transaction ID (TrxID) from confirmation',
-              ].map((stepText, idx) => (
-                <li key={idx} className="flex items-start gap-2.5">
-                  <span
-                    className="size-5 rounded-full flex items-center justify-center text-caption-2-semibold tnum shrink-0 mt-0.5"
-                    style={{ backgroundColor: meta.bgSoft, color: meta.color }}
-                  >
-                    {idx + 1}
-                  </span>
-                  <span className="text-text-primary leading-snug">{stepText}</span>
-                </li>
-              ))}
-            </ol>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <Button
-              variant="secondary"
-              size="medium"
-              onClick={() => setActiveStep(1)}
-              className="w-1/3 min-h-11"
-            >
-              Back
-            </Button>
-            <Button
-              variant="primary"
-              size="medium"
-              onClick={() => setActiveStep(3)}
-              trailingIcon={RiArrowRightLine}
-              className="w-2/3 min-h-11"
-            >
-              I Have Sent the Money
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {/* PHASE 3: VERIFY TRANSFER ONLY */}
-      {activeStep === 3 && (
-        <div key="step-3" className="orbit-step-enter space-y-5">
-          <div className="flex items-start justify-between gap-2">
-            <div className="space-y-0.5 min-w-0">
-              <h4 className="text-headline-medium text-text-primary">
-                Confirm your transfer
-              </h4>
-              <p className="text-caption-1-regular text-text-secondary">
-                Enter your {meta.name} sender details and TrxID.
-              </p>
-            </div>
-            {submitAttempts > 0 && (
-              <Chip variant="caption" color="neutral" className="shrink-0 tnum">
-                Attempt {Math.min(submitAttempts + 1, maxSubmitAttempts)}/{maxSubmitAttempts}
-              </Chip>
-            )}
-          </div>
-
+          {/* Minimal 2-Field Form: Mobile Number + TrxID */}
           <div className="space-y-3.5">
             <Input
-              label="Sender Mobile Number"
+              label={`Your ${meta.name} Mobile Number`}
               type="tel"
               placeholder="017XXXXXXXX"
               value={senderNumber}
@@ -470,29 +315,8 @@ export function CheckoutStepper({
               isRequired
             />
 
-            <TextField
-              value={paidAmount}
-              onChange={onChangePaidAmount}
-              inputClassName="font-mono tnum"
-              isRequired
-            >
-              {({ isRequired }) => (
-                <>
-                  <Label isRequired={isRequired}>Amount Sent (BDT)</Label>
-                  <InputBase
-                    type="number"
-                    step="0.01"
-                    min="1"
-                    placeholder={exactAmountText}
-                    leadingIcon={RiMoneyDollarCircleLine}
-                  />
-                  <HintText className="tnum">Exact: {formatBDT(uniqueAmount)}</HintText>
-                </>
-              )}
-            </TextField>
-
             <Input
-              label={`${meta.name} Transaction ID (TrxID)`}
+              label="Transaction ID (TrxID)"
               placeholder="e.g. DKS43RJ1P4"
               value={trxId}
               onChange={(val) => onChangeTrxId(val.toUpperCase())}
@@ -501,28 +325,12 @@ export function CheckoutStepper({
               isRequired
             />
 
-            <Input
-              label="Email for Receipt & Invoice (Optional)"
-              type="email"
-              placeholder="you@example.com"
-              value={emailValue}
-              onChange={handleEmailChange}
-              leadingIcon={RiMailLine}
-              hint="Confirmation & invoice via OrbitMail"
-            />
-
-            {/* Compact Screenshot Proof Upload */}
-            {allowReceiptUpload && onUploadReceipt && (
+            {isReceiptRequired && onUploadReceipt && (
               <div className="pt-1 space-y-2">
                 <div className="flex items-center justify-between gap-2">
                   <span className="inline-flex items-center gap-1.5 text-caption-1-medium text-text-primary">
                     <RiImageAddLine className="size-4 text-foreground-icon-secondary shrink-0" aria-hidden />
-                    <span>
-                      Payment screenshot proof{' '}
-                      <span className="text-text-tertiary">
-                        ({isReceiptRequired ? 'Required' : 'Optional'})
-                      </span>
-                    </span>
+                    <span>Payment screenshot (Required)</span>
                   </span>
                   {receiptUploadCount > 0 && (
                     <span className="text-caption-2-medium text-text-tertiary tnum">
@@ -535,9 +343,7 @@ export function CheckoutStepper({
                   <div className="px-3 py-2 rounded-xl bg-notification-success-background text-notification-success-foreground flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">
                       <RiCheckLine className="size-4 shrink-0" aria-hidden />
-                      <span className="text-caption-1-medium truncate">
-                        Screenshot proof attached
-                      </span>
+                      <span className="text-caption-1-medium truncate">Screenshot attached</span>
                     </div>
                     <a
                       href={receiptUrl}
@@ -551,7 +357,7 @@ export function CheckoutStepper({
                   </div>
                 )}
 
-                {receiptUploadCount < receiptMaxUploads && sessionToken ? (
+                {receiptUploadCount < receiptMaxUploads && sessionToken && (
                   <FileUpload
                     allowedExtensions={['png', 'jpg', 'jpeg', 'webp']}
                     maxBytes={5 * 1024 * 1024}
@@ -559,7 +365,7 @@ export function CheckoutStepper({
                     onUploadComplete={async (file) => {
                       try {
                         await onUploadReceipt(file);
-                        toast.success('Payment screenshot attached');
+                        toast.success('Screenshot attached');
                       } catch (err: unknown) {
                         toast.error(
                           err instanceof Error ? err.message : 'Receipt upload failed',
@@ -567,16 +373,10 @@ export function CheckoutStepper({
                       }
                     }}
                   />
-                ) : !sessionToken ? (
-                  <p className="text-caption-2-medium text-text-tertiary">
-                    Screenshot upload requires a signed session link.
-                  </p>
-                ) : null}
+                )}
 
                 {receiptError && (
-                  <p className="text-caption-1-medium text-text-error-primary">
-                    {receiptError}
-                  </p>
+                  <p className="text-caption-1-medium text-text-error-primary">{receiptError}</p>
                 )}
               </div>
             )}
@@ -592,26 +392,16 @@ export function CheckoutStepper({
             </div>
           )}
 
-          <div className="flex items-center gap-3">
-            <Button
-              variant="secondary"
-              size="medium"
-              onClick={() => setActiveStep(2)}
-              className="w-1/3 min-h-11"
-            >
-              Back
-            </Button>
-            <Button
-              variant="primary"
-              size="medium"
-              onClick={onSubmit}
-              isLoading={isSubmitting}
-              disabled={isUploadingReceipt}
-              className="w-2/3 min-h-11"
-            >
-              Verify Payment
-            </Button>
-          </div>
+          <Button
+            variant="primary"
+            size="medium"
+            onClick={onSubmit}
+            isLoading={isSubmitting}
+            disabled={isUploadingReceipt}
+            className="w-full min-h-11"
+          >
+            Verify Payment
+          </Button>
         </div>
       )}
     </div>

@@ -3,7 +3,6 @@ import { CheckoutStepper } from './CheckoutStepper';
 import { PollingStatus } from './PollingStatus';
 import { CheckoutDisplayHeader } from './CheckoutDisplayHeader';
 import { Modal, ModalHeader, ModalBody } from '@/components/base/modal/modal';
-import { RiShieldCheckLine } from '@remixicon/react';
 
 export interface CheckoutModalProps {
   isOpen: boolean;
@@ -98,7 +97,7 @@ export function CheckoutModal({ isOpen, onClose, config }: CheckoutModalProps) {
           {currentStep === 'POLLING' || currentStep === 'SUCCESS' ? (
             <PollingStatus
               orderId={orderId || config.orderId || ''}
-              expectedAmount={verifiedData?.amount ?? (Number(paidAmount) || uniqueAmount)}
+              expectedAmount={verifiedData?.amount ?? (baseAmount > 0 ? baseAmount : uniqueAmount)}
               provider={selectedProvider}
               trxId={verifiedData?.trxId || trxId}
               senderNumber={senderNumber}
@@ -160,15 +159,6 @@ export function CheckoutModal({ isOpen, onClose, config }: CheckoutModalProps) {
               errorMessage={errorMessage}
             />
           )}
-
-          {/* Security watermark footer */}
-          <div className="pt-4 mt-5 border-t border-separator-border flex items-center justify-between gap-2 text-caption-2-medium text-text-tertiary">
-            <span className="flex items-center gap-1.5 whitespace-nowrap">
-              <RiShieldCheckLine className="size-3.5 text-status-lime-text shrink-0" aria-hidden />
-              <span>256-bit encrypted verification</span>
-            </span>
-            <span className="text-caption-2-semibold text-text-secondary whitespace-nowrap">ORBIT Pay Hub</span>
-          </div>
         </div>
       </ModalBody>
     </Modal>

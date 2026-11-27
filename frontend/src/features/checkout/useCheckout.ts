@@ -614,38 +614,40 @@ export function useCheckout(config: CheckoutConfig) {
     [sessionToken],
   );
 
-  // Submit 3-field payment verification (+ optional receiptAssetId/receiptUrl)
+  // Submit 2-field payment verification (mobile number + TrxID)
   const submitPayment = async () => {
     setErrorMessage(null);
-    const cleanSender = senderNumber.trim().replace(/^\+88/, '');
+    let cleanSender = senderNumber.trim().replace(/[\s-]/g, '');
+    if (cleanSender.startsWith('+880')) cleanSender = cleanSender.slice(3);
+    else if (cleanSender.startsWith('880')) cleanSender = cleanSender.slice(2);
+    else if (cleanSender.startsWith('+88')) cleanSender = cleanSender.slice(3);
+    else if (cleanSender.startsWith('88')) cleanSender = cleanSender.slice(2);
+
     const cleanTrx = trxId.trim().toUpperCase();
     const cleanEmail = customerEmail.trim();
-    const numericPaid = Number(paidAmount);
+    const effectivePayAmount =
+      baseAmount > 0 ? baseAmount : uniqueAmount > 0 ? uniqueAmount : Number(paidAmount) || 0;
 
     if (!activeWallet) {
       setErrorMessage(
-        `${selectedProvider} is currently on standby. Please choose an Active payment method.`,
+        `${selectedProvider} is currently unavailable. Please choose an active payment method.`,
       );
       return;
     }
-    if (!cleanSender || cleanSender.length < 10) {
-      setErrorMessage('Please enter a valid 11-digit sender mobile number.');
+    if (!/^01[3-9]\d{8}$/.test(cleanSender)) {
+      setErrorMessage('Please enter a valid 11-digit mobile number (e.g. 017XXXXXXXX).');
       return;
     }
-    if (!Number.isFinite(numericPaid) || numericPaid <= 0) {
-      setErrorMessage('Please enter a valid payment amount in BDT.');
-      return;
-    }
-    if (!cleanTrx || cleanTrx.length < 3) {
+    if (!cleanTrx || cleanTrx.length < 5) {
       setErrorMessage('Please enter a valid Transaction ID (TrxID).');
       return;
     }
-    if (cleanEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
-      setErrorMessage('Please enter a valid email address or leave it blank.');
+    if (!Number.isFinite(effectivePayAmount) || effectivePayAmount <= 0) {
+      setErrorMessage('Unable to determine order amount.');
       return;
     }
     if (
-      (receiptPolicy === 'ALWAYS_REQUIRED' || receiptPolicy === 'REQUIRED_ON_MANUAL') &&
+      receiptPolicy === 'ALWAYS_REQUIRED' &&
       !receiptUrl &&
       !receiptAssetId
     ) {
@@ -661,9 +663,9 @@ export function useCheckout(config: CheckoutConfig) {
         sessionId,
         paymentIntentId: paymentIntentId || undefined,
         provider: selectedProvider,
-        amount: numericPaid,
-        paidAmount: numericPaid,
-        baseAmount,
+        amount: effectivePayAmount,
+        paidAmount: effectivePayAmount,
+        baseAmount: baseAmount > 0 ? baseAmount : effectivePayAmount,
         trxId: cleanTrx,
         senderNumber: cleanSender,
         sessionToken,
@@ -700,13 +702,13 @@ export function useCheckout(config: CheckoutConfig) {
       }
 
       if (result.status === 'VERIFIED') {
-        const finalAmount = Number(result.paidAmount ?? result.amount ?? numericPaid);
+        const finalAmount = Number(result.paidAmount ?? result.amount ?? effectivePayAmount);
         const finalTrx = result.trxId || cleanTrx;
         const providerName = MFS_METADATA[selectedProvider]?.name || selectedProvider;
-        toast.success('Payment received & verified!', {
+        toast.success('Payment verified!', {
           id: `buyer-verified-${orderId}`,
           description: `${formatBDT(finalAmount)} confirmed via ${providerName} · TrxID ${finalTrx}`,
-          duration: 6000,
+          duration: 5000,
         });
         setVerifiedData({
           trxId: finalTrx,
@@ -742,7 +744,7 @@ export function useCheckout(config: CheckoutConfig) {
           sessionId: sessionId ?? null,
           status: nextStatus,
           trxId: result.trxId || cleanTrx,
-          amount: Number(result.paidAmount ?? result.amount ?? numericPaid),
+          amount: Number(result.paidAmount ?? result.amount ?? effectivePayAmount),
           escalationReason: result.escalationReason ?? null,
         });
       }
@@ -757,10 +759,10 @@ export function useCheckout(config: CheckoutConfig) {
     }
   };
 
-  // Allow buyer to edit a mistyped TrxID and re-submit while pending/manual-review
+  // Allow buyer to edit a mistyped TrxID or mobile number and re-submit
   const editSubmission = useCallback(() => {
     setErrorMessage(null);
-    setPreferredStepperStep(3);
+    setPreferredStepperStep(2);
     setCurrentStep('SUBMIT_TRX');
   }, []);
 

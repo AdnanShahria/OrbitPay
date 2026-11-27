@@ -457,7 +457,7 @@ function PublicLinkActiveCheckout({
           {currentStep === 'POLLING' || currentStep === 'SUCCESS' ? (
             <PollingStatus
               orderId={orderId}
-              expectedAmount={verifiedData?.amount ?? (Number(paidAmount) || uniqueAmount)}
+              expectedAmount={verifiedData?.amount ?? (baseAmount > 0 ? baseAmount : uniqueAmount)}
               provider={selectedProvider}
               trxId={verifiedData?.trxId || trxId}
               senderNumber={senderNumber}
