@@ -12,6 +12,7 @@ export type RealtimeEventType =
 
 export interface RealtimeEvent {
   type: RealtimeEventType;
+  merchantId?: string;
   data: unknown;
   timestamp: string;
 }
@@ -28,12 +29,20 @@ class RealtimeHub {
     };
   }
 
-  broadcast(type: RealtimeEventType, data: unknown = {}) {
+  broadcast(type: RealtimeEventType, data: unknown = {}, merchantId?: string) {
+    const derivedMerchantId =
+      merchantId ||
+      (data && typeof data === 'object' && 'merchantId' in data && typeof (data as any).merchantId === 'string'
+        ? (data as any).merchantId
+        : undefined);
+
     const event: RealtimeEvent = {
       type,
+      merchantId: derivedMerchantId,
       data,
       timestamp: new Date().toISOString(),
     };
+
     for (const listener of this.listeners) {
       try {
         listener(event);

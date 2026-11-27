@@ -9,22 +9,36 @@ export interface WebhookEventPayload<T = Record<string, unknown>> {
 
 /**
  * Builds standard ORBIT Webhook Event payload.
+ * Preserves existing eventId and timestamp when replaying or retrying deliveries.
  */
 export function buildWebhookPayload<T extends Record<string, unknown>>(
   event: string,
-  data: T
+  data: T,
+  existingEventId?: string,
+  existingTimestamp?: number
 ): WebhookEventPayload<T> {
   return {
     event,
-    eventId: `evt_${generateSecureToken(12)}`,
-    timestamp: Date.now(),
+    eventId: existingEventId || `evt_${generateSecureToken(12)}`,
+    timestamp: existingTimestamp ?? Date.now(),
     data,
   };
 }
 
 /**
- * Generates X-Orbit-Signature HMAC-SHA256 hex signature string.
+ * Generates X-Orbit-Signature HMAC-SHA256 hex signature string over rawBody.
  */
 export async function generateHmacSignature(rawBody: string, secret: string): Promise<string> {
   return signHmacSha256(rawBody, secret);
+}
+
+/**
+ * Generates X-Orbit-Signature-V2 HMAC-SHA256 hex signature string over "${timestamp}.${rawBody}".
+ */
+export async function generateHmacSignatureV2(
+  timestamp: number | string,
+  rawBody: string,
+  secret: string
+): Promise<string> {
+  return signHmacSha256(`${timestamp}.${rawBody}`, secret);
 }

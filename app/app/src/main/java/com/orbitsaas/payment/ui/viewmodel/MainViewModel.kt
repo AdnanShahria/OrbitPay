@@ -18,8 +18,10 @@ import com.orbitsaas.payment.data.local.SmsEntity
 import com.orbitsaas.payment.data.remote.IngestSmsItem
 import com.orbitsaas.payment.data.remote.MerchantOrderDto
 import com.orbitsaas.payment.data.remote.OrbitApiClient
+import com.orbitsaas.payment.data.remote.PaymentIntentDto
 import com.orbitsaas.payment.data.remote.UnauthorizedException
 import com.orbitsaas.payment.interceptors.InboxScanner
+import com.orbitsaas.payment.service.DynamicPushDispatcher
 import com.orbitsaas.payment.service.FcmTokenRegistrar
 import com.orbitsaas.payment.service.StickyForegroundService
 import kotlinx.coroutines.Dispatchers
@@ -44,6 +46,10 @@ data class DashboardUiState(
     val pendingOrderCount: Int = 0,
     val isOrdersLoading: Boolean = false,
     val actionInProgressOrderId: String? = null,
+    val paymentIntents: List<PaymentIntentDto> = emptyList(),
+    val isIntentsLoading: Boolean = false,
+    val actionInProgressIntentId: String? = null,
+    val focusedPaymentIntentId: String? = null,
     val merchantId: String = "",
     val serverUrl: String = "",
     val deviceKey: String = "",
@@ -69,6 +75,13 @@ private data class OrdersBundle(
     val pendingOrderCount: Int,
     val isOrdersLoading: Boolean,
     val actionInProgressOrderId: String?
+)
+
+private data class IntentsBundle(
+    val paymentIntents: List<PaymentIntentDto>,
+    val isIntentsLoading: Boolean,
+    val actionInProgressIntentId: String?,
+    val focusedPaymentIntentId: String?
 )
 
 private data class AuthBundle(
@@ -100,6 +113,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _pendingOrderCount = MutableStateFlow(0)
     private val _isOrdersLoading = MutableStateFlow(false)
     private val _actionInProgressOrderId = MutableStateFlow<String?>(null)
+
+    private val _paymentIntents = MutableStateFlow<List<PaymentIntentDto>>(emptyList())
+    private val _isIntentsLoading = MutableStateFlow(false)
+    private val _actionInProgressIntentId = MutableStateFlow<String?>(null)
+    private val _focusedPaymentIntentId = MutableStateFlow<String?>(null)
 
     private val _isLoggingIn = MutableStateFlow(false)
     private val _loginError = MutableStateFlow<String?>(null)
@@ -136,6 +154,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         OrdersBundle(orders, pendingCount, isLoading, actionOrderId)
     }
 
+    private val intentsBundleFlow = combine(
+        _paymentIntents,
+        _isIntentsLoading,
+        _actionInProgressIntentId,
+        _focusedPaymentIntentId
+    ) { intents, isLoading, actionIntentId, focusedIntentId ->
+        IntentsBundle(intents, isLoading, actionIntentId, focusedIntentId)
+    }
+
     private val authBundleFlow = combine(
         preferences.authTokenFlow,
         preferences.userEmailFlow,
@@ -157,14 +184,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // Combined UI State
     val uiState: StateFlow<DashboardUiState> = combine(
-        combine(coreBundleFlow, ordersBundleFlow, authBundleFlow, loginProgressBundleFlow) { core, orders, auth, loginProg ->
-            Pair(core to orders, auth to loginProg)
+        combine(coreBundleFlow, ordersBundleFlow, intentsBundleFlow) { core, orders, intents ->
+            Triple(core, orders, intents)
+        },
+        combine(authBundleFlow, loginProgressBundleFlow) { auth, loginProg ->
+            auth to loginProg
         },
         recentTransactions,
         statsFlow
-    ) { (coreAndOrders, authAndLogin), transactions, stats ->
-        val (core, ordersBundle) = coreAndOrders
-        val (auth, loginProg) = authAndLogin
+    ) { (core, ordersBundle, intentsBundle), (auth, loginProg), transactions, stats ->
         val loggedIn = auth.authToken.isNotBlank() || (auth.merchantId.isNotBlank() && auth.deviceKey.isNotBlank())
 
         DashboardUiState(
@@ -180,6 +208,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             pendingOrderCount = ordersBundle.pendingOrderCount,
             isOrdersLoading = ordersBundle.isOrdersLoading,
             actionInProgressOrderId = ordersBundle.actionInProgressOrderId,
+            paymentIntents = intentsBundle.paymentIntents,
+            isIntentsLoading = intentsBundle.isIntentsLoading,
+            actionInProgressIntentId = intentsBundle.actionInProgressIntentId,
+            focusedPaymentIntentId = intentsBundle.focusedPaymentIntentId,
             merchantId = auth.merchantId,
             serverUrl = loginProg.serverUrl,
             deviceKey = auth.deviceKey,
@@ -212,6 +244,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         registerNetworkCallback()
         refreshStatsFromServer()
         refreshOrders()
+        refreshPaymentIntents()
+        observePushRefreshEvents()
+    }
+
+    private fun observePushRefreshEvents() {
+        viewModelScope.launch {
+            DynamicPushDispatcher.refreshEvents.collect {
+                refreshPaymentIntents()
+                refreshOrders()
+                refreshStatsFromServer()
+            }
+        }
     }
 
     private fun checkInitialNetworkState(): Boolean {
@@ -296,6 +340,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _isLoggingIn.value = false
                 refreshStatsFromServer()
                 refreshOrders()
+                refreshPaymentIntents()
                 onSuccess()
             }.onFailure { err ->
                 _isLoggingIn.value = false
@@ -321,6 +366,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         WorkManager.getInstance(getApplication()).cancelAllWork()
         _orders.value = emptyList()
         _pendingOrderCount.value = 0
+        _paymentIntents.value = emptyList()
+        _focusedPaymentIntentId.value = null
         _loginError.value = null
         _feedbackMessage.value = "Signed out of ORBIT Hub."
         onComplete()
@@ -339,8 +386,124 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         WorkManager.getInstance(getApplication()).cancelAllWork()
         _orders.value = emptyList()
         _pendingOrderCount.value = 0
+        _paymentIntents.value = emptyList()
+        _focusedPaymentIntentId.value = null
         _loginError.value = message?.takeIf { it.isNotBlank() }
             ?: "Session expired or revoked. Please sign in again."
+    }
+
+    /**
+     * Fetches universal multi-vertical payment intents from ORBIT Hub.
+     */
+    fun refreshPaymentIntents(statusFilter: String? = null) {
+        if (!preferences.isLoggedIn()) return
+
+        viewModelScope.launch {
+            _isIntentsLoading.value = true
+            val result = withContext(Dispatchers.IO) {
+                apiClient.listPaymentIntents(status = statusFilter, limit = 50)
+            }
+            result.onSuccess { data ->
+                _paymentIntents.value = data.items
+            }.onFailure { err ->
+                if (err is UnauthorizedException) {
+                    handleUnauthorized(err.message)
+                } else {
+                    Log.w(TAG, "Failed to refresh payment intents: ${err.message}")
+                }
+            }
+            _isIntentsLoading.value = false
+        }
+    }
+
+    /**
+     * Atomically approves or rejects a universal payment intent with CAS stateVersion.
+     */
+    fun resolvePaymentIntent(
+        intentId: String,
+        decision: String,
+        expectedStateVersion: Int? = null,
+        reason: String? = null
+    ) {
+        if (_actionInProgressIntentId.value != null) return
+
+        viewModelScope.launch {
+            _actionInProgressIntentId.value = intentId
+            val result = withContext(Dispatchers.IO) {
+                apiClient.resolvePaymentIntent(
+                    intentId = intentId,
+                    decision = decision,
+                    expectedStateVersion = expectedStateVersion,
+                    reason = reason
+                )
+            }
+
+            result.onSuccess { data ->
+                data.paymentIntent?.let { updated ->
+                    _paymentIntents.value = _paymentIntents.value.map { existing ->
+                        if (existing.id == updated.id) updated else existing
+                    }
+                }
+                val verb = if (decision.equals("APPROVE", ignoreCase = true)) "approved" else "rejected"
+                val ref = data.paymentIntent?.externalRefId ?: intentId
+                _feedbackMessage.value = "Payment $ref $verb"
+                refreshPaymentIntents()
+                refreshOrders()
+            }.onFailure { err ->
+                if (err is UnauthorizedException) {
+                    handleUnauthorized(err.message)
+                } else {
+                    _feedbackMessage.value = "Resolve failed: ${err.message ?: "Unknown error"}"
+                }
+            }
+
+            _actionInProgressIntentId.value = null
+        }
+    }
+
+    /**
+     * Triggers a server-declared dynamic webhook action on a universal payment intent.
+     */
+    fun triggerPaymentIntentAction(
+        intentId: String,
+        actionId: String,
+        actionLabel: String,
+        note: String? = null
+    ) {
+        if (_actionInProgressIntentId.value != null) return
+
+        viewModelScope.launch {
+            _actionInProgressIntentId.value = intentId
+            val result = withContext(Dispatchers.IO) {
+                apiClient.triggerPaymentAction(intentId, actionId, note)
+            }
+
+            result.onSuccess { data ->
+                val syncSuffix = if (data.webhookDispatched) " · Webhook dispatched" else ""
+                _feedbackMessage.value = "$actionLabel (${data.externalRefId})$syncSuffix"
+                refreshPaymentIntents()
+            }.onFailure { err ->
+                if (err is UnauthorizedException) {
+                    handleUnauthorized(err.message)
+                } else {
+                    _feedbackMessage.value = "$actionLabel failed: ${err.message ?: "Unknown error"}"
+                }
+            }
+
+            _actionInProgressIntentId.value = null
+        }
+    }
+
+    fun handleDeepLinkNotification(paymentIntentId: String?, externalRefId: String?) {
+        val target = paymentIntentId?.takeIf { it.isNotBlank() }
+            ?: externalRefId?.takeIf { it.isNotBlank() }
+            ?: return
+        _focusedPaymentIntentId.value = target
+        refreshPaymentIntents()
+    }
+
+    fun clearFocusedPaymentIntent() {
+        _focusedPaymentIntentId.value = null
     }
 
     /**
@@ -479,6 +642,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 return@withContext
                             }
                         }
+
+                        apiClient.listPaymentIntents(limit = 50).onSuccess { intentsData ->
+                            _paymentIntents.value = intentsData.items
+                        }.onFailure { err ->
+                            if (err is UnauthorizedException) {
+                                withContext(Dispatchers.Main) { handleUnauthorized(err.message) }
+                                return@withContext
+                            }
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -535,6 +707,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _feedbackMessage.value = "Settings saved successfully."
         refreshStatsFromServer()
         refreshOrders()
+        refreshPaymentIntents()
     }
 
     fun testConnection(

@@ -35,9 +35,10 @@ export interface EvaluableSmsMessage {
  * Checked strictly in contract order:
  * 1. smsSender missing or blank -> 'LEGACY_UNVERIFIED_SENDER'
  * 2. smsSender matches personal-phone regex ^\+?(88)?01\d{9}$ -> 'UNTRUSTED_SENDER'
- * 3. source === 'NOTIFICATION' and smsSender not in trusted-package list -> 'UNTRUSTED_SENDER'
- * 4. Server re-parse of rawSms fails, trxId mismatch, or amount delta > 0.009 -> 'PARSE_MISMATCH'
- * 5. Otherwise null (trusted)
+ * 3. source === 'NOTIFICATION' and smsSender not in TRUSTED_NOTIFICATION_PACKAGES[provider] -> 'UNTRUSTED_SENDER'
+ * 4. source === 'SMS' | 'INBOX_SCAN' and smsSender not in TRUSTED_SMS_SENDERS[provider] -> 'UNTRUSTED_SENDER'
+ * 5. Server re-parse of rawSms (with smsSender) fails, provider/trxId mismatch, or amount delta > 0.009 -> 'PARSE_MISMATCH'
+ * 6. Otherwise null (trusted)
  */
 export function evaluateSmsTrust(msg: EvaluableSmsMessage): TrustFlag | null {
   const sender = msg.smsSender?.trim();
@@ -49,17 +50,26 @@ export function evaluateSmsTrust(msg: EvaluableSmsMessage): TrustFlag | null {
     return 'UNTRUSTED_SENDER';
   }
 
-  if (msg.source === 'NOTIFICATION') {
+  const source: SmsSource = msg.source ?? 'SMS';
+  const normalizedSenderLower = sender.toLowerCase();
+
+  if (source === 'NOTIFICATION') {
     const trustedPackages = TRUSTED_NOTIFICATION_PACKAGES[msg.provider] || [];
-    if (!trustedPackages.includes(sender.toLowerCase())) {
+    if (!trustedPackages.includes(normalizedSenderLower)) {
+      return 'UNTRUSTED_SENDER';
+    }
+  } else {
+    const trustedSmsSenders = TRUSTED_SMS_SENDERS[msg.provider] || [];
+    if (!trustedSmsSenders.includes(normalizedSenderLower)) {
       return 'UNTRUSTED_SENDER';
     }
   }
 
   const normalizedTrxId = msg.trxId.trim().toUpperCase();
-  const parsed = parseMfsSms(msg.rawSms);
+  const parsed = parseMfsSms(msg.rawSms, sender);
   if (
     !parsed ||
+    parsed.provider !== msg.provider ||
     parsed.trxId !== normalizedTrxId ||
     Math.abs(parsed.amount - msg.amount) > 0.009
   ) {

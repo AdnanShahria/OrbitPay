@@ -6,14 +6,19 @@ import { TransactionTable } from '@/features/transactions/TransactionTable';
 import { WalletManager } from '@/features/wallets/WalletManager';
 import { useWallets } from '@/features/wallets/useWallets';
 import { MerchantSettings } from '@/features/merchants/MerchantSettings';
+import { useMerchant } from '@/features/merchants/useMerchant';
 import { IntegrationGuide } from '@/features/merchants/IntegrationGuide';
 import { OrdersManager } from '@/features/orders/OrdersManager';
+import { PaymentIntentsManager } from '@/features/payments/PaymentIntentsManager';
+import { PaymentLinksManager } from '@/features/payment-links/PaymentLinksManager';
+import { PublicPaymentLinkPage } from '@/features/payment-links/PublicPaymentLinkPage';
 import { AuthProvider, useAuth } from '@/features/auth/useAuth';
 import { MerchantLoginScreen } from '@/features/auth/MerchantLoginScreen';
 import { CheckoutModal } from '@/features/checkout/CheckoutModal';
+import { CheckoutDisplayHeader } from '@/features/checkout/CheckoutDisplayHeader';
 import { CheckoutStepper } from '@/features/checkout/CheckoutStepper';
 import { PollingStatus } from '@/features/checkout/PollingStatus';
-import { useCheckout } from '@/features/checkout/useCheckout';
+import { useCheckout, type CheckoutConfig } from '@/features/checkout/useCheckout';
 import { Button } from '@/components/base/buttons/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/base/card/card';
 import { Input } from '@/components/base/input/input';
@@ -46,10 +51,15 @@ import {
   RiCodeSSlashLine,
   RiLogoutBoxRLine,
   RiUser3Line,
+  RiBankCardLine,
+  RiLinksLine,
+  RiShieldCheckLine,
 } from '@remixicon/react';
 
 export type PortalTab =
   | 'overview'
+  | 'payments'
+  | 'payment_links'
   | 'orders'
   | 'wallets'
   | 'transactions'
@@ -58,13 +68,21 @@ export type PortalTab =
   | 'integration'
   | 'checkout_demo';
 
-const NAV_ITEMS: Array<{
+const ALL_NAV_ITEMS: Array<{
   id: PortalTab;
   label: string;
   icon: typeof RiLayoutGridLine;
+  requiresEcommerceModule?: boolean;
 }> = [
   { id: 'overview', label: 'Overview', icon: RiLayoutGridLine },
-  { id: 'orders', label: 'Orders & COD Sync', icon: RiShoppingCart2Line },
+  { id: 'payments', label: 'Universal Payments', icon: RiBankCardLine },
+  { id: 'payment_links', label: 'Payment Links', icon: RiLinksLine },
+  {
+    id: 'orders',
+    label: 'Orders & COD Sync',
+    icon: RiShoppingCart2Line,
+    requiresEcommerceModule: true,
+  },
   { id: 'wallets', label: 'SIM Pool & Limits', icon: RiSmartphoneLine },
   { id: 'transactions', label: 'Transactions & Typo', icon: RiFileList3Line },
   { id: 'device', label: 'Device Pairing QR', icon: RiQrCodeLine },
@@ -93,12 +111,40 @@ export function App() {
 function AppRouter() {
   const { merchant: authMerchant, isLoading: authLoading } = useAuth();
 
-  // Check URL query and hash for standalone / embedded checkout mode
-  const urlParams = new URLSearchParams(window.location.search);
+  const pathname = typeof window !== 'undefined' ? window.location.pathname : '/';
+  const urlParams = new URLSearchParams(
+    typeof window !== 'undefined' ? window.location.search : '',
+  );
+
+  // Public shareable Payment Link route (/l/:slug)
+  const linkMatch = pathname.match(/^\/l\/([^/]+)\/?$/);
+  const publicLinkSlug = linkMatch ? decodeURIComponent(linkMatch[1]) : null;
+
+  // First-class checkout session route (/checkout/:sessionId or ?sessionId=...)
+  const sessionPathMatch = pathname.match(/^\/checkout\/([^/]+)\/?$/);
+  const pathSessionId = sessionPathMatch ? decodeURIComponent(sessionPathMatch[1]) : '';
+  const querySessionId = urlParams.get('sessionId') || '';
+  const resolvedSessionId = pathSessionId || querySessionId || undefined;
+  const resolvedSessionToken =
+    urlParams.get('token') || urlParams.get('sessionToken') || undefined;
+  const paramOrigin = urlParams.get('origin') || undefined;
+  const paramTheme = urlParams.get('theme');
+
   const isEmbedded =
     urlParams.get('embedded') === 'true' ||
     window.location.hash === '#checkout' ||
-    window.location.pathname.startsWith('/checkout');
+    pathname.startsWith('/checkout');
+
+  // Sync light/dark theme when embedded via ?theme=dark|light
+  useEffect(() => {
+    if (!isEmbedded || (paramTheme !== 'dark' && paramTheme !== 'light')) return;
+    const root = document.documentElement;
+    if (paramTheme === 'dark') {
+      root.classList.add('dark');
+    } else {
+      root.classList.remove('dark');
+    }
+  }, [isEmbedded, paramTheme]);
 
   // Stealth Admin Mode detection (/admin or /#admin or ?admin=true)
   const checkIsAdmin = () =>
@@ -108,7 +154,6 @@ function AppRouter() {
 
   const [isAdminMode, setIsAdminMode] = useState<boolean>(checkIsAdmin);
 
-  // Read URL parameters if provided for embedded checkout (fall back to signed-in merchant or default merchant ID)
   const DEFAULT_MERCHANT_ID = 'mer_live_fb8eb757cceb7c35';
   const paramMerchantId = urlParams.get('merchantId') || '';
   const resolvedMerchantId = paramMerchantId || authMerchant?.id || DEFAULT_MERCHANT_ID;
@@ -116,20 +161,15 @@ function AppRouter() {
   const paramAmount = Number(urlParams.get('amount')) || 50;
   const paramStoreName =
     urlParams.get('storeName') || authMerchant?.storeName || 'ORBIT Secure Checkout';
-  const paramCustomerEmail = urlParams.get('customerEmail') || 'customer@example.com';
+  const paramCustomerEmail = urlParams.get('customerEmail') || undefined;
 
-  // Listen for Ctrl+Alt+A stealth hotkey and URL changes
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.altKey && (e.key === 'a' || e.key === 'A')) {
         e.preventDefault();
         setIsAdminMode((prev) => {
           const next = !prev;
-          if (next) {
-            window.history.pushState({}, '', '/admin');
-          } else {
-            window.history.pushState({}, '', '/');
-          }
+          window.history.pushState({}, '', next ? '/admin' : '/');
           return next;
         });
       }
@@ -154,7 +194,12 @@ function AppRouter() {
     window.history.pushState({}, '', '/admin');
   };
 
-  // 1. Hidden Multi-Tenant Central Hub Admin Panel (/admin) — bypasses merchant login
+  // 1. Public Payment Link Route (/l/:slug)
+  if (publicLinkSlug) {
+    return <PublicPaymentLinkPage slug={publicLinkSlug} />;
+  }
+
+  // 2. Hidden Multi-Tenant Central Hub Admin Panel (/admin)
   if (isAdminMode) {
     return (
       <AdminDashboard
@@ -166,9 +211,9 @@ function AppRouter() {
     );
   }
 
-  // 2. Embedded / Standalone Checkout Mode — bypasses merchant login so buyers can pay
+  // 3. Embedded / Standalone Checkout Mode — bypasses merchant login
   if (isEmbedded) {
-    if (!paramMerchantId && authLoading) {
+    if (!resolvedSessionId && !paramMerchantId && authLoading) {
       return (
         <div className="min-h-screen bg-background-full flex flex-col items-center justify-center gap-3">
           <Spinner size="lg" aria-label="Loading checkout session" className="text-text-primary" />
@@ -182,27 +227,20 @@ function AppRouter() {
     return (
       <EmbeddedCheckoutView
         config={{
-          merchantId: resolvedMerchantId,
-          orderId: paramOrderId,
-          amount: paramAmount,
+          sessionId: resolvedSessionId,
+          sessionToken: resolvedSessionToken,
+          merchantId: resolvedSessionId ? undefined : resolvedMerchantId,
+          orderId: resolvedSessionId ? undefined : paramOrderId,
+          amount: resolvedSessionId ? undefined : paramAmount,
           storeName: paramStoreName,
           customerEmail: paramCustomerEmail,
-          onSuccess: (data) => {
-            if (window.parent && window.parent !== window) {
-              window.parent.postMessage({ event: 'payment.verified', ...data }, '*');
-            }
-          },
-          onClose: () => {
-            if (window.parent && window.parent !== window) {
-              window.parent.postMessage({ event: 'checkout.close', orderId: paramOrderId }, '*');
-            }
-          },
+          parentOrigin: paramOrigin,
         }}
       />
     );
   }
 
-  // 3. Authenticated Merchant Portal
+  // 4. Authenticated Merchant Portal
   return <MerchantPortalGate onEnterAdmin={enterAdminMode} />;
 }
 
@@ -235,16 +273,29 @@ function AuthenticatedMerchantPortal({ onEnterAdmin }: { onEnterAdmin: () => voi
   const [isSimulating, setIsSimulating] = useState(false);
 
   const merchantId = merchant!.id;
-  const storeName = merchant!.storeName;
-  const storeHost = extractHost(merchant!.webhookUrl);
+  const { data: merchantProfile } = useMerchant(merchantId);
+  const storeName = merchantProfile?.storeName || merchant!.storeName;
+  const storeHost = extractHost(merchantProfile?.webhookUrl || merchant!.webhookUrl);
+
+  const ecommerceEnabled =
+    merchantProfile?.enabledModules?.ecommerce_fulfillment !== false;
+
+  const navItems = ALL_NAV_ITEMS.filter(
+    (item) => !item.requiresEcommerceModule || ecommerceEnabled,
+  );
+
+  useEffect(() => {
+    if (!ecommerceEnabled && activeTab === 'orders') {
+      setActiveTab('payments');
+    }
+  }, [ecommerceEnabled, activeTab]);
 
   const { status: realtimeStatus, simulateTransaction } = useRealtime();
   const { data: wallets } = useWallets(merchantId);
 
-  // Demo Checkout Config State
   const [demoAmount, setDemoAmount] = useState(50);
   const [demoOrderId, setDemoOrderId] = useState('ORD-10492');
-  const [demoCustomerEmail, setDemoCustomerEmail] = useState('buyer@example.com');
+  const [demoCustomerEmail, setDemoCustomerEmail] = useState('');
   const [demoVerifiedResult, setDemoVerifiedResult] = useState<{
     orderId: string;
     trxId: string;
@@ -266,7 +317,7 @@ function AuthenticatedMerchantPortal({ onEnterAdmin }: { onEnterAdmin: () => voi
     onEnterAdmin();
   };
 
-  const activeNavItem = NAV_ITEMS.find((item) => item.id === activeTab) ?? NAV_ITEMS[0];
+  const activeNavItem = navItems.find((item) => item.id === activeTab) ?? navItems[0];
 
   const origin =
     typeof window !== 'undefined' ? window.location.origin : 'https://payment.orbitsaas.cloud';
@@ -274,17 +325,17 @@ function AuthenticatedMerchantPortal({ onEnterAdmin }: { onEnterAdmin: () => voi
   const embedSnippet = `<!-- 1. Include ORBIT Widget Script -->
 <script src="${origin}/widget.js"></script>
 
-<!-- 2. Trigger Checkout on Place Order Button -->
+<!-- 2. Trigger Checkout with server-created sessionId & sessionToken -->
 <script>
-  function launchOrbitPay() {
+  function launchOrbitPay(session) {
     OrbitPay.open({
-      merchantId: "${merchantId}",
-      orderId: "${demoOrderId}",
-      amount: ${demoAmount},
-      customerEmail: "${demoCustomerEmail}",
-      storeName: "${storeName}",
+      sessionId: session.sessionId,
+      sessionToken: session.sessionToken,
       onSuccess: function(data) {
         window.location.href = "/order-confirmed?id=" + data.orderId + "&trxId=" + data.trxId;
+      },
+      onPending: function(data) {
+        console.log("Submitted for verification:", data.status);
       }
     });
   }
@@ -292,7 +343,7 @@ function AuthenticatedMerchantPortal({ onEnterAdmin }: { onEnterAdmin: () => voi
 
   const renderNavList = (onSelect?: () => void) => (
     <nav className="space-y-1" aria-label="Portal sections">
-      {NAV_ITEMS.map((item) => {
+      {navItems.map((item) => {
         const Icon = item.icon;
         const isActive = activeTab === item.id;
         return (
@@ -326,7 +377,6 @@ function AuthenticatedMerchantPortal({ onEnterAdmin }: { onEnterAdmin: () => voi
 
   const renderUserAndFooterControls = (isDrawer = false) => (
     <div className={cx('space-y-3', !isDrawer && 'p-4 border-t border-separator-border')}>
-      {/* Active Authenticated User Badge + Logout */}
       <div className="p-2.5 rounded-2xl bg-background-secondary-default border border-separator-border flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
           <div className="size-7 rounded-lg bg-background-primary-default border border-border-button-default text-foreground-icon-primary flex items-center justify-center shrink-0">
@@ -384,7 +434,6 @@ function AuthenticatedMerchantPortal({ onEnterAdmin }: { onEnterAdmin: () => voi
     <div className="min-h-screen bg-background-full flex flex-col md:flex-row antialiased">
       {/* Desktop Sidebar Navigation */}
       <aside className="hidden md:flex w-64 bg-background-primary-default border-e border-separator-border flex-col shrink-0">
-        {/* Brand Header */}
         <div className="h-16 px-5 border-b border-separator-border flex items-center justify-between">
           <div className="flex items-center gap-3 min-w-0">
             <div
@@ -401,13 +450,12 @@ function AuthenticatedMerchantPortal({ onEnterAdmin }: { onEnterAdmin: () => voi
                 ORBIT Pay Hub
               </span>
               <span className="text-caption-2-medium text-text-tertiary">
-                v1.0.0-PROD
+                v2.0.0-PROD
               </span>
             </div>
           </div>
         </div>
 
-        {/* Store Profile Selector Row */}
         <div className="p-4 border-b border-separator-border">
           <div className="p-2.5 rounded-2lg bg-background-secondary-default border border-border-button-default flex items-center justify-between gap-2">
             <div className="flex items-center gap-2.5 min-w-0">
@@ -427,10 +475,8 @@ function AuthenticatedMerchantPortal({ onEnterAdmin }: { onEnterAdmin: () => voi
           </div>
         </div>
 
-        {/* Navigation Items */}
         <div className="flex-1 p-3 overflow-y-auto">{renderNavList()}</div>
 
-        {/* Footer Controls */}
         {renderUserAndFooterControls(false)}
       </aside>
 
@@ -457,7 +503,6 @@ function AuthenticatedMerchantPortal({ onEnterAdmin }: { onEnterAdmin: () => voi
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">
-        {/* Top Header Bar (Liquid Glass functional layer) */}
         <header className="h-16 bg-background-primary-default/80 backdrop-blur-xl supports-[backdrop-filter]:bg-background-primary-default/75 border-b border-separator-border px-4 sm:px-6 flex items-center justify-between gap-3 sticky top-0 z-20">
           <div className="flex items-center gap-2.5 min-w-0">
             <Button
@@ -475,7 +520,6 @@ function AuthenticatedMerchantPortal({ onEnterAdmin }: { onEnterAdmin: () => voi
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-            {/* Realtime Live SSE Indicator */}
             <div
               className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-background-secondary-default border border-border-button-default text-caption-2-medium text-text-secondary"
               title={
@@ -493,7 +537,6 @@ function AuthenticatedMerchantPortal({ onEnterAdmin }: { onEnterAdmin: () => voi
               </span>
             </div>
 
-            {/* Quick 1-Click Realtime Transaction Simulator */}
             <Button
               variant="secondary"
               size="small"
@@ -518,14 +561,11 @@ function AuthenticatedMerchantPortal({ onEnterAdmin }: { onEnterAdmin: () => voi
           </div>
         </header>
 
-        {/* Page Content Body */}
         <main className="p-4 sm:p-6 md:p-8 space-y-6 max-w-7xl w-full mx-auto">
-          {/* TAB 1: OVERVIEW */}
           {activeTab === 'overview' && (
             <div className="space-y-6">
               <AnalyticsOverview merchantId={merchantId} />
 
-              {/* Quick SIM status & Recent Ledger */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div className="lg:col-span-2">
                   <div className="flex items-center justify-between mb-3">
@@ -545,7 +585,6 @@ function AuthenticatedMerchantPortal({ onEnterAdmin }: { onEnterAdmin: () => voi
                 </div>
 
                 <div className="space-y-6">
-                  {/* SIM limits widget summary (real backend data) */}
                   <Card>
                     <CardHeader>
                       <CardTitle className="text-headline-medium flex items-center gap-2">
@@ -596,7 +635,6 @@ function AuthenticatedMerchantPortal({ onEnterAdmin }: { onEnterAdmin: () => voi
                     </CardContent>
                   </Card>
 
-                  {/* Device Sync Info */}
                   <Card>
                     <CardHeader>
                       <CardTitle className="text-headline-medium flex items-center gap-2">
@@ -639,13 +677,14 @@ function AuthenticatedMerchantPortal({ onEnterAdmin }: { onEnterAdmin: () => voi
             </div>
           )}
 
-          {/* TAB 2: ORDERS & COD SYNC */}
-          {activeTab === 'orders' && <OrdersManager />}
+          {activeTab === 'payments' && <PaymentIntentsManager />}
 
-          {/* TAB 3: WALLETS */}
+          {activeTab === 'payment_links' && <PaymentLinksManager />}
+
+          {activeTab === 'orders' && ecommerceEnabled && <OrdersManager />}
+
           {activeTab === 'wallets' && <WalletManager />}
 
-          {/* TAB 4: TRANSACTIONS */}
           {activeTab === 'transactions' && (
             <div className="space-y-4">
               <div>
@@ -660,16 +699,12 @@ function AuthenticatedMerchantPortal({ onEnterAdmin }: { onEnterAdmin: () => voi
             </div>
           )}
 
-          {/* TAB 5: DEVICE PAIRING */}
           {activeTab === 'device' && <DevicePairingQR merchantId={merchantId} />}
 
-          {/* TAB 6: SETTINGS */}
           {activeTab === 'settings' && <MerchantSettings />}
 
-          {/* TAB 7: INTEGRATION GUIDE */}
           {activeTab === 'integration' && <IntegrationGuide />}
 
-          {/* TAB 8: CHECKOUT DEMO */}
           {activeTab === 'checkout_demo' && (
             <Card>
               <CardHeader>
@@ -694,10 +729,11 @@ function AuthenticatedMerchantPortal({ onEnterAdmin }: { onEnterAdmin: () => voi
                     inputClassName="font-mono"
                   />
                   <Input
-                    label="Customer Email"
+                    label="Customer Email (Optional)"
                     type="email"
                     value={demoCustomerEmail}
                     onChange={setDemoCustomerEmail}
+                    placeholder="Optional"
                   />
                 </div>
 
@@ -726,7 +762,6 @@ function AuthenticatedMerchantPortal({ onEnterAdmin }: { onEnterAdmin: () => voi
                   </div>
                 )}
 
-                {/* HTML Script Embed Code Snippet */}
                 <div className="space-y-2.5 pt-4 border-t border-separator-border">
                   <div className="flex items-center justify-between gap-2">
                     <h3 className="text-body-medium text-text-primary">
@@ -762,7 +797,7 @@ function AuthenticatedMerchantPortal({ onEnterAdmin }: { onEnterAdmin: () => voi
           merchantId,
           orderId: demoOrderId,
           amount: demoAmount,
-          customerEmail: demoCustomerEmail,
+          customerEmail: demoCustomerEmail || undefined,
           storeName,
           onSuccess: (data) => {
             setDemoVerifiedResult(data);
@@ -775,23 +810,12 @@ function AuthenticatedMerchantPortal({ onEnterAdmin }: { onEnterAdmin: () => voi
 }
 
 // -------------------------------------------------------------
-// Standalone Embedded Checkout Container for iframe embed
+// Standalone Embedded Checkout Container for iframe / hosted URL
 // -------------------------------------------------------------
-function EmbeddedCheckoutView({
-  config,
-}: {
-  config: {
-    merchantId: string;
-    orderId: string;
-    amount: number;
-    storeName?: string;
-    customerEmail?: string;
-    onSuccess: (data: { orderId: string; trxId: string; amount: number; matchType?: string | null }) => void;
-    onClose: () => void;
-  };
-}) {
+function EmbeddedCheckoutView({ config }: { config: CheckoutConfig }) {
   const {
     currentStep,
+    preferredStepperStep,
     selectedProvider,
     setSelectedProvider,
     activeWallet,
@@ -802,61 +826,91 @@ function EmbeddedCheckoutView({
     setPaidAmount,
     trxId,
     setTrxId,
+    sessionToken,
+    merchantId,
+    orderId,
+    storeName,
+    vertical,
     baseAmount,
     uniqueAmount,
     offsetCents,
+    expiresAt,
+    graceExpiresAt,
+    returnUrl,
+    cancelUrl,
+    verificationMode,
+    receiptPolicy,
+    deviceStatus,
+    display,
+    pollingStatus,
+    escalationReason,
+    submitAttempts,
+    maxSubmitAttempts,
+    receiptUrl,
+    receiptUploadCount,
+    receiptMaxUploads,
+    isUploadingReceipt,
+    receiptError,
     isSessionLoading,
     isSubmitting,
     errorMessage,
     verifiedData,
+    uploadReceipt,
     submitPayment,
+    editSubmission,
     markVerified,
+    handlePollStateChange,
+    emitClose,
   } = useCheckout(config);
 
   return (
     <div className="min-h-screen bg-background-full flex items-center justify-center p-4">
       <Card variant="elevated" className="w-full max-w-lg">
         <CardContent className="p-6 space-y-6">
-          <div className="flex items-center justify-between gap-3 pb-4 border-b border-separator-border">
-            <div className="min-w-0">
-              <h2 className="text-title-3-semibold text-text-primary truncate">
-                {config.storeName || 'ORBIT Secure Checkout'}
-              </h2>
-              <span className="text-caption-2-medium text-text-tertiary font-mono">
-                Order #{config.orderId}
-              </span>
-            </div>
-            <div className="flex flex-col items-end shrink-0">
-              <span className="text-title-2-medium text-text-primary font-mono tabular-nums tnum">
-                {formatBDT(uniqueAmount)}
-              </span>
-              {offsetCents > 0 && (
-                <span className="text-caption-2-medium text-text-tertiary tabular-nums">
-                  Base {formatBDT(baseAmount)} + {formatBDT(offsetCents / 100)} code
-                </span>
-              )}
-            </div>
+          <div className="pb-4 border-b border-separator-border">
+            <CheckoutDisplayHeader
+              storeName={storeName}
+              orderId={orderId || config.orderId || ''}
+              vertical={vertical}
+              display={display}
+              baseAmount={baseAmount}
+              uniqueAmount={uniqueAmount}
+              offsetCents={offsetCents}
+              isSessionLoading={isSessionLoading}
+            />
           </div>
 
           {currentStep === 'POLLING' || currentStep === 'SUCCESS' ? (
             <PollingStatus
-              orderId={config.orderId}
+              orderId={orderId || config.orderId || ''}
               expectedAmount={verifiedData?.amount ?? (Number(paidAmount) || uniqueAmount)}
               provider={selectedProvider}
               trxId={verifiedData?.trxId || trxId}
               senderNumber={senderNumber}
-              merchantId={config.merchantId}
+              merchantId={merchantId}
               initialVerified={currentStep === 'SUCCESS'}
               initialMatchType={verifiedData?.matchType ?? null}
+              initialStatus={pollingStatus}
+              initialEscalationReason={escalationReason}
+              receiptUrl={receiptUrl}
+              returnUrl={returnUrl}
+              cancelUrl={cancelUrl}
+              graceExpiresAt={graceExpiresAt}
+              submitAttempts={submitAttempts}
+              maxSubmitAttempts={maxSubmitAttempts}
+              onEditSubmission={editSubmission}
+              onStatusChange={handlePollStateChange}
               onVerified={markVerified}
-              onClose={config.onClose}
+              onClose={emitClose}
             />
           ) : (
             <CheckoutStepper
+              initialStep={preferredStepperStep}
               baseAmount={baseAmount}
               uniqueAmount={uniqueAmount}
               offsetCents={offsetCents}
-              orderId={config.orderId}
+              orderId={orderId || config.orderId || ''}
+              expiresAt={expiresAt}
               selectedProvider={selectedProvider}
               onSelectProvider={setSelectedProvider}
               activeWallet={activeWallet}
@@ -867,12 +921,32 @@ function EmbeddedCheckoutView({
               onChangePaidAmount={setPaidAmount}
               trxId={trxId}
               onChangeTrxId={setTrxId}
+              verificationMode={verificationMode}
+              receiptPolicy={receiptPolicy}
+              deviceStatus={deviceStatus}
+              sessionToken={sessionToken}
+              receiptUrl={receiptUrl}
+              receiptUploadCount={receiptUploadCount}
+              receiptMaxUploads={receiptMaxUploads}
+              isUploadingReceipt={isUploadingReceipt}
+              receiptError={receiptError}
+              onUploadReceipt={uploadReceipt}
+              submitAttempts={submitAttempts}
+              maxSubmitAttempts={maxSubmitAttempts}
               onSubmit={submitPayment}
               isSubmitting={isSubmitting}
               isSessionLoading={isSessionLoading}
               errorMessage={errorMessage}
             />
           )}
+
+          <div className="pt-4 border-t border-separator-border flex items-center justify-between text-caption-2-medium text-text-tertiary">
+            <span className="flex items-center gap-1.5">
+              <RiShieldCheckLine className="size-3.5 text-status-lime-text" aria-hidden />
+              <span>256-bit encrypted MFS verification</span>
+            </span>
+            <span className="text-caption-2-semibold text-text-secondary">ORBIT Pay Hub</span>
+          </div>
         </CardContent>
       </Card>
     </div>

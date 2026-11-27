@@ -525,6 +525,145 @@ class OrbitApiClient(
         }
     }
 
+    /**
+     * Lists universal multi-vertical payment intents with optional status/search filters.
+     */
+    suspend fun listPaymentIntents(
+        status: String? = null,
+        limit: Int = 50,
+        offset: Int = 0,
+        search: String? = null
+    ): Result<PaymentIntentsListData> {
+        return runCatching {
+            val resolvedBaseUrl = PreferencesManager.normalizeServerUrl(baseUrl)
+            val url = "$resolvedBaseUrl/api/v1/payment-intents"
+            val response: HttpResponse = client.get(url) {
+                applyAuthHeaders()
+                parameter("limit", limit)
+                parameter("offset", offset)
+                if (!status.isNullOrBlank()) {
+                    parameter("status", status.trim())
+                }
+                if (!search.isNullOrBlank()) {
+                    parameter("search", search.trim())
+                }
+            }
+
+            if (response.status.isSuccess()) {
+                val envelope = response.body<ApiEnvelope<PaymentIntentsListData>>()
+                if (envelope.success && envelope.data != null) {
+                    envelope.data
+                } else {
+                    throw Exception(envelope.error ?: envelope.message ?: "Failed to load payment intents")
+                }
+            } else {
+                throwHttpException(response)
+            }
+        }
+    }
+
+    /**
+     * Fetches a single universal payment intent by ID or externalRefId.
+     */
+    suspend fun getPaymentIntent(intentId: String): Result<PaymentIntentDto> {
+        return runCatching {
+            val resolvedBaseUrl = PreferencesManager.normalizeServerUrl(baseUrl)
+            val encodedId = intentId.trim().encodeURLPathPart()
+            val url = "$resolvedBaseUrl/api/v1/payment-intents/$encodedId"
+            val response: HttpResponse = client.get(url) {
+                applyAuthHeaders()
+            }
+
+            if (response.status.isSuccess()) {
+                val envelope = response.body<ApiEnvelope<PaymentIntentDto>>()
+                if (envelope.success && envelope.data != null) {
+                    envelope.data
+                } else {
+                    throw Exception(envelope.error ?: envelope.message ?: "Failed to load payment intent")
+                }
+            } else {
+                throwHttpException(response)
+            }
+        }
+    }
+
+    /**
+     * Atomically resolves (APPROVE or REJECT) a payment intent with optimistic CAS stateVersion.
+     */
+    suspend fun resolvePaymentIntent(
+        intentId: String,
+        decision: String,
+        expectedStateVersion: Int? = null,
+        reason: String? = null,
+        trxId: String? = null
+    ): Result<ResolvePaymentData> {
+        return runCatching {
+            val resolvedBaseUrl = PreferencesManager.normalizeServerUrl(baseUrl)
+            val encodedId = intentId.trim().encodeURLPathPart()
+            val url = "$resolvedBaseUrl/api/v1/payments/$encodedId/resolve"
+            val payload = ResolvePaymentRequest(
+                decision = decision.trim().uppercase(),
+                expectedStateVersion = expectedStateVersion,
+                resolutionSource = "ORBIT_ANDROID",
+                reason = reason?.trim()?.ifBlank { null },
+                trxId = trxId?.trim()?.ifBlank { null }
+            )
+
+            val response: HttpResponse = client.post(url) {
+                contentType(ContentType.Application.Json)
+                applyAuthHeaders()
+                setBody(payload)
+            }
+
+            if (response.status.isSuccess()) {
+                val envelope = response.body<ApiEnvelope<ResolvePaymentData>>()
+                if (envelope.success && envelope.data != null) {
+                    envelope.data
+                } else {
+                    throw Exception(envelope.error ?: envelope.message ?: "Failed to resolve payment intent")
+                }
+            } else {
+                throwHttpException(response)
+            }
+        }
+    }
+
+    /**
+     * Triggers a server-declared dynamic client action webhook on a payment intent.
+     */
+    suspend fun triggerPaymentAction(
+        intentId: String,
+        actionId: String,
+        note: String? = null
+    ): Result<TriggerActionData> {
+        return runCatching {
+            val resolvedBaseUrl = PreferencesManager.normalizeServerUrl(baseUrl)
+            val encodedId = intentId.trim().encodeURLPathPart()
+            val url = "$resolvedBaseUrl/api/v1/payments/$encodedId/action"
+            val payload = TriggerActionRequest(
+                actionId = actionId.trim(),
+                note = note?.trim()?.ifBlank { null }
+            )
+
+            val response: HttpResponse = client.post(url) {
+                contentType(ContentType.Application.Json)
+                applyAuthHeaders()
+                setBody(payload)
+            }
+
+            if (response.status.isSuccess()) {
+                val envelope = response.body<ApiEnvelope<TriggerActionData>>()
+                if (envelope.success && envelope.data != null) {
+                    envelope.data
+                } else {
+                    throw Exception(envelope.error ?: envelope.message ?: "Payment action failed")
+                }
+            } else {
+                throwHttpException(response)
+            }
+        }
+    }
+
     companion object {
         private const val TAG = "OrbitApiClient"
         private val USER_AGENT = "OrbitPay-Android/${BuildConfig.VERSION_NAME}"

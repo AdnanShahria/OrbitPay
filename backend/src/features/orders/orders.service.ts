@@ -2,6 +2,7 @@ import { eq, and, desc, sql, like, or, inArray, type SQL } from 'drizzle-orm';
 import type { AppDb } from '../../db/client';
 import {
   merchantOrders,
+  paymentIntents,
   type MerchantRecord,
   type MerchantOrderRecord,
   type OrderStatus,
@@ -9,6 +10,7 @@ import {
 } from '../../db/schema';
 import { generateSecureToken } from '../../shared/crypto';
 import { NotFoundError } from '../../shared/errors';
+import { parseAllowedOrigins, validateSafeWebhookUrl } from '../../shared/ssrf';
 import type { Env } from '../../shared/types';
 import { dispatchWebhook, sendPushToMerchantDevices } from '../webhooks/webhook.dispatcher';
 import { realtimeHub } from '../realtime/realtime.service';
@@ -35,9 +37,17 @@ export async function notifyOrder(
   input: NotifyOrderInput,
   envOrFcmKey?: string | Env
 ): Promise<{ order: MerchantOrderRecord; created: boolean }> {
+  const env = typeof envOrFcmKey === 'string' ? undefined : envOrFcmKey;
   const now = new Date();
   const normalizedTrxId = input.trxId ? input.trxId.trim().toUpperCase() : null;
   const callbackUrl = input.storeCallbackUrl ? input.storeCallbackUrl.trim() : null;
+  if (callbackUrl) {
+    validateSafeWebhookUrl(
+      callbackUrl,
+      env,
+      parseAllowedOrigins(merchant.allowedCallbackOriginsJson)
+    );
+  }
   const customerEmail = input.customerEmail ? input.customerEmail.trim() : null;
   const metadataJson = input.metadata ? JSON.stringify(input.metadata) : null;
 
@@ -122,10 +132,14 @@ export async function notifyOrder(
     order = insertedRes[0];
   }
 
-  realtimeHub.broadcast(created ? 'ORDER_CREATED' : 'ORDER_UPDATED', {
-    merchantId: merchant.id,
-    order,
-  });
+  realtimeHub.broadcast(
+    created ? 'ORDER_CREATED' : 'ORDER_UPDATED',
+    {
+      merchantId: merchant.id,
+      order,
+    },
+    merchant.id
+  );
 
   sendPushToMerchantDevices(
     db,
@@ -217,6 +231,48 @@ export async function listOrders(
 }
 
 /**
+ * Retrieves a single merchant order by externalOrderId alongside any linked paymentIntent.
+ */
+export async function getOrderByExternalId(
+  db: AppDb,
+  merchantId: string,
+  externalOrderId: string
+) {
+  const [orderRes, intentRes] = await Promise.all([
+    db
+      .select()
+      .from(merchantOrders)
+      .where(
+        and(
+          eq(merchantOrders.merchantId, merchantId),
+          eq(merchantOrders.externalOrderId, externalOrderId)
+        )
+      )
+      .limit(1),
+    db
+      .select()
+      .from(paymentIntents)
+      .where(
+        and(
+          eq(paymentIntents.merchantId, merchantId),
+          eq(paymentIntents.externalRefId, externalOrderId)
+        )
+      )
+      .limit(1),
+  ]);
+
+  const order = orderRes[0];
+  if (!order) {
+    throw new NotFoundError(`Order '${externalOrderId}' not found`);
+  }
+
+  return {
+    ...order,
+    paymentIntent: intentRes[0] || null,
+  };
+}
+
+/**
  * Applies a merchant confirmation/fulfillment action to an order, updates D1,
  * dispatches an HMAC-SHA256 signed webhook back to the storefront, and broadcasts SSE.
  */
@@ -224,7 +280,8 @@ export async function performOrderAction(
   db: AppDb,
   merchant: MerchantRecord,
   externalOrderId: string,
-  input: OrderActionInput
+  input: OrderActionInput,
+  env?: Env
 ) {
   const existingRes = await db
     .select()
@@ -294,15 +351,20 @@ export async function performOrderAction(
     webhookData,
     1,
     undefined,
-    updated.storeCallbackUrl
+    updated.storeCallbackUrl,
+    env
   );
 
-  realtimeHub.broadcast('ORDER_UPDATED', {
-    merchantId: merchant.id,
-    order: updated,
-    action: input.action,
-    event: config.event,
-  });
+  realtimeHub.broadcast(
+    'ORDER_UPDATED',
+    {
+      merchantId: merchant.id,
+      order: updated,
+      action: input.action,
+      event: config.event,
+    },
+    merchant.id
+  );
 
   return {
     order: updated,

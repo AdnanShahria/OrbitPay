@@ -152,6 +152,20 @@ export function generateDeviceApiKey(): string {
 }
 
 /**
+ * Generates a server-to-server merchant API key (e.g., sk_live_...).
+ */
+export function generateMerchantApiKey(): string {
+  return `sk_live_${generateSecureToken(24)}`;
+}
+
+/**
+ * Generates a publishable merchant key (e.g., pk_live_...).
+ */
+export function generatePublishableKey(): string {
+  return `pk_live_${generateSecureToken(16)}`;
+}
+
+/**
  * Creates a signed tamper-proof session token for checkout flows.
  */
 export async function createSignedSessionToken<T extends Record<string, unknown>>(

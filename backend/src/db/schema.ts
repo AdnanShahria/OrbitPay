@@ -1,4 +1,5 @@
-import { sqliteTable, text, integer, real, uniqueIndex, index } from 'drizzle-orm/sqlite-core';
+import { sql } from 'drizzle-orm';
+import { sqliteTable, text, integer, real, uniqueIndex, index, primaryKey } from 'drizzle-orm/sqlite-core';
 
 export const MFS_PROVIDERS = ['BKASH', 'NAGAD', 'ROCKET', 'UPAY', 'CELLFIN'] as const;
 export type MfsProvider = (typeof MFS_PROVIDERS)[number];
@@ -6,7 +7,7 @@ export type MfsProvider = (typeof MFS_PROVIDERS)[number];
 export const ACCOUNT_TYPES = ['PERSONAL', 'PRA', 'MERCHANT'] as const;
 export type AccountType = (typeof ACCOUNT_TYPES)[number];
 
-export const LEDGER_STATUSES = ['UNCLAIMED', 'VERIFIED', 'MANUAL_VERIFIED'] as const;
+export const LEDGER_STATUSES = ['UNCLAIMED', 'VERIFIED', 'MANUAL_VERIFIED', 'PENDING_LATE_SMS'] as const;
 export type LedgerStatus = (typeof LEDGER_STATUSES)[number];
 
 export const SMS_SOURCES = ['SMS', 'NOTIFICATION', 'INBOX_SCAN'] as const;
@@ -15,10 +16,24 @@ export type SmsSource = (typeof SMS_SOURCES)[number];
 export const MATCH_TYPES = ['EXACT_UNIQUE', 'BASE_AMOUNT_FALLBACK', 'OVERPAID', 'MANUAL_VERIFIED'] as const;
 export type MatchType = (typeof MATCH_TYPES)[number];
 
-export const QUEUE_STATUSES = ['WAITING_FOR_SMS', 'MATCHED', 'EXPIRED'] as const;
+export const QUEUE_STATUSES = [
+  'WAITING_FOR_SMS',
+  'MATCHED',
+  'EXPIRED',
+  'MANUAL_REVIEW_REQUIRED',
+  'MANUALLY_APPROVED',
+  'MANUALLY_REJECTED',
+] as const;
 export type QueueStatus = (typeof QUEUE_STATUSES)[number];
 
-export const CHECKOUT_SESSION_STATUSES = ['OPEN', 'SUBMITTED', 'VERIFIED', 'EXPIRED'] as const;
+export const CHECKOUT_SESSION_STATUSES = [
+  'OPEN',
+  'SUBMITTED',
+  'VERIFIED',
+  'EXPIRED',
+  'ESCALATED',
+  'REJECTED',
+] as const;
 export type CheckoutSessionStatus = (typeof CHECKOUT_SESSION_STATUSES)[number];
 
 export const USER_ROLES = ['MERCHANT_OWNER', 'MERCHANT_STAFF'] as const;
@@ -46,6 +61,61 @@ export type OrderStatus = (typeof ORDER_STATUSES)[number];
 export const WEBHOOK_STATUSES = ['DELIVERED', 'FAILED', 'RETRYING'] as const;
 export type WebhookStatus = (typeof WEBHOOK_STATUSES)[number];
 
+export const VERIFICATION_MODES = ['AUTO', 'PURE_MANUAL'] as const;
+export type VerificationMode = (typeof VERIFICATION_MODES)[number];
+
+export const VERTICAL_PROFILES = [
+  'ecommerce',
+  'saas_subscription',
+  'lms_course',
+  'booking_appointment',
+  'invoice_b2b',
+  'donation',
+  'digital_topup',
+  'custom',
+] as const;
+export type VerticalProfile = (typeof VERTICAL_PROFILES)[number];
+
+export const PAYMENT_INTENT_STATUSES = [
+  'OPEN',
+  'WAITING_FOR_SMS',
+  'MANUAL_REVIEW_REQUIRED',
+  'VERIFIED',
+  'REJECTED',
+  'EXPIRED',
+  'REFUNDED',
+] as const;
+export type PaymentIntentStatus = (typeof PAYMENT_INTENT_STATUSES)[number];
+
+export const ESCALATION_REASONS = [
+  'GRACE_PERIOD_EXCEEDED',
+  'PURE_MANUAL_MODE',
+  'TRUST_FLAG_ANOMALY',
+  'UNDERPAID_AMOUNT',
+  'OVERPAID_AMOUNT_MISMATCH',
+  'SENDER_MISMATCH',
+  'STALE_SMS_TIMESTAMP',
+  'DEVICE_OFFLINE_IMMEDIATE',
+] as const;
+export type EscalationReason = (typeof ESCALATION_REASONS)[number];
+
+export const RESOLUTION_SOURCES = [
+  'AUTO_SMS',
+  'LATE_SMS_AUTO',
+  'CLIENT_ADMIN',
+  'ORBIT_DASHBOARD',
+  'ORBIT_ANDROID',
+] as const;
+export type ResolutionSource = (typeof RESOLUTION_SOURCES)[number];
+
+export const RECEIPT_POLICIES = [
+  'OFFLINE_OPTIONAL',
+  'ALWAYS_OPTIONAL',
+  'ALWAYS_REQUIRED',
+  'DISABLED',
+] as const;
+export type ReceiptPolicy = (typeof RECEIPT_POLICIES)[number];
+
 // 1. Merchants Table
 export const merchants = sqliteTable('merchants', {
   id: text('id').primaryKey(), // mer_live_xxxx
@@ -57,9 +127,24 @@ export const merchants = sqliteTable('merchants', {
   fcmToken: text('fcm_token'),
   lastSeenAt: integer('last_seen_at', { mode: 'timestamp' }),
   isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
+  verificationMode: text('verification_mode', { enum: VERIFICATION_MODES }).notNull().default('AUTO'),
+  allowBaseAmountFallback: integer('allow_base_amount_fallback', { mode: 'boolean' }).notNull().default(true),
+  receiptPolicy: text('receipt_policy', { enum: RECEIPT_POLICIES }).notNull().default('OFFLINE_OPTIONAL'),
+  lateSmsAutoApprove: integer('late_sms_auto_approve', { mode: 'boolean' }).notNull().default(false),
+  enabledModulesJson: text('enabled_modules_json')
+    .notNull()
+    .default('{"ecommerce_fulfillment":true,"phone_otp":false,"telegram_alerts":false}'),
+  allowedCallbackOriginsJson: text('allowed_callback_origins_json').notNull().default('[]'),
+  apiKeyHash: text('api_key_hash'),
+  apiKeyPrefix: text('api_key_prefix'),
+  publishableKey: text('publishable_key'),
+  telegramBotToken: text('telegram_bot_token'),
+  telegramChatId: text('telegram_chat_id'),
   createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).$defaultFn(() => new Date()).notNull(),
-});
+}, (table) => ({
+  apiKeyHashIdx: index('idx_merchants_api_key_hash').on(table.apiKeyHash),
+}));
 
 // 2. Merchant Wallets (Multi-SIM Pooling & Limit Rotation)
 export const merchantWallets = sqliteTable('merchant_wallets', {
@@ -87,11 +172,12 @@ export const smsLedger = sqliteTable('sms_ledger', {
   amount: real('amount').notNull(),
   senderNumber: text('sender_number').notNull(), // Normalized digits
   rawSms: text('raw_sms').notNull(),
-  status: text('status', { enum: ['UNCLAIMED', 'VERIFIED', 'MANUAL_VERIFIED'] }).default('UNCLAIMED').notNull(),
+  status: text('status', { enum: LEDGER_STATUSES }).default('UNCLAIMED').notNull(),
   matchType: text('match_type', {
     enum: ['EXACT_UNIQUE', 'BASE_AMOUNT_FALLBACK', 'OVERPAID', 'MANUAL_VERIFIED'],
   }),
   externalOrderId: text('external_order_id'),
+  paymentIntentId: text('payment_intent_id'),
   smsReceivedAt: integer('sms_received_at', { mode: 'timestamp' }).notNull(),
   verifiedAt: integer('verified_at', { mode: 'timestamp' }),
   smsSender: text('sms_sender'),
@@ -106,6 +192,7 @@ export const smsLedger = sqliteTable('sms_ledger', {
 export const verificationQueue = sqliteTable('verification_queue', {
   id: text('id').primaryKey(),
   merchantId: text('merchant_id').notNull().references(() => merchants.id),
+  paymentIntentId: text('payment_intent_id'),
   provider: text('provider', { enum: ['BKASH', 'NAGAD', 'ROCKET', 'UPAY', 'CELLFIN'] }).notNull(),
   externalOrderId: text('external_order_id').notNull(),
   customerEmail: text('customer_email').notNull(),
@@ -115,11 +202,17 @@ export const verificationQueue = sqliteTable('verification_queue', {
   submittedAmount: real('submitted_amount'),
   submittedTrxId: text('submitted_trx_id').notNull(), // Normalized uppercase
   submittedSender: text('submitted_sender').notNull(), // Normalized digits
-  status: text('status', { enum: ['WAITING_FOR_SMS', 'MATCHED', 'EXPIRED'] }).default('WAITING_FOR_SMS').notNull(),
+  receiptAssetId: text('receipt_asset_id'),
+  receiptUrl: text('receipt_url'),
+  escalationReason: text('escalation_reason', { enum: ESCALATION_REASONS }),
+  escalatedAt: integer('escalated_at', { mode: 'timestamp' }),
+  resolvedAt: integer('resolved_at', { mode: 'timestamp' }),
+  status: text('status', { enum: QUEUE_STATUSES }).default('WAITING_FOR_SMS').notNull(),
   expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
   createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()).notNull(),
 }, (table) => ({
   queueLookupIdx: index('idx_queue_lookup').on(table.merchantId, table.submittedTrxId, table.status),
+  queueIntentIdx: index('idx_queue_intent').on(table.paymentIntentId),
 }));
 
 // 5. Webhook Deliveries Table (Retry Engine)
@@ -205,18 +298,25 @@ export type RouterProviderLogRecord = typeof routerProviderLogs.$inferSelect;
 export const checkoutSessions = sqliteTable('checkout_sessions', {
   id: text('id').primaryKey(), // chk_xxxx
   merchantId: text('merchant_id').notNull().references(() => merchants.id),
+  paymentIntentId: text('payment_intent_id'),
+  vertical: text('vertical', { enum: VERTICAL_PROFILES }).default('ecommerce').notNull(),
   externalOrderId: text('external_order_id').notNull(),
   customerEmail: text('customer_email').notNull(),
   baseAmount: real('base_amount').notNull(),
   uniqueAmount: real('unique_amount').notNull(),
   offsetCents: integer('offset_cents').notNull(),
   provider: text('provider', { enum: ['BKASH', 'NAGAD', 'ROCKET', 'UPAY', 'CELLFIN'] }),
-  status: text('status', { enum: ['OPEN', 'SUBMITTED', 'VERIFIED', 'EXPIRED'] }).default('OPEN').notNull(),
+  status: text('status', { enum: CHECKOUT_SESSION_STATUSES }).default('OPEN').notNull(),
+  displayJson: text('display_json'),
+  actionsJson: text('actions_json'),
   expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
   createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()).notNull(),
 }, (table) => ({
   checkoutActiveIdx: index('idx_checkout_active').on(table.merchantId, table.baseAmount, table.status, table.expiresAt),
   checkoutOrderIdx: index('idx_checkout_order').on(table.merchantId, table.externalOrderId),
+  uqActiveUniqueAmount: uniqueIndex('uq_active_unique_amount')
+    .on(table.merchantId, table.uniqueAmount)
+    .where(sql`${table.status} IN ('OPEN', 'SUBMITTED')`),
 }));
 
 // 10. Merchant Users (Admin-Provisioned Client Accounts)
@@ -272,6 +372,7 @@ export const merchantDevices = sqliteTable('merchant_devices', {
 export const merchantOrders = sqliteTable('merchant_orders', {
   id: text('id').primaryKey(), // ord_xxxx
   merchantId: text('merchant_id').notNull().references(() => merchants.id),
+  paymentIntentId: text('payment_intent_id'),
   externalOrderId: text('external_order_id').notNull(),
   customerName: text('customer_name'),
   customerPhone: text('customer_phone'),
@@ -358,25 +459,101 @@ export const appReleases = sqliteTable('app_releases', {
 export type AppReleaseRecord = typeof appReleases.$inferSelect;
 export type NewAppRelease = typeof appReleases.$inferInsert;
 
-// 15. App Releases (Self-Hosted Android APK Distribution & Auto-Update Manifest)
-export const appReleases = sqliteTable('app_releases', {
-  id: text('id').primaryKey(), // rel_xxxx
-  platform: text('platform').default('ANDROID').notNull(),
-  versionCode: integer('version_code').notNull(),
-  versionName: text('version_name').notNull(),
-  minSupportedVersionCode: integer('min_supported_version_code').default(1).notNull(),
-  mandatory: integer('mandatory', { mode: 'boolean' }).default(false).notNull(),
-  releaseNotes: text('release_notes').default('').notNull(),
-  fileName: text('file_name').notNull(),
-  r2Key: text('r2_key').notNull(),
-  sha256: text('sha256').notNull(),
-  sizeBytes: integer('size_bytes').notNull(),
-  isActive: integer('is_active', { mode: 'boolean' }).default(true).notNull(),
+// 16. Universal Payment Intents (Multi-Vertical Payment Ledger)
+export const paymentIntents = sqliteTable('payment_intents', {
+  id: text('id').primaryKey(), // pay_xxxx
+  merchantId: text('merchant_id').notNull().references(() => merchants.id),
+  vertical: text('vertical', { enum: VERTICAL_PROFILES }).notNull().default('ecommerce'),
+  externalRefId: text('external_ref_id').notNull(),
+  verificationMode: text('verification_mode', { enum: VERIFICATION_MODES }).notNull().default('AUTO'),
+  status: text('status', { enum: PAYMENT_INTENT_STATUSES }).notNull().default('OPEN'),
+  baseAmount: real('base_amount').notNull(),
+  uniqueAmount: real('unique_amount').notNull(),
+  paidAmount: real('paid_amount'),
+  provider: text('provider', { enum: MFS_PROVIDERS }),
+  trxId: text('trx_id'),
+  senderNumber: text('sender_number'),
+  receiptAssetId: text('receipt_asset_id'),
+  receiptUrl: text('receipt_url'),
+  matchType: text('match_type', { enum: MATCH_TYPES }),
+  trustFlag: text('trust_flag'),
+  deviceOnlineAtSubmit: integer('device_online_at_submit', { mode: 'boolean' }),
+  smsLedgerId: text('sms_ledger_id'),
+  smsReconciliationState: text('sms_reconciliation_state'),
+  escalationReason: text('escalation_reason', { enum: ESCALATION_REASONS }),
+  resolutionSource: text('resolution_source', { enum: RESOLUTION_SOURCES }),
+  resolvedByJson: text('resolved_by_json'),
+  rejectionReason: text('rejection_reason'),
+  callbackUrl: text('callback_url'),
+  returnUrl: text('return_url'),
+  cancelUrl: text('cancel_url'),
+  customerJson: text('customer_json'),
+  displayJson: text('display_json'),
+  actionsJson: text('actions_json'),
+  metadataJson: text('metadata_json'),
+  stateVersion: integer('state_version').notNull().default(1),
+  submitAttempts: integer('submit_attempts').notNull().default(0),
+  graceExpiresAt: integer('grace_expires_at', { mode: 'timestamp' }),
+  expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+  verifiedAt: integer('verified_at', { mode: 'timestamp' }),
+  resolvedAt: integer('resolved_at', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).$defaultFn(() => new Date()).notNull(),
 }, (table) => ({
-  uniquePlatformVersion: uniqueIndex('unique_app_release_version').on(table.platform, table.versionCode),
-  latestLookupIdx: index('idx_app_releases_latest').on(table.platform, table.isActive, table.versionCode),
+  uniqueMerchantExternalRef: uniqueIndex('uq_payment_intent_merchant_ref').on(table.merchantId, table.externalRefId),
+  statusIdx: index('idx_payment_intents_status').on(table.merchantId, table.status, table.createdAt),
+  trxIdx: index('idx_payment_intents_trx').on(table.merchantId, table.trxId),
+  graceIdx: index('idx_payment_intents_grace').on(table.status, table.graceExpiresAt),
 }));
 
-export type AppReleaseRecord = typeof appReleases.$inferSelect;
-export type NewAppRelease = typeof appReleases.$inferInsert;
+export type PaymentIntentRecord = typeof paymentIntents.$inferSelect;
+export type NewPaymentIntent = typeof paymentIntents.$inferInsert;
+
+// 17. Payment Links (Zero-Code Hosted Checkout Links)
+export const paymentLinks = sqliteTable('payment_links', {
+  id: text('id').primaryKey(), // lnk_xxxx
+  merchantId: text('merchant_id').notNull().references(() => merchants.id),
+  slug: text('slug').notNull(),
+  title: text('title').notNull(),
+  description: text('description'),
+  vertical: text('vertical', { enum: VERTICAL_PROFILES }).notNull().default('custom'),
+  amountType: text('amount_type', { enum: ['FIXED', 'OPEN'] }).notNull().default('FIXED'),
+  fixedAmount: real('fixed_amount'),
+  minAmount: real('min_amount'),
+  maxAmount: real('max_amount'),
+  currency: text('currency').notNull().default('BDT'),
+  verificationMode: text('verification_mode', { enum: VERIFICATION_MODES }),
+  displayJson: text('display_json'),
+  actionsJson: text('actions_json'),
+  metadataJson: text('metadata_json'),
+  returnUrl: text('return_url'),
+  cancelUrl: text('cancel_url'),
+  isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
+  maxUses: integer('max_uses'),
+  usedCount: integer('used_count').notNull().default(0),
+  expiresAt: integer('expires_at', { mode: 'timestamp' }),
+  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).$defaultFn(() => new Date()).notNull(),
+}, (table) => ({
+  uniqueSlug: uniqueIndex('uq_payment_links_slug').on(table.slug),
+  merchantIdx: index('idx_payment_links_merchant').on(table.merchantId, table.isActive),
+}));
+
+export type PaymentLinkRecord = typeof paymentLinks.$inferSelect;
+export type NewPaymentLink = typeof paymentLinks.$inferInsert;
+
+// 18. Consumed TrxIDs (Global Cross-Mode Single-Use TrxID Tombstone)
+export const consumedTrxIds = sqliteTable('consumed_trx_ids', {
+  merchantId: text('merchant_id').notNull().references(() => merchants.id),
+  trxId: text('trx_id').notNull(),
+  provider: text('provider', { enum: MFS_PROVIDERS }).notNull(),
+  paymentIntentId: text('payment_intent_id'),
+  externalRefId: text('external_ref_id'),
+  resolutionSource: text('resolution_source', { enum: RESOLUTION_SOURCES }).notNull(),
+  consumedAt: integer('consumed_at', { mode: 'timestamp' }).$defaultFn(() => new Date()).notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.merchantId, table.trxId] }),
+}));
+
+export type ConsumedTrxIdRecord = typeof consumedTrxIds.$inferSelect;
+export type NewConsumedTrxId = typeof consumedTrxIds.$inferInsert;

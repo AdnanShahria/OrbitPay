@@ -9,6 +9,12 @@
     <string name="sync_channel_desc">Shows background MFS sync state and persistent listener</string>
     <string name="alert_channel_name">ORBIT Payment Alerts</string>
     <string name="alert_channel_desc">Instant alerts for verified storefront payments</string>
+    <string name="channel_urgent_name">Urgent Payment Reviews</string>
+    <string name="channel_urgent_desc">High-priority alerts for manual reviews, escalations, and incoming submissions</string>
+    <string name="channel_verified_name">Verified Payments</string>
+    <string name="channel_verified_desc">Confirmations when payments are verified or approved</string>
+    <string name="channel_status_name">Payment Status &amp; Updates</string>
+    <string name="channel_status_desc">Background service status and action confirmations</string>
 
     <!-- Common Actions & Content Descriptions -->
     <string name="action_back">Back</string>
@@ -188,4 +194,44 @@
     <string name="update_notif_ready_title">ORBIT Pay v%1$s Ready</string>
     <string name="update_notif_ready_body">Update downloaded and verified. Tap to install v%1$s.</string>
     <string name="update_notif_required_body">Required update v%1$s is ready. Tap to install now.</string>
+
+    <!-- Dynamic Payment Intents & Notification Actions -->
+    <string name="dashboard_tab_payments">Payments (%1$d)</string>
+    <string name="dashboard_tab_orders_short">Orders (%1$d)</string>
+    <string name="dashboard_tab_mfs_short">MFS (%1$d)</string>
+    <string name="dashboard_loading_intents">Loading payment intents…</string>
+    <string name="dashboard_empty_intents_title">No payment intents yet</string>
+    <string name="dashboard_empty_intents_desc">Incoming payment sessions across your connected apps will appear here with real-time verification controls.</string>
+    <string name="action_refresh_intents">Refresh payments</string>
+    <string name="intent_approve">Approve</string>
+    <string name="intent_reject">Reject</string>
+    <string name="intent_open_admin">Open Admin</string>
+    <string name="intent_view_receipt">View Receipt</string>
+    <string name="intent_receipt_attached">Receipt attached</string>
+    <string name="intent_device_offline_submit">Device offline at submit</string>
+    <string name="intent_reject_dialog_title">Reject payment</string>
+    <string name="intent_reject_dialog_body">Reject payment for %1$s (%2$s)? This will notify the connected app.</string>
+    <string name="intent_reject_reason_label">Rejection reason (optional)</string>
+    <string name="intent_reject_reason_placeholder">e.g. TrxID not received or amount mismatch</string>
+    <string name="intent_approve_dialog_title">Approve payment</string>
+    <string name="intent_approve_dialog_body">Approve %1$s for %2$s? This will mark the payment as verified and trigger webhooks.</string>
+    <string name="intent_status_open">OPEN</string>
+    <string name="intent_status_waiting_sms">WAITING SMS</string>
+    <string name="intent_status_manual_review">MANUAL REVIEW</string>
+    <string name="intent_status_verified">VERIFIED</string>
+    <string name="intent_status_rejected">REJECTED</string>
+    <string name="intent_status_expired">EXPIRED</string>
+    <string name="intent_status_refunded">REFUNDED</string>
+    <string name="notif_action_approve">Approve</string>
+    <string name="notif_action_reject">Reject</string>
+    <string name="notif_action_open_admin">Open Admin</string>
+    <string name="notif_action_result_title">Action completed</string>
+    <string name="notif_action_failed_title">Action failed</string>
+    <string name="verify_tab_review_queue">Review (%1$d)</string>
+    <string name="verify_tab_unclaimed_sms">SMS (%1$d)</string>
+    <string name="verify_tab_order_pay">Orders (%1$d)</string>
+    <string name="verify_review_empty_title">No payments awaiting review</string>
+    <string name="verify_review_empty_desc">Escalated or pending payment intents requiring manual approval will appear here.</string>
+    <string name="verify_orders_empty_title">No unpaid orders</string>
+    <string name="verify_orders_empty_desc">Orders awaiting payment confirmation or COD collection will appear here.</string>
 </resources>

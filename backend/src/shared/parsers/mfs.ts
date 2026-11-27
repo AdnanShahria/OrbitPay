@@ -9,69 +9,111 @@ export interface ParsedMfsResult {
 
 const AMOUNT = '([0-9][0-9,]*(?:\\.[0-9]{1,2})?)';
 const CURRENCY = '(?:Tk\\.?|BDT)';
-const TRX_ID = '(?:TrxID|TxnID):?\\s*([A-Za-z0-9]+)';
+const PHONE_CAPTURE = '((?:\\+?88)?01[3-9]\\d{8})';
+const ROCKET_PHONE_CAPTURE = '((?:\\+?88)?01[3-9]\\d{8}[A-Za-z0-9]?)';
+const TRX_ID = '(?:TrxID|TxnID|TxnId):?\\s*([A-Za-z0-9]+)';
 
 export const PROVIDER_PARSERS = {
-  // 1. bKash (Personal Send Money, PRA Payment, Cash In)
-  BKASH_RECEIVED: new RegExp(
-    `(?:You have received(?:\\s+payment)?|Payment received)\\s+${CURRENCY}\\s*${AMOUNT}\\.?\\s+from\\s+(01[3-9]\\d{8})(?!\\d)[\\s\\S]*?${TRX_ID}`,
+  // 1. bKash (Personal Send Money, PRA Payment, Cash In, Fallback)
+  BKASH_PERSONAL: new RegExp(
+    `You have received\\s+(?:payment\\s+)?${CURRENCY}\\s*${AMOUNT}\\.?\\s+from\\s+${PHONE_CAPTURE}(?!\\d)[\\s\\S]*?${TRX_ID}`,
+    'i'
+  ),
+  BKASH_PRA: new RegExp(
+    `Payment received\\s+${CURRENCY}\\s*${AMOUNT}\\.?\\s+from\\s+${PHONE_CAPTURE}(?!\\d)[\\s\\S]*?${TRX_ID}`,
     'i'
   ),
   BKASH_CASH_IN: new RegExp(
-    `Cash\\s+In\\s+${CURRENCY}\\s*${AMOUNT}\\.?\\s+from\\s+(01[3-9]\\d{8})(?!\\d)[\\s\\S]*?${TRX_ID}`,
+    `Cash\\s+In\\s+${CURRENCY}\\s*${AMOUNT}\\.?\\s+from\\s+${PHONE_CAPTURE}(?!\\d)[\\s\\S]*?${TRX_ID}`,
+    'i'
+  ),
+  BKASH_FALLBACK: new RegExp(
+    `(?:received|Payment)\\s+(?:${CURRENCY}\\s*)?${AMOUNT}\\.?\\s+from\\s+${PHONE_CAPTURE}(?!\\d)[\\s\\S]*?${TRX_ID}`,
     'i'
   ),
 
-  // 2. Nagad (Standard & Key-Value Multiline)
+  // 2. Nagad (Standard, Key-Value Multiline, Alt)
   NAGAD_STANDARD: new RegExp(
-    `received\\s+BDT\\s*${AMOUNT}\\.?\\s+from\\s+(01[3-9]\\d{8})(?!\\d)[\\s\\S]*?${TRX_ID}`,
+    `(?:received|credited)\\s+${CURRENCY}\\s*${AMOUNT}\\.?\\s+from\\s+${PHONE_CAPTURE}(?!\\d)[\\s\\S]*?${TRX_ID}`,
     'i'
   ),
   NAGAD_KV: new RegExp(
-    `Amount:\\s*${CURRENCY}\\s*${AMOUNT}\\.?[\\s\\S]*?Sender:\\s*(01[3-9]\\d{8})(?!\\d)[\\s\\S]*?${TRX_ID}`,
+    `Amount:\\s*(?:${CURRENCY}\\s*)?${AMOUNT}\\.?[\\s\\S]*?Sender:\\s*${PHONE_CAPTURE}(?!\\d)[\\s\\S]*?${TRX_ID}`,
+    'i'
+  ),
+  NAGAD_ALT: new RegExp(
+    `${CURRENCY}\\s*${AMOUNT}\\.?[\\s\\S]*?from\\s+${PHONE_CAPTURE}(?!\\d)[\\s\\S]*?${TRX_ID}`,
     'i'
   ),
 
   // 3. DBBL Rocket (16216 A/C format with check char, legacy 12-digit format, merchant)
   ROCKET_AC: new RegExp(
-    `${CURRENCY}\\s*${AMOUNT}\\.?\\s+received\\s+from\\s+A\\/C[:\\s]+(01[3-9]\\d{8})[A-Za-z0-9]?[\\s\\S]*?${TRX_ID}`,
-    'i'
-  ),
-  ROCKET_RECEIVED_AC: new RegExp(
-    `received\\s+${CURRENCY}\\s*${AMOUNT}\\.?\\s+from\\s+A\\/C[:\\s]+(01[3-9]\\d{8})[A-Za-z0-9]?[\\s\\S]*?${TRX_ID}`,
-    'i'
-  ),
-  ROCKET_LEGACY_12DIGIT: new RegExp(
-    `received\\s+${CURRENCY}\\s*${AMOUNT}\\.?\\s+from\\s+(01[3-9]\\d{8})[A-Za-z0-9](?!\\d)[\\s\\S]*?${TRX_ID}`,
+    `${CURRENCY}\\s*${AMOUNT}\\.?\\s+received\\s+from\\s+(?:A\\/C:?\\s*)?${ROCKET_PHONE_CAPTURE}(?!\\d)[\\s\\S]*?${TRX_ID}`,
     'i'
   ),
   ROCKET_STANDARD: new RegExp(
-    `(?:You have received|Payment)\\s+${CURRENCY}\\s*${AMOUNT}\\.?\\s+from\\s+(?:A\\/C[:\\s]+)?(01[3-9]\\d{8})[A-Za-z0-9]?[\\s\\S]*?${TRX_ID}`,
+    `(?:You have received|Payment(?:\\s+received)?|received)\\s+${CURRENCY}\\s*${AMOUNT}\\.?\\s+from\\s+(?:A\\/C:?\\s*)?${ROCKET_PHONE_CAPTURE}(?!\\d)[\\s\\S]*?${TRX_ID}`,
     'i'
   ),
 
   // 4. Upay (UCB MFS)
   UPAY_STANDARD: new RegExp(
-    `You have received\\s+${CURRENCY}\\s*${AMOUNT}\\.?\\s+from\\s+(01[3-9]\\d{8})(?!\\d)[\\s\\S]*?${TRX_ID}`,
+    `(?:You have received|Received)\\s+${CURRENCY}\\s*${AMOUNT}\\.?\\s+from\\s+${PHONE_CAPTURE}(?!\\d)[\\s\\S]*?${TRX_ID}`,
     'i'
   ),
 
   // 5. Cellfin (Islami Bank Bangladesh PLC)
   CELLFIN_STANDARD: new RegExp(
-    `(?:received|credited)\\s+${CURRENCY}\\s*${AMOUNT}\\.?\\s+from\\s+(01[3-9]\\d{8})(?!\\d)[\\s\\S]*?${TRX_ID}`,
+    `(?:You have received|received|credited)\\s+${CURRENCY}\\s*${AMOUNT}\\.?\\s+from\\s+${PHONE_CAPTURE}(?!\\d)[\\s\\S]*?${TRX_ID}`,
     'i'
   ),
 };
 
-// Reject outgoing transfers and OTP verification messages
+// Reject outgoing transfers and OTP verification messages (aligned with MfsParser.kt)
 const REJECT_PATTERNS = [
-  /^\s*(?:send\s+money|cash\s+out|mobile\s+recharge|bill\s+pay|payment\s+of|you\s+have\s+sent|sent\s+(?:tk\.?|bdt)|transferred\s+(?:tk\.?|bdt))/i,
-  /\b(?:send\s+money|cash\s+out)\s+(?:tk\.?|bdt)\s*[0-9]/i,
-  /\b(?:verification\s+code|one[- ]time\s+password|otp\s+is|pin\s+is|do\s+not\s+share\s+this\s+code)\b/i,
+  /\b(?:verification code|otp|one[- ]time password|security code|pin reset|login code|pin is|do not share this code)\b/i,
+  /\b(?:you have sent|send money|cash out|mobile recharge|pay bill|bill pay)\b/i,
+  /\bpaid\s+(?:Tk\.?|BDT)/i,
+  /\bpayment\s+(?:of\s+)?(?:Tk\.?|BDT)\s*[0-9][0-9,]*(?:\.[0-9]{1,2})?\s+to\b/i,
+  /^\s*(?:payment of|sent\s+(?:tk\.?|bdt)|transferred\s+(?:tk\.?|bdt))/i,
 ];
 
 export function parseAmount(amountStr: string): number {
   return parseFloat(amountStr.replace(/,/g, '').trim());
+}
+
+/**
+ * Normalizes Bangladeshi mobile numbers identically to Android MfsParser.sanitizePhoneNumber:
+ * - Strips trailing check letters (e.g. Rocket A/C:01912345678X -> 01912345678).
+ * - Strips +880 / 880 / +88 / 88 international dial code.
+ * - Prepends leading 0 for 10-digit numbers.
+ * - For ROCKET, normalizes 12-digit check-digit numbers to 11 digits.
+ */
+export function sanitizePhoneNumber(rawNumber: string, provider?: MfsProvider | null): string {
+  const withoutTrailingLetters = rawNumber.trim().replace(/[A-Za-z]+$/, '');
+  let cleaned = withoutTrailingLetters.replace(/[^0-9+]/g, '');
+
+  if (cleaned.startsWith('+880')) {
+    cleaned = cleaned.slice(3);
+  } else if (cleaned.startsWith('880')) {
+    cleaned = cleaned.slice(2);
+  } else if (cleaned.startsWith('+88')) {
+    cleaned = cleaned.slice(3);
+  } else if (cleaned.startsWith('88')) {
+    cleaned = cleaned.slice(2);
+  }
+
+  cleaned = cleaned.replace(/\+/g, '');
+
+  if (!cleaned.startsWith('0') && cleaned.length >= 10 && cleaned.length <= 11) {
+    cleaned = `0${cleaned}`;
+  }
+
+  if (provider === 'ROCKET' && cleaned.length === 12 && cleaned.startsWith('01')) {
+    cleaned = cleaned.slice(0, 11);
+  }
+
+  return cleaned;
 }
 
 function resolveProviderFromShortcode(senderShortcode?: string): MfsProvider | null {
@@ -90,10 +132,12 @@ function buildResult(provider: MfsProvider, match: RegExpMatchArray): ParsedMfsR
   if (!Number.isFinite(amount) || amount <= 0) {
     return null;
   }
-  const rawSender = match[2].trim();
-  const senderNumber = provider === 'ROCKET' ? rawSender.slice(0, 11) : rawSender;
+  const senderNumber = sanitizePhoneNumber(match[2], provider);
+  if (!/^01[3-9]\d{8}$/.test(senderNumber)) {
+    return null;
+  }
   const trxId = match[3].trim().toUpperCase();
-  if (!trxId) return null;
+  if (trxId.length < 5) return null;
 
   return {
     provider,
@@ -108,8 +152,11 @@ export function parseMfsSms(rawText: string, senderShortcode?: string): ParsedMf
     return null;
   }
 
+  const cleanText = rawText.trim();
+  if (!cleanText) return null;
+
   for (const rejectPattern of REJECT_PATTERNS) {
-    if (rejectPattern.test(rawText)) {
+    if (rejectPattern.test(cleanText)) {
       return null;
     }
   }
@@ -118,46 +165,52 @@ export function parseMfsSms(rawText: string, senderShortcode?: string): ParsedMf
 
   // If a known provider shortcode was explicitly supplied, enforce provider consistency
   if (knownProvider === 'BKASH') {
-    const m = rawText.match(PROVIDER_PARSERS.BKASH_RECEIVED) || rawText.match(PROVIDER_PARSERS.BKASH_CASH_IN);
+    const m =
+      cleanText.match(PROVIDER_PARSERS.BKASH_PERSONAL) ||
+      cleanText.match(PROVIDER_PARSERS.BKASH_PRA) ||
+      cleanText.match(PROVIDER_PARSERS.BKASH_CASH_IN) ||
+      cleanText.match(PROVIDER_PARSERS.BKASH_FALLBACK);
     return m ? buildResult('BKASH', m) : null;
   }
   if (knownProvider === 'NAGAD') {
-    const m = rawText.match(PROVIDER_PARSERS.NAGAD_KV) || rawText.match(PROVIDER_PARSERS.NAGAD_STANDARD);
+    const m =
+      cleanText.match(PROVIDER_PARSERS.NAGAD_STANDARD) ||
+      cleanText.match(PROVIDER_PARSERS.NAGAD_KV) ||
+      cleanText.match(PROVIDER_PARSERS.NAGAD_ALT);
     return m ? buildResult('NAGAD', m) : null;
   }
   if (knownProvider === 'ROCKET') {
     const m =
-      rawText.match(PROVIDER_PARSERS.ROCKET_AC) ||
-      rawText.match(PROVIDER_PARSERS.ROCKET_RECEIVED_AC) ||
-      rawText.match(PROVIDER_PARSERS.ROCKET_LEGACY_12DIGIT) ||
-      rawText.match(PROVIDER_PARSERS.ROCKET_STANDARD);
+      cleanText.match(PROVIDER_PARSERS.ROCKET_AC) ||
+      cleanText.match(PROVIDER_PARSERS.ROCKET_STANDARD);
     return m ? buildResult('ROCKET', m) : null;
   }
   if (knownProvider === 'UPAY') {
-    const m = rawText.match(PROVIDER_PARSERS.UPAY_STANDARD);
+    const m = cleanText.match(PROVIDER_PARSERS.UPAY_STANDARD);
     return m ? buildResult('UPAY', m) : null;
   }
   if (knownProvider === 'CELLFIN') {
-    const m = rawText.match(PROVIDER_PARSERS.CELLFIN_STANDARD);
+    const m = cleanText.match(PROVIDER_PARSERS.CELLFIN_STANDARD);
     return m ? buildResult('CELLFIN', m) : null;
   }
 
-  // Un-gated scan across all provider formats (used by server re-parse and SIMULATOR)
+  // Un-gated scan across all provider formats
   const orderedParsers: Array<[MfsProvider, RegExp]> = [
+    ['BKASH', PROVIDER_PARSERS.BKASH_PERSONAL],
+    ['BKASH', PROVIDER_PARSERS.BKASH_PRA],
     ['BKASH', PROVIDER_PARSERS.BKASH_CASH_IN],
     ['NAGAD', PROVIDER_PARSERS.NAGAD_KV],
     ['NAGAD', PROVIDER_PARSERS.NAGAD_STANDARD],
     ['ROCKET', PROVIDER_PARSERS.ROCKET_AC],
-    ['ROCKET', PROVIDER_PARSERS.ROCKET_RECEIVED_AC],
-    ['ROCKET', PROVIDER_PARSERS.ROCKET_LEGACY_12DIGIT],
-    ['BKASH', PROVIDER_PARSERS.BKASH_RECEIVED],
+    ['ROCKET', PROVIDER_PARSERS.ROCKET_STANDARD],
     ['UPAY', PROVIDER_PARSERS.UPAY_STANDARD],
     ['CELLFIN', PROVIDER_PARSERS.CELLFIN_STANDARD],
-    ['ROCKET', PROVIDER_PARSERS.ROCKET_STANDARD],
+    ['BKASH', PROVIDER_PARSERS.BKASH_FALLBACK],
+    ['NAGAD', PROVIDER_PARSERS.NAGAD_ALT],
   ];
 
   for (const [provider, regex] of orderedParsers) {
-    const match = rawText.match(regex);
+    const match = cleanText.match(regex);
     if (match) {
       const result = buildResult(provider, match);
       if (result) return result;

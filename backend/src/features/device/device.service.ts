@@ -1,9 +1,13 @@
-import { eq, and, desc, sql, gte, inArray, isNotNull } from 'drizzle-orm';
+import { eq, and, desc, sql, gte, inArray, isNotNull, or } from 'drizzle-orm';
+import type { Context } from 'hono';
 import type { AppDb } from '../../db/client';
 import {
+  checkoutSessions,
+  consumedTrxIds,
   merchants,
   merchantDevices,
   merchantOrders,
+  paymentIntents,
   smsLedger,
   verificationQueue,
   type MerchantRecord,
@@ -12,11 +16,24 @@ import {
   type SmsLedgerRecord,
 } from '../../db/schema';
 import { generateSecureToken, hashDeviceApiKey } from '../../shared/crypto';
+import { safeWaitUntil } from '../../shared/middleware';
+import { sanitizePhoneNumber } from '../../shared/parsers/mfs';
 import { evaluateSmsTrust } from '../../shared/sms-trust';
-import type { Env } from '../../shared/types';
+import type { AppContextEnv, Env } from '../../shared/types';
+import {
+  computeDeviceOnlineStatus,
+  evaluateSixFactors,
+  executeAtomicVerificationCas,
+  parseActionsList,
+  parseDisplayMetadata,
+  syncVerifiedOrderAndSession,
+} from '../payments/verification.engine';
 import { incrementWalletVolume } from '../wallets/wallets.service';
-import { dispatchWebhook, sendPushToMerchantDevices } from '../webhooks/webhook.dispatcher';
-import { computeMatchType, syncVerifiedOrderAndSession } from '../checkout/checkout.service';
+import {
+  dispatchWebhook,
+  sendDynamicPushToMerchantDevices,
+  sendTelegramOfficeAlert,
+} from '../webhooks/webhook.dispatcher';
 import { realtimeHub } from '../realtime/realtime.service';
 import type { IngestMessageDTO } from './device.schema';
 
@@ -46,6 +63,7 @@ export interface DeviceStatsResult {
   storeName: string;
   isOnline: boolean;
   lastSeenAt: Date | null;
+  activeSockets: number;
   totalVerifiedVolume: number;
   verifiedCount: number;
   unclaimedCount: number;
@@ -55,27 +73,28 @@ export interface DeviceStatsResult {
 
 /**
  * Ingests a batch of incoming MFS SMS messages from the Android companion app.
- * Deduplicates using unique (merchant_id, trx_id) constraint and triggers
- * the real-time auto-reconciliation loop across the verification queue.
+ * Enforces anti-spoofing trust, reconciles late SMS on manually approved intents silently,
+ * and runs 6-factor validation + atomic CAS on waiting payments.
  */
 export async function ingestDeviceSmsBatch(
   db: AppDb,
   merchant: MerchantRecord,
   messages: IngestMessageDTO[],
-  fcmServerKeyOrEnv?: string | Env
+  fcmServerKeyOrEnv?: string | Env,
+  ctx?: Context<AppContextEnv>
 ): Promise<IngestBatchResult> {
+  const env = typeof fcmServerKeyOrEnv === 'string' ? undefined : fcmServerKeyOrEnv;
   let ingestedCount = 0;
   let autoVerifiedCount = 0;
   let flaggedCount = 0;
 
   for (const msg of messages) {
     const normalizedTrxId = msg.trxId.trim().toUpperCase();
-    const normalizedSender = msg.senderNumber.replace(/^\+88/, '').replace(/^88/, '').trim();
+    const normalizedSender = sanitizePhoneNumber(msg.senderNumber, msg.provider);
     const receivedAtDate = msg.receivedAt ? new Date(msg.receivedAt) : new Date();
     const source = msg.source ?? 'SMS';
     const smsSender = msg.smsSender?.trim() || null;
 
-    // Check if SMS already exists in sms_ledger
     const existing = await db
       .select()
       .from(smsLedger)
@@ -83,7 +102,6 @@ export async function ingestDeviceSmsBatch(
       .limit(1);
 
     if (existing[0]) {
-      // Already recorded, skip duplicate ingestion
       continue;
     }
 
@@ -98,7 +116,59 @@ export async function ingestDeviceSmsBatch(
 
     const ledgerId = `sms_${generateSecureToken(16)}`;
 
-    // Insert into sms_ledger as UNCLAIMED with trust metadata
+    // Check if TrxID was already manually approved prior to SMS arrival
+    const consumedRows = await db
+      .select()
+      .from(consumedTrxIds)
+      .where(
+        and(eq(consumedTrxIds.merchantId, merchant.id), eq(consumedTrxIds.trxId, normalizedTrxId))
+      )
+      .limit(1);
+
+    if (consumedRows[0]) {
+      const linkedIntentRows = consumedRows[0].paymentIntentId
+        ? await db
+            .select()
+            .from(paymentIntents)
+            .where(eq(paymentIntents.id, consumedRows[0].paymentIntentId))
+            .limit(1)
+        : [];
+      const linkedIntent = linkedIntentRows[0];
+
+      await db.insert(smsLedger).values({
+        id: ledgerId,
+        merchantId: merchant.id,
+        provider: msg.provider,
+        trxId: normalizedTrxId,
+        amount: msg.amount,
+        senderNumber: normalizedSender,
+        rawSms: msg.rawSms,
+        status: 'MANUAL_VERIFIED',
+        matchType: 'MANUAL_VERIFIED',
+        externalOrderId: linkedIntent?.externalRefId ?? consumedRows[0].externalRefId ?? null,
+        paymentIntentId: linkedIntent?.id ?? consumedRows[0].paymentIntentId ?? null,
+        smsReceivedAt: receivedAtDate,
+        verifiedAt: linkedIntent?.verifiedAt ?? new Date(),
+        smsSender,
+        source,
+        trustFlag,
+      });
+
+      if (linkedIntent && linkedIntent.smsReconciliationState === 'PENDING_LATE_SMS') {
+        await db
+          .update(paymentIntents)
+          .set({
+            smsLedgerId: ledgerId,
+            smsReconciliationState: trustFlag ? 'MISMATCH' : 'RECONCILED',
+            updatedAt: new Date(),
+          })
+          .where(eq(paymentIntents.id, linkedIntent.id));
+      }
+
+      ingestedCount++;
+      continue;
+    }
+
     await db.insert(smsLedger).values({
       id: ledgerId,
       merchantId: merchant.id,
@@ -116,19 +186,84 @@ export async function ingestDeviceSmsBatch(
 
     ingestedCount++;
 
-    // Flagged rows are NEVER auto-reconciled; emit alert and leave UNCLAIMED for manual review
+    const insertedLedgerRows = await db
+      .select()
+      .from(smsLedger)
+      .where(eq(smsLedger.id, ledgerId))
+      .limit(1);
+    const ledgerRow = insertedLedgerRows[0];
+
     if (trustFlag !== null) {
       flaggedCount++;
-      realtimeHub.broadcast('SMS_FLAGGED', {
-        trxId: normalizedTrxId,
-        provider: msg.provider,
-        flag: trustFlag,
-      });
+      realtimeHub.broadcast(
+        'SMS_FLAGGED',
+        {
+          trxId: normalizedTrxId,
+          provider: msg.provider,
+          flag: trustFlag,
+        },
+        merchant.id
+      );
+
+      // Escalate any waiting intent/queue item matching this TrxID to MANUAL_REVIEW_REQUIRED
+      const waitingQueueRows = await db
+        .select()
+        .from(verificationQueue)
+        .where(
+          and(
+            eq(verificationQueue.merchantId, merchant.id),
+            eq(verificationQueue.submittedTrxId, normalizedTrxId),
+            eq(verificationQueue.status, 'WAITING_FOR_SMS')
+          )
+        )
+        .limit(1);
+
+      const waitingQ = waitingQueueRows[0];
+      if (waitingQ) {
+        const now = new Date();
+        await db
+          .update(verificationQueue)
+          .set({
+            status: 'MANUAL_REVIEW_REQUIRED',
+            escalationReason: 'TRUST_FLAG_ANOMALY',
+            escalatedAt: now,
+          })
+          .where(eq(verificationQueue.id, waitingQ.id));
+
+        if (waitingQ.paymentIntentId) {
+          await db
+            .update(paymentIntents)
+            .set({
+              status: 'MANUAL_REVIEW_REQUIRED',
+              escalationReason: 'TRUST_FLAG_ANOMALY',
+              smsLedgerId: ledgerId,
+              trustFlag,
+              stateVersion: sql`${paymentIntents.stateVersion} + 1`,
+              updatedAt: now,
+            })
+            .where(eq(paymentIntents.id, waitingQ.paymentIntentId));
+        }
+
+        await db
+          .update(checkoutSessions)
+          .set({ status: 'ESCALATED' })
+          .where(
+            and(
+              eq(checkoutSessions.merchantId, merchant.id),
+              eq(checkoutSessions.externalOrderId, waitingQ.externalOrderId),
+              inArray(checkoutSessions.status, ['OPEN', 'SUBMITTED'])
+            )
+          );
+      }
+
       continue;
     }
 
-    // AUTO-RECONCILIATION LOOP: Check if any order is waiting in verification_queue
-    // Supports baseAmount fallback: msg.amount >= COALESCE(base_amount, expected_amount) - 0.001
+    // Look for waiting queue entry (plus GRACE_PERIOD_EXCEEDED if lateSmsAutoApprove is enabled)
+    const eligibleStatuses = merchant.lateSmsAutoApprove
+      ? (['WAITING_FOR_SMS', 'MANUAL_REVIEW_REQUIRED'] as const)
+      : (['WAITING_FOR_SMS'] as const);
+
     const pendingMatches = await db
       .select()
       .from(verificationQueue)
@@ -136,107 +271,283 @@ export async function ingestDeviceSmsBatch(
         and(
           eq(verificationQueue.merchantId, merchant.id),
           eq(verificationQueue.submittedTrxId, normalizedTrxId),
-          eq(verificationQueue.status, 'WAITING_FOR_SMS'),
-          sql`COALESCE(${verificationQueue.baseAmount}, ${verificationQueue.expectedAmount}) <= ${msg.amount + 0.001}`
+          inArray(verificationQueue.status, [...eligibleStatuses])
         )
       )
+      .orderBy(desc(verificationQueue.createdAt))
       .limit(1);
 
     const pendingQueueRecord = pendingMatches[0];
+    if (!pendingQueueRecord || !ledgerRow) {
+      continue;
+    }
 
-    if (pendingQueueRecord) {
-      const verifiedTime = new Date();
-      const effectiveBaseAmount =
-        pendingQueueRecord.baseAmount ?? pendingQueueRecord.expectedAmount;
-      const effectiveUniqueAmount =
-        pendingQueueRecord.uniqueAmount ?? pendingQueueRecord.expectedAmount;
-      const matchType = computeMatchType(
-        msg.amount,
-        effectiveBaseAmount,
-        effectiveUniqueAmount
-      );
+    if (
+      pendingQueueRecord.status === 'MANUAL_REVIEW_REQUIRED' &&
+      pendingQueueRecord.escalationReason !== 'GRACE_PERIOD_EXCEEDED'
+    ) {
+      continue;
+    }
 
-      // 1. Mark verification_queue as MATCHED
+    const intentRows = pendingQueueRecord.paymentIntentId
+      ? await db
+          .select()
+          .from(paymentIntents)
+          .where(eq(paymentIntents.id, pendingQueueRecord.paymentIntentId))
+          .limit(1)
+      : await db
+          .select()
+          .from(paymentIntents)
+          .where(
+            and(
+              eq(paymentIntents.merchantId, merchant.id),
+              eq(paymentIntents.externalRefId, pendingQueueRecord.externalOrderId)
+            )
+          )
+          .limit(1);
+
+    const intent = intentRows[0];
+    if (intent && intent.verificationMode === 'PURE_MANUAL') {
+      continue;
+    }
+    if (intent && !['WAITING_FOR_SMS', 'MANUAL_REVIEW_REQUIRED'].includes(intent.status)) {
+      continue;
+    }
+
+    const effectiveBaseAmount =
+      intent?.baseAmount ?? pendingQueueRecord.baseAmount ?? pendingQueueRecord.expectedAmount;
+    const effectiveUniqueAmount =
+      intent?.uniqueAmount ?? pendingQueueRecord.uniqueAmount ?? pendingQueueRecord.expectedAmount;
+    const sessionCreatedAt = intent?.createdAt ?? pendingQueueRecord.createdAt;
+    const verifiedTime = new Date();
+
+    const sixFactor = evaluateSixFactors({
+      sms: ledgerRow,
+      merchant,
+      submittedProvider: pendingQueueRecord.provider,
+      submittedSender: pendingQueueRecord.submittedSender,
+      baseAmount: effectiveBaseAmount,
+      uniqueAmount: effectiveUniqueAmount,
+      sessionCreatedAt,
+      now: verifiedTime,
+    });
+
+    if (!sixFactor.ok) {
       await db
         .update(verificationQueue)
-        .set({ status: 'MATCHED' })
+        .set({
+          status: 'MANUAL_REVIEW_REQUIRED',
+          escalationReason: sixFactor.escalationReason,
+          escalatedAt: verifiedTime,
+        })
         .where(eq(verificationQueue.id, pendingQueueRecord.id));
 
-      // 2. Mark sms_ledger as VERIFIED with matchType
-      await db
-        .update(smsLedger)
-        .set({
-          status: 'VERIFIED',
-          matchType,
-          externalOrderId: pendingQueueRecord.externalOrderId,
-          verifiedAt: verifiedTime,
-        })
-        .where(eq(smsLedger.id, ledgerId));
+      if (intent) {
+        await db
+          .update(paymentIntents)
+          .set({
+            status: 'MANUAL_REVIEW_REQUIRED',
+            escalationReason: sixFactor.escalationReason,
+            smsLedgerId: ledgerId,
+            trustFlag: ledgerRow.trustFlag,
+            stateVersion: intent.stateVersion + 1,
+            updatedAt: verifiedTime,
+          })
+          .where(eq(paymentIntents.id, intent.id));
+      }
 
-      // 3. Sync checkout_sessions and merchant_orders
+      await db
+        .update(checkoutSessions)
+        .set({ status: 'ESCALATED' })
+        .where(
+          and(
+            eq(checkoutSessions.merchantId, merchant.id),
+            eq(checkoutSessions.externalOrderId, pendingQueueRecord.externalOrderId),
+            inArray(checkoutSessions.status, ['OPEN', 'SUBMITTED'])
+          )
+        );
+
+      const display = parseDisplayMetadata(
+        intent?.displayJson,
+        merchant.storeName,
+        pendingQueueRecord.externalOrderId
+      );
+      const actions = parseActionsList(intent?.actionsJson);
+
+      safeWaitUntil(
+        ctx,
+        Promise.allSettled([
+          dispatchWebhook(
+            db,
+            merchant,
+            'payment.escalated_manual',
+            {
+              paymentIntentId: intent?.id ?? pendingQueueRecord.paymentIntentId,
+              merchantId: merchant.id,
+              externalRefId: pendingQueueRecord.externalOrderId,
+              externalOrderId: pendingQueueRecord.externalOrderId,
+              provider: msg.provider,
+              trxId: normalizedTrxId,
+              baseAmount: effectiveBaseAmount,
+              uniqueAmount: effectiveUniqueAmount,
+              paidAmount: msg.amount,
+              escalationReason: sixFactor.escalationReason,
+              reason: sixFactor.reason,
+              status: 'MANUAL_REVIEW_REQUIRED',
+              callbackUrl: intent?.callbackUrl,
+              escalatedAt: verifiedTime.getTime(),
+            },
+            1,
+            undefined,
+            intent?.callbackUrl || undefined,
+            env
+          ),
+          sendDynamicPushToMerchantDevices(db, env, merchant, {
+            event: 'payment.escalated_manual',
+            paymentIntentId: intent?.id,
+            externalRefId: pendingQueueRecord.externalOrderId,
+            appName: display.appName || merchant.storeName,
+            appDomain: display.appDomain,
+            category: display.category || intent?.vertical,
+            referenceLabel: display.referenceLabel,
+            title: `Manual Review (${sixFactor.escalationReason})`,
+            subtitle: sixFactor.reason,
+            amountFormatted: `৳${msg.amount}`,
+            provider: msg.provider,
+            paymentStatus: 'MANUAL_REVIEW_REQUIRED',
+            adminDeepLink: display.adminDeepLink,
+            actions,
+          }),
+          sendTelegramOfficeAlert(
+            merchant,
+            `⚠️ Payment Escalated [${display.appName || merchant.storeName}]\nRef: ${pendingQueueRecord.externalOrderId}\nReason: ${sixFactor.escalationReason}\n${sixFactor.reason}`
+          ),
+        ])
+      );
+
+      continue;
+    }
+
+    const isLateAuto = pendingQueueRecord.status === 'MANUAL_REVIEW_REQUIRED';
+    const resolutionSource = isLateAuto ? 'LATE_SMS_AUTO' : 'AUTO_SMS';
+
+    try {
+      const updatedIntent = await executeAtomicVerificationCas(db, {
+        merchantId: merchant.id,
+        smsId: ledgerId,
+        trxId: normalizedTrxId,
+        provider: msg.provider,
+        matchType: sixFactor.matchType,
+        externalRefId: pendingQueueRecord.externalOrderId,
+        paymentIntent: intent ?? null,
+        resolutionSource,
+        submittedSender: pendingQueueRecord.submittedSender,
+        paidAmount: msg.amount,
+        now: verifiedTime,
+      });
+
+      await db
+        .update(verificationQueue)
+        .set({ status: 'MATCHED', resolvedAt: verifiedTime })
+        .where(eq(verificationQueue.id, pendingQueueRecord.id));
+
       await syncVerifiedOrderAndSession(db, {
         merchantId: merchant.id,
         externalOrderId: pendingQueueRecord.externalOrderId,
+        paymentIntentId: intent?.id ?? pendingQueueRecord.paymentIntentId,
         baseAmount: effectiveBaseAmount,
         uniqueAmount: effectiveUniqueAmount,
         paidAmount: msg.amount,
         trxId: normalizedTrxId,
-        matchType,
+        matchType: sixFactor.matchType,
         customerEmail: pendingQueueRecord.customerEmail,
         customerPhone: pendingQueueRecord.submittedSender,
       });
 
-      // 4. Increment SIM wallet monthly volume
       await incrementWalletVolume(db, merchant.id, msg.provider, msg.amount);
 
-      // 5. Asynchronously dispatch storefront HMAC webhook
+      const display = parseDisplayMetadata(
+        intent?.displayJson,
+        merchant.storeName,
+        pendingQueueRecord.externalOrderId
+      );
+      const actions = parseActionsList(intent?.actionsJson);
+
       const webhookPayload = {
+        paymentIntentId: intent?.id ?? pendingQueueRecord.paymentIntentId,
         merchantId: merchant.id,
+        externalRefId: pendingQueueRecord.externalOrderId,
         externalOrderId: pendingQueueRecord.externalOrderId,
+        vertical: intent?.vertical ?? 'ecommerce',
         provider: msg.provider,
         trxId: normalizedTrxId,
         amount: msg.amount,
         baseAmount: effectiveBaseAmount,
         uniqueAmount: effectiveUniqueAmount,
         paidAmount: msg.amount,
-        matchType,
+        matchType: sixFactor.matchType,
         senderNumber: normalizedSender,
+        resolutionSource,
+        stateVersion: updatedIntent?.stateVersion ?? (intent ? intent.stateVersion + 1 : 1),
         status: 'VERIFIED',
+        callbackUrl: intent?.callbackUrl,
         verifiedAt: verifiedTime.getTime(),
       };
 
-      dispatchWebhook(db, merchant, 'payment.verified', webhookPayload).catch((err) => {
-        console.error('[Auto-Reconciliation Webhook Error]:', err);
-      });
+      safeWaitUntil(
+        ctx,
+        Promise.allSettled([
+          dispatchWebhook(
+            db,
+            merchant,
+            'payment.verified',
+            webhookPayload,
+            1,
+            undefined,
+            intent?.callbackUrl || undefined,
+            env
+          ),
+          sendDynamicPushToMerchantDevices(db, env, merchant, {
+            event: 'payment.verified',
+            paymentIntentId: intent?.id,
+            externalRefId: pendingQueueRecord.externalOrderId,
+            appName: display.appName || merchant.storeName,
+            appDomain: display.appDomain,
+            category: display.category || intent?.vertical,
+            referenceLabel: display.referenceLabel,
+            title: isLateAuto ? 'Late SMS Auto-Verified' : 'Auto-Reconciliation Match',
+            subtitle: display.subtitle || `TrxID ${normalizedTrxId}`,
+            amountFormatted: `৳${msg.amount}`,
+            provider: msg.provider,
+            paymentStatus: 'VERIFIED',
+            adminDeepLink: display.adminDeepLink,
+            actions,
+          }),
+          sendTelegramOfficeAlert(
+            merchant,
+            `✅ Reconciled [${display.appName || merchant.storeName}]\nRef: ${pendingQueueRecord.externalOrderId}\nAmount: ৳${msg.amount} (${msg.provider})\nTrxID: ${normalizedTrxId}`
+          ),
+        ])
+      );
 
-      realtimeHub.broadcast('PAYMENT_VERIFIED', {
-        orderId: pendingQueueRecord.externalOrderId,
-        trxId: normalizedTrxId,
-        amount: msg.amount,
-        baseAmount: effectiveBaseAmount,
-        uniqueAmount: effectiveUniqueAmount,
-        matchType,
-        provider: msg.provider,
-      });
-
-      // 6. Notify all registered merchant Android devices via FCM
-      sendPushToMerchantDevices(
-        db,
-        fcmServerKeyOrEnv,
-        merchant,
-        'Auto-Reconciliation Match',
-        `Order #${pendingQueueRecord.externalOrderId} verified (৳${msg.amount} via ${msg.provider})`,
+      realtimeHub.broadcast(
+        'PAYMENT_VERIFIED',
         {
+          paymentIntentId: intent?.id ?? pendingQueueRecord.paymentIntentId,
           orderId: pendingQueueRecord.externalOrderId,
           trxId: normalizedTrxId,
-          status: 'VERIFIED',
-          matchType,
-        }
-      ).catch((err) => {
-        console.warn('[FCM Push Error]:', err);
-      });
+          amount: msg.amount,
+          baseAmount: effectiveBaseAmount,
+          uniqueAmount: effectiveUniqueAmount,
+          matchType: sixFactor.matchType,
+          provider: msg.provider,
+        },
+        merchant.id
+      );
 
       autoVerifiedCount++;
+    } catch (err) {
+      console.warn('[Device Reconciler CAS Skip]:', err);
     }
   }
 
@@ -250,14 +561,17 @@ export async function ingestDeviceSmsBatch(
 /**
  * Computes telemetry and transaction analytics for the device & dashboard.
  */
-export async function getDeviceStats(db: AppDb, merchantId: string): Promise<DeviceStatsResult> {
+export async function getDeviceStats(
+  db: AppDb,
+  merchantId: string,
+  env?: Env
+): Promise<DeviceStatsResult> {
   const merchantRes = await db.select().from(merchants).where(eq(merchants.id, merchantId)).limit(1);
   const merchant = merchantRes[0];
 
   const now = new Date();
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-  // Recent 50 transactions
   const recentTransactions = await db
     .select()
     .from(smsLedger)
@@ -265,7 +579,6 @@ export async function getDeviceStats(db: AppDb, merchantId: string): Promise<Dev
     .orderBy(desc(smsLedger.smsReceivedAt))
     .limit(50);
 
-  // Compute stats via SQL aggregation
   const volumeResult = await db
     .select({
       sumAmount: sql<number>`COALESCE(SUM(${smsLedger.amount}), 0)`,
@@ -285,16 +598,23 @@ export async function getDeviceStats(db: AppDb, merchantId: string): Promise<Dev
       count: sql<number>`COALESCE(COUNT(*), 0)`,
     })
     .from(verificationQueue)
-    .where(and(eq(verificationQueue.merchantId, merchantId), eq(verificationQueue.status, 'WAITING_FOR_SMS')));
+    .where(
+      and(
+        eq(verificationQueue.merchantId, merchantId),
+        inArray(verificationQueue.status, ['WAITING_FOR_SMS', 'MANUAL_REVIEW_REQUIRED'])
+      )
+    );
 
-  const lastSeenMs = merchant?.lastSeenAt ? merchant.lastSeenAt.getTime() : 0;
-  const isOnline = Date.now() - lastSeenMs < 5 * 60 * 1000; // 5-minute online threshold
+  const onlineStatus = merchant
+    ? await computeDeviceOnlineStatus(db, env, merchant)
+    : { online: false, lastSeenAt: null, activeSockets: 0 };
 
   return {
     merchantId,
     storeName: merchant?.storeName || 'ORBIT Store',
-    isOnline,
-    lastSeenAt: merchant?.lastSeenAt || null,
+    isOnline: onlineStatus.online,
+    lastSeenAt: onlineStatus.lastSeenAt,
+    activeSockets: onlineStatus.activeSockets,
     totalVerifiedVolume: Number(volumeResult[0]?.sumAmount || 0),
     verifiedCount: Number(volumeResult[0]?.verifiedCount || 0),
     unclaimedCount: Number(volumeResult[0]?.unclaimedCount || 0),
@@ -365,9 +685,7 @@ export async function listOrdersUpdatedSince(
 }
 
 /**
- * Returns incremental sync payload for the mobile companion polling fallback:
- * newly verified transactions and updated orders since `sinceMs` (default 24h ago),
- * each capped at 100 items, plus pending confirmation count.
+ * Returns incremental sync payload for the mobile companion polling fallback.
  */
 export async function getSyncPayload(
   db: AppDb,

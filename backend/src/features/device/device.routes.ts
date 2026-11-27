@@ -31,7 +31,8 @@ router.post('/ingest', authDeviceMiddleware, async (c) => {
     db,
     merchant,
     input.messages,
-    c.env
+    c.env,
+    c
   );
 
   return c.json({ success: true, data: result });
@@ -45,7 +46,7 @@ router.post('/ingest', authDeviceMiddleware, async (c) => {
 router.get('/stats', authMerchantOrDeviceMiddleware, async (c) => {
   const db = c.get('db');
   const merchantId = c.get('merchantId')!;
-  const stats = await getDeviceStats(db, merchantId);
+  const stats = await getDeviceStats(db, merchantId, c.env);
   return c.json({ success: true, data: stats });
 });
 
@@ -60,14 +61,18 @@ router.post('/heartbeat', authDeviceMiddleware, async (c) => {
   const input = heartbeatSchema.parse(body);
 
   await recordDeviceHeartbeat(db, merchantId, input.fcmToken, c.req.header('x-device-key'), c.env.ENCRYPTION_PEPPER);
-  realtimeHub.broadcast('DEVICE_HEARTBEAT', {
-    merchantId,
-    isOnline: true,
-    lastSeenAt: new Date().toISOString(),
-    fcmEnabled: input.fcmEnabled,
-    smsPermission: input.smsPermission,
-    listenerEnabled: input.listenerEnabled,
-  });
+  realtimeHub.broadcast(
+    'DEVICE_HEARTBEAT',
+    {
+      merchantId,
+      isOnline: true,
+      lastSeenAt: new Date().toISOString(),
+      fcmEnabled: input.fcmEnabled,
+      smsPermission: input.smsPermission,
+      listenerEnabled: input.listenerEnabled,
+    },
+    merchantId
+  );
   return c.json({ success: true, message: 'Heartbeat acknowledged' });
 });
 
@@ -170,7 +175,7 @@ router.post('/orders/:externalOrderId/action', authDeviceMiddleware, async (c) =
   const body = await c.req.json();
   const input = orderActionSchema.parse(body);
 
-  const result = await performOrderAction(db, merchant, externalOrderId, input);
+  const result = await performOrderAction(db, merchant, externalOrderId, input, c.env);
   return c.json({ success: true, data: result });
 });
 

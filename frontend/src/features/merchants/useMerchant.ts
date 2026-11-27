@@ -1,5 +1,18 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { authFetch, getAuthToken, unwrapApiResponse } from '@/shared/utils/api';
+import type { VerificationMode } from '@/features/checkout/useCheckout';
+
+export type MerchantReceiptPolicy =
+  | 'OFFLINE_OPTIONAL'
+  | 'ALWAYS_OPTIONAL'
+  | 'ALWAYS_REQUIRED'
+  | 'DISABLED';
+
+export interface EnabledModulesConfig {
+  ecommerce_fulfillment: boolean;
+  phone_otp: boolean;
+  telegram_alerts: boolean;
+}
 
 export interface MerchantProfile {
   id: string;
@@ -7,17 +20,60 @@ export interface MerchantProfile {
   webhookUrl: string;
   webhookSecret: string;
   gracePeriodMinutes: number;
-  deviceApiKeyHash: string;
+  deviceApiKeyHash?: string;
   fcmToken?: string | null;
   lastSeenAt?: string | null;
   isActive: boolean;
+  verificationMode: VerificationMode;
+  allowBaseAmountFallback: boolean;
+  receiptPolicy: MerchantReceiptPolicy;
+  lateSmsAutoApprove: boolean;
+  enabledModules: EnabledModulesConfig;
+  allowedCallbackOrigins: string[];
+  apiKeyPrefix?: string | null;
+  publishableKey?: string | null;
+  telegramConfigured?: boolean;
+  telegramChatId?: string | null;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface UpdateMerchantSettingsDTO {
   storeName?: string;
   webhookUrl?: string;
   gracePeriodMinutes?: number;
+  verificationMode?: VerificationMode;
+  allowBaseAmountFallback?: boolean;
+  receiptPolicy?: MerchantReceiptPolicy;
+  lateSmsAutoApprove?: boolean;
+  enabledModules?: Partial<EnabledModulesConfig>;
+  allowedCallbackOrigins?: string[];
+  telegramBotToken?: string | null;
+  telegramChatId?: string | null;
+}
+
+export type WebhookDeliveryStatus = 'DELIVERED' | 'FAILED' | 'RETRYING';
+
+export interface WebhookDeliveryView {
+  id: string;
+  merchantId: string;
+  eventType: string;
+  externalOrderId: string;
+  payloadJson: string;
+  attemptCount: number;
+  status: WebhookDeliveryStatus;
+  nextRetryAt?: string | number | null;
+  deliveredAt?: string | number | null;
+  lastAttemptAt?: string | number | null;
+  responseStatus?: number | null;
+  responseBody?: string | null;
+}
+
+export interface MerchantWebhooksResponse {
+  items: WebhookDeliveryView[];
+  total: number;
+  limit: number;
+  offset: number;
 }
 
 export function useMerchant(merchantId?: string) {
@@ -56,7 +112,9 @@ export function useRotateWebhookSecret() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (target: 'WEBHOOK_SECRET' | 'DEVICE_API_KEY' | 'DEVICE_KEY' | 'BOTH' = 'WEBHOOK_SECRET') => {
+    mutationFn: async (
+      target: 'WEBHOOK_SECRET' | 'DEVICE_API_KEY' | 'DEVICE_KEY' | 'API_KEY' | 'BOTH' = 'WEBHOOK_SECRET',
+    ) => {
       const normalizedTarget = target === 'DEVICE_KEY' ? 'DEVICE_API_KEY' : target;
       const res = await authFetch('/api/v1/merchants/keys/rotate', {
         method: 'POST',
@@ -67,6 +125,9 @@ export function useRotateWebhookSecret() {
       const data = await unwrapApiResponse<{
         webhookSecret?: string;
         deviceKey?: string;
+        apiKey?: string;
+        apiKeyPrefix?: string;
+        publishableKey?: string;
         newWebhookSecret?: string;
         newDeviceApiKey?: string;
       }>(res, 'Failed to rotate keys');
@@ -74,6 +135,9 @@ export function useRotateWebhookSecret() {
       return {
         webhookSecret: data.webhookSecret ?? data.newWebhookSecret,
         deviceKey: data.deviceKey ?? data.newDeviceApiKey,
+        apiKey: data.apiKey,
+        apiKeyPrefix: data.apiKeyPrefix,
+        publishableKey: data.publishableKey,
       };
     },
     onSuccess: () => {
@@ -83,18 +147,67 @@ export function useRotateWebhookSecret() {
 }
 
 export function useTestWebhookPing() {
+  const queryClient = useQueryClient();
+
   return useMutation({
-    mutationFn: async (webhookUrl: string) => {
+    mutationFn: async (webhookUrl?: string) => {
       const res = await authFetch('/api/v1/merchants/webhook/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ webhookUrl }),
+        body: JSON.stringify(webhookUrl ? { webhookUrl } : {}),
       });
 
-      return unwrapApiResponse<{ status?: number; message?: string }>(
+      return unwrapApiResponse<{
+        delivered?: boolean;
+        status?: string;
+        responseStatus?: number;
+        message?: string;
+      }>(res, 'Target endpoint failed to acknowledge test ping');
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['merchant-webhooks'] });
+    },
+  });
+}
+
+export function useMerchantWebhooks(status: WebhookDeliveryStatus | 'ALL' = 'ALL') {
+  return useQuery<MerchantWebhooksResponse>({
+    queryKey: ['merchant-webhooks', status],
+    queryFn: async () => {
+      const params = new URLSearchParams({ status, limit: '25', offset: '0' });
+      const res = await authFetch(`/api/v1/merchants/webhooks?${params.toString()}`);
+      const data = await unwrapApiResponse<MerchantWebhooksResponse>(
         res,
-        'Target endpoint failed to acknowledge test ping',
+        'Failed to fetch webhook deliveries',
       );
+      return {
+        items: data.items ?? [],
+        total: Number(data.total ?? data.items?.length ?? 0),
+        limit: Number(data.limit ?? 25),
+        offset: Number(data.offset ?? 0),
+      };
+    },
+    enabled: Boolean(getAuthToken()),
+    staleTime: 10_000,
+  });
+}
+
+export function useReplayMerchantWebhook() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (deliveryId: string) => {
+      const res = await authFetch(
+        `/api/v1/merchants/webhooks/${encodeURIComponent(deliveryId)}/replay`,
+        { method: 'POST' },
+      );
+      return unwrapApiResponse<{ status?: string; responseStatus?: number }>(
+        res,
+        'Failed to replay webhook delivery',
+      );
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['merchant-webhooks'] });
     },
   });
 }

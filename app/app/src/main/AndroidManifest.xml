@@ -124,6 +124,16 @@
             android:name=".update.UpdateInstallReceiver"
             android:exported="false" />
 
+        <!-- Notification Inline Action Receiver (Dynamic Webhook Actions & Approve/Reject) -->
+        <receiver
+            android:name=".service.PaymentActionReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.orbitsaas.payment.action.TRIGGER_DYNAMIC_PAYMENT_ACTION" />
+                <action android:name="com.orbitsaas.payment.action.RESOLVE_PAYMENT_INTENT" />
+            </intent-filter>
+        </receiver>
+
     </application>
 
 </manifest>

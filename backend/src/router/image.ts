@@ -1,8 +1,14 @@
 import { eq } from 'drizzle-orm';
 import type { AppDb } from '../db/client';
 import { mediaAssets } from '../db/schema';
-import { bufferToHex, generateSecureToken, toExactArrayBuffer } from '../shared/crypto';
-import { BadRequestError, NotFoundError } from '../shared/errors';
+import {
+  bufferToHex,
+  generateSecureToken,
+  signHmacSha256,
+  toExactArrayBuffer,
+  verifyHmacSha256,
+} from '../shared/crypto';
+import { BadRequestError, ForbiddenError, NotFoundError } from '../shared/errors';
 import type { Env } from '../shared/types';
 import {
   buildChannelCapabilities,
@@ -34,6 +40,13 @@ const ALLOWED_IMAGE_MIME_TYPES = new Set([
   'image/svg+xml',
 ]);
 
+const STRICT_PROOF_MIME_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/jpg',
+  'image/webp',
+]);
+
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024; // 5 MB ceiling on edge
 const MAX_D1_FALLBACK_BYTES = 900 * 1024; // ~900 KB safety ceiling for D1 inline base64 rows
 
@@ -43,6 +56,8 @@ export interface ImageUploadInput {
   bytes: Uint8Array;
   merchantId?: string;
   preferredProvider?: ImageProviderId;
+  strictPaymentProof?: boolean;
+  storageKeyPrefix?: string;
 }
 
 export interface ImageUploadResult {
@@ -58,8 +73,10 @@ export interface ImageUploadResult {
 
 export interface ImageDownloadResult {
   assetId: string;
+  merchantId: string | null;
   fileName: string;
   mimeType: string;
+  storageKey: string;
   bytes: Uint8Array;
   providerUsed: string;
   fallbackTriggered: boolean;
@@ -82,6 +99,91 @@ interface NormalizedImageUpload {
   sizeBytes: number;
   sha256: string;
   db: AppDb;
+}
+
+/**
+ * Validates raw file magic bytes against declared MIME type to prevent polyglot/XSS uploads.
+ */
+export function validateImageMagicBytes(bytes: Uint8Array, mimeType: string): boolean {
+  const normalized = mimeType.toLowerCase().trim();
+  if (bytes.byteLength < 3) return false;
+
+  if (normalized === 'image/png') {
+    return (
+      bytes.byteLength >= 8 &&
+      bytes[0] === 0x89 &&
+      bytes[1] === 0x50 &&
+      bytes[2] === 0x4e &&
+      bytes[3] === 0x47 &&
+      bytes[4] === 0x0d &&
+      bytes[5] === 0x0a &&
+      bytes[6] === 0x1a &&
+      bytes[7] === 0x0a
+    );
+  }
+
+  if (normalized === 'image/jpeg' || normalized === 'image/jpg') {
+    return bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  }
+
+  if (normalized === 'image/webp') {
+    return (
+      bytes.byteLength >= 12 &&
+      bytes[0] === 0x52 &&
+      bytes[1] === 0x49 &&
+      bytes[2] === 0x46 &&
+      bytes[3] === 0x46 &&
+      bytes[8] === 0x57 &&
+      bytes[9] === 0x45 &&
+      bytes[10] === 0x42 &&
+      bytes[11] === 0x50
+    );
+  }
+
+  if (normalized === 'image/gif') {
+    if (bytes.byteLength < 6) return false;
+    const header = String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5]);
+    return header === 'GIF87a' || header === 'GIF89a';
+  }
+
+  if (normalized === 'image/svg+xml') {
+    const sample = new TextDecoder().decode(bytes.subarray(0, Math.min(bytes.byteLength, 256))).trimStart();
+    return sample.startsWith('<svg') || sample.startsWith('<?xml');
+  }
+
+  return false;
+}
+
+/**
+ * Signs a time-limited HMAC token authorizing read access to a private payment proof asset.
+ */
+export async function signProofAssetToken(
+  assetId: string,
+  secret: string,
+  ttlSeconds = 30 * 24 * 3600
+): Promise<string> {
+  const exp = Date.now() + ttlSeconds * 1000;
+  const sig = await signHmacSha256(`${assetId}:${exp}`, secret);
+  return `${exp}.${sig}`;
+}
+
+/**
+ * Verifies an HMAC token for private payment proof asset reads.
+ */
+export async function verifyProofAssetToken(
+  assetId: string,
+  token: string,
+  secret: string
+): Promise<boolean> {
+  const dotIdx = token.indexOf('.');
+  if (dotIdx <= 0) return false;
+  const expStr = token.slice(0, dotIdx);
+  const sig = token.slice(dotIdx + 1);
+  const exp = Number(expStr);
+  if (!Number.isFinite(exp) || Date.now() > exp || !sig) {
+    return false;
+  }
+  return verifyHmacSha256(`${assetId}:${expStr}`, sig, secret);
 }
 
 function uint8ToBase64(bytes: Uint8Array): string {
@@ -307,8 +409,8 @@ const IMAGE_UPLOAD_ADAPTERS: Record<
 
 /**
  * Unified Image Upload Router
- * Validates image safety on the backend and routes uploads through configured storage backends:
- * R2 -> ImgBB -> Supabase -> MongoDB -> D1.
+ * Validates image MIME type + magic bytes on the backend and routes uploads through configured storage backends.
+ * In `strictPaymentProof` mode, SVG/GIF are rejected and storage is restricted strictly to private ['r2', 'd1'].
  */
 export async function routeImageUpload(
   env: Env,
@@ -317,7 +419,15 @@ export async function routeImageUpload(
   callerId?: string
 ): Promise<RouterDispatchResponse<ImageUploadResult>> {
   const mimeType = input.mimeType.toLowerCase().trim();
-  if (!ALLOWED_IMAGE_MIME_TYPES.has(mimeType)) {
+  const isProof = Boolean(input.strictPaymentProof);
+
+  if (isProof) {
+    if (!STRICT_PROOF_MIME_TYPES.has(mimeType)) {
+      throw new BadRequestError(
+        `Payment proof uploads only allow PNG, JPEG, or WEBP images (got '${mimeType}')`
+      );
+    }
+  } else if (!ALLOWED_IMAGE_MIME_TYPES.has(mimeType)) {
     throw new BadRequestError(`Unsupported image MIME type '${mimeType}'`);
   }
 
@@ -325,9 +435,14 @@ export async function routeImageUpload(
     throw new BadRequestError(`Image size must be between 1 byte and ${MAX_UPLOAD_BYTES} bytes`);
   }
 
+  if (!validateImageMagicBytes(input.bytes, mimeType)) {
+    throw new BadRequestError(`Image file signature (magic bytes) does not match '${mimeType}'`);
+  }
+
   const assetId = `img_${generateSecureToken(16)}`;
   const cleanName = sanitizeFileName(input.fileName);
-  const storageKey = `assets/${assetId}_${cleanName}`;
+  const rawPrefix = (input.storageKeyPrefix || (isProof ? 'proofs' : 'assets')).replace(/^\/+|\/+$/g, '');
+  const storageKey = `${rawPrefix}/${assetId}_${cleanName}`;
   const sha256 = await computeSha256Hex(input.bytes);
   const base64 = uint8ToBase64(input.bytes);
 
@@ -343,11 +458,13 @@ export async function routeImageUpload(
     db,
   };
 
-  const priorityOrder = resolveProviderOrder(
-    env.IMAGE_PROVIDER_ORDER,
-    DEFAULT_IMAGE_PROVIDERS,
-    input.preferredProvider
-  );
+  const priorityOrder: ImageProviderId[] = isProof
+    ? ['r2', 'd1']
+    : resolveProviderOrder(
+        env.IMAGE_PROVIDER_ORDER,
+        DEFAULT_IMAGE_PROVIDERS,
+        input.preferredProvider
+      );
 
   const dispatch = await executeWithFallback({
     channel: 'image',
@@ -467,6 +584,18 @@ async function fetchLocationBytes(
 }
 
 /**
+ * Fetches media asset metadata row from D1.
+ */
+export async function getMediaAssetRecord(db: AppDb, assetId: string) {
+  const rows = await db.select().from(mediaAssets).where(eq(mediaAssets.id, assetId)).limit(1);
+  const asset = rows[0];
+  if (!asset) {
+    throw new NotFoundError(`Image asset '${assetId}' not found`);
+  }
+  return asset;
+}
+
+/**
  * Unified Image Download Router
  * Resolves an opaque asset ID from the D1 registry and loads bytes from the primary
  * backend, cascading across fallback locations (and inline D1 blob) if primary fails.
@@ -476,11 +605,7 @@ export async function routeImageDownload(
   db: AppDb,
   assetId: string
 ): Promise<ImageDownloadResult> {
-  const rows = await db.select().from(mediaAssets).where(eq(mediaAssets.id, assetId)).limit(1);
-  const asset = rows[0];
-  if (!asset) {
-    throw new NotFoundError(`Image asset '${assetId}' not found`);
-  }
+  const asset = await getMediaAssetRecord(db, assetId);
 
   const locations: StoredLocation[] = [];
   locations.push({
@@ -517,8 +642,10 @@ export async function routeImageDownload(
         attempts.push({ provider: loc.provider, ok: true, statusCode: 200, latencyMs });
         return {
           assetId: asset.id,
+          merchantId: asset.merchantId ?? null,
           fileName: asset.fileName,
           mimeType: asset.mimeType,
+          storageKey: asset.storageKey,
           bytes,
           providerUsed: loc.provider,
           fallbackTriggered: i > 0,
@@ -548,12 +675,13 @@ export async function routeImageDownload(
 export async function routeImageDelete(
   env: Env,
   db: AppDb,
-  assetId: string
+  assetId: string,
+  callerId?: string
 ): Promise<{ deleted: boolean; assetId: string }> {
-  const rows = await db.select().from(mediaAssets).where(eq(mediaAssets.id, assetId)).limit(1);
-  const asset = rows[0];
-  if (!asset) {
-    throw new NotFoundError(`Image asset '${assetId}' not found`);
+  const asset = await getMediaAssetRecord(db, assetId);
+
+  if (callerId && callerId !== 'master_admin' && asset.merchantId !== callerId) {
+    throw new ForbiddenError('Cannot delete an image asset owned by another merchant');
   }
 
   if (asset.primaryProvider === 'r2' && env.R2_BUCKET) {

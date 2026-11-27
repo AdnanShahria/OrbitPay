@@ -1,6 +1,7 @@
 package com.orbitsaas.payment.ui
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -49,6 +50,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.orbitsaas.payment.R
+import com.orbitsaas.payment.service.DynamicPushDispatcher
 import com.orbitsaas.payment.service.StickyForegroundService
 import com.orbitsaas.payment.ui.diagnostics.DiagnosticsScreen
 import com.orbitsaas.payment.ui.history.HistoryScreen
@@ -75,6 +77,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
 
         checkEssentialPermissions()
+        handleIncomingNotificationIntent(intent)
 
         setContent {
             val uiState by viewModel.uiState.collectAsState()
@@ -92,17 +95,33 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIncomingNotificationIntent(intent)
+    }
+
     override fun onResume() {
         super.onResume()
         checkAndStartForegroundService()
         viewModel.refreshStatsFromServer()
         viewModel.refreshOrders()
+        viewModel.refreshPaymentIntents()
         lifecycleScope.launch {
             AppUpdateManager.checkForUpdates(
                 context = this@MainActivity,
                 userInitiated = false,
                 autoDownload = true
             )
+        }
+    }
+
+    private fun handleIncomingNotificationIntent(intent: Intent?) {
+        if (intent == null) return
+        val paymentIntentId = intent.getStringExtra(DynamicPushDispatcher.EXTRA_PAYMENT_INTENT_ID)
+        val externalRefId = intent.getStringExtra(DynamicPushDispatcher.EXTRA_EXTERNAL_REF_ID)
+        if (!paymentIntentId.isNullOrBlank() || !externalRefId.isNullOrBlank()) {
+            viewModel.handleDeepLinkNotification(paymentIntentId, externalRefId)
         }
     }
 
@@ -209,6 +228,19 @@ fun OrbitPaymentApp(
         }
     }
 
+    LaunchedEffect(uiState.isLoggedIn, uiState.focusedPaymentIntentId) {
+        if (uiState.isLoggedIn && !uiState.focusedPaymentIntentId.isNullOrBlank()) {
+            val activeRoute = navController.currentBackStackEntry?.destination?.route
+            if (activeRoute != Screen.Dashboard.route) {
+                navController.navigate(Screen.Dashboard.route) {
+                    popUpTo(Screen.Dashboard.route) { saveState = true }
+                    launchSingleTop = true
+                    restoreState = true
+                }
+            }
+        }
+    }
+
     val navigateTopLevel: (String) -> Unit = { route ->
         navController.navigate(route) {
             popUpTo(Screen.Dashboard.route) {
@@ -293,7 +325,15 @@ fun OrbitPaymentApp(
                     onOrderAction = { externalOrderId, action ->
                         viewModel.performOrderAction(externalOrderId, action)
                     },
-                    onRefreshOrders = { viewModel.refreshOrders() }
+                    onRefreshOrders = { viewModel.refreshOrders() },
+                    onResolveIntent = { intentId, decision, expectedStateVersion, reason ->
+                        viewModel.resolvePaymentIntent(intentId, decision, expectedStateVersion, reason)
+                    },
+                    onTriggerIntentAction = { intentId, actionId, actionLabel ->
+                        viewModel.triggerPaymentIntentAction(intentId, actionId, actionLabel)
+                    },
+                    onRefreshIntents = { viewModel.refreshPaymentIntents() },
+                    onClearFocusedIntent = { viewModel.clearFocusedPaymentIntent() }
                 )
             }
 

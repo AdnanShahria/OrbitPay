@@ -32,6 +32,9 @@ local.properties
 .dev.vars
 .dev.vars.*
 !.dev.vars.example
+google-services.json
+*-firebase-adminsdk-*.json
+keystore.properties
 
 # Codebase Memory
 .codebase-memory/artifact.json

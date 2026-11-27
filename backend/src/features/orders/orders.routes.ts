@@ -9,13 +9,17 @@ import {
   listOrdersQuerySchema,
   orderActionSchema,
 } from './orders.schema';
-import { notifyOrder, listOrders, performOrderAction } from './orders.service';
+import {
+  getOrderByExternalId,
+  listOrders,
+  notifyOrder,
+  performOrderAction,
+} from './orders.service';
 
 const router = new Hono<AppContextEnv>();
 
 /**
  * POST /api/v1/orders/notify
- * Storefront-initiated order notification (MFS, COD, Card, Bank Transfer, Other).
  */
 router.post('/notify', authMerchantMiddleware, async (c) => {
   const db = c.get('db');
@@ -29,7 +33,6 @@ router.post('/notify', authMerchantMiddleware, async (c) => {
 
 /**
  * GET /api/v1/orders
- * Lists synchronized orders for Merchant Dashboard (JWT/Secret) or Android Companion (Device Key/JWT).
  */
 router.get('/', authMerchantOrDeviceMiddleware, async (c) => {
   const db = c.get('db');
@@ -41,8 +44,19 @@ router.get('/', authMerchantOrDeviceMiddleware, async (c) => {
 });
 
 /**
+ * GET /api/v1/orders/:externalOrderId
+ */
+router.get('/:externalOrderId', authMerchantOrDeviceMiddleware, async (c) => {
+  const db = c.get('db');
+  const merchantId = c.get('merchantId')!;
+  const externalOrderId = c.req.param('externalOrderId');
+
+  const result = await getOrderByExternalId(db, merchantId, externalOrderId);
+  return c.json({ success: true, data: result });
+});
+
+/**
  * POST /api/v1/orders/:externalOrderId/action
- * Performs merchant confirmation/fulfillment actions and dispatches signed webhook back to storefront.
  */
 router.post('/:externalOrderId/action', authMerchantOrDeviceMiddleware, async (c) => {
   const db = c.get('db');
@@ -51,7 +65,7 @@ router.post('/:externalOrderId/action', authMerchantOrDeviceMiddleware, async (c
   const body = await c.req.json();
   const input = orderActionSchema.parse(body);
 
-  const result = await performOrderAction(db, merchant, externalOrderId, input);
+  const result = await performOrderAction(db, merchant, externalOrderId, input, c.env);
   return c.json({ success: true, data: result });
 });
 

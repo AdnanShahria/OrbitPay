@@ -1,9 +1,9 @@
 import { useCheckout, CheckoutConfig } from './useCheckout';
 import { CheckoutStepper } from './CheckoutStepper';
 import { PollingStatus } from './PollingStatus';
+import { CheckoutDisplayHeader } from './CheckoutDisplayHeader';
 import { Modal, ModalHeader, ModalBody } from '@/components/base/modal/modal';
-import { formatBDT } from '@/shared/utils/format';
-import { RiLock2Line, RiShieldCheckLine } from '@remixicon/react';
+import { RiShieldCheckLine } from '@remixicon/react';
 
 export interface CheckoutModalProps {
   isOpen: boolean;
@@ -14,6 +14,7 @@ export interface CheckoutModalProps {
 export function CheckoutModal({ isOpen, onClose, config }: CheckoutModalProps) {
   const {
     currentStep,
+    preferredStepperStep,
     selectedProvider,
     setSelectedProvider,
     activeWallet,
@@ -24,21 +25,45 @@ export function CheckoutModal({ isOpen, onClose, config }: CheckoutModalProps) {
     setPaidAmount,
     trxId,
     setTrxId,
+    sessionToken,
+    merchantId,
+    orderId,
+    storeName,
+    vertical,
     baseAmount,
     uniqueAmount,
     offsetCents,
+    expiresAt,
+    graceExpiresAt,
+    returnUrl,
+    cancelUrl,
+    verificationMode,
+    receiptPolicy,
+    deviceStatus,
+    display,
+    pollingStatus,
+    escalationReason,
+    submitAttempts,
+    maxSubmitAttempts,
+    receiptUrl,
+    receiptUploadCount,
+    receiptMaxUploads,
+    isUploadingReceipt,
+    receiptError,
     isSessionLoading,
     isSubmitting,
     errorMessage,
     verifiedData,
+    uploadReceipt,
     submitPayment,
+    editSubmission,
     markVerified,
+    handlePollStateChange,
+    emitClose,
   } = useCheckout(config);
 
   const handleClose = () => {
-    if (window.parent && window.parent !== window) {
-      window.parent.postMessage({ event: 'checkout.close', orderId: config.orderId }, '*');
-    }
+    emitClose();
     onClose();
   };
 
@@ -51,32 +76,18 @@ export function CheckoutModal({ isOpen, onClose, config }: CheckoutModalProps) {
     >
       <ModalHeader
         title={
-          <span className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pe-2">
-            <span className="flex items-center gap-2.5 min-w-0">
-              <span className="size-9 rounded-2lg bg-background-secondary-default border border-border-button-default text-foreground-icon-primary flex items-center justify-center shrink-0">
-                <RiLock2Line className="size-4" aria-hidden />
-              </span>
-              <span className="min-w-0">
-                <span className="text-body-medium text-text-primary block truncate">
-                  {config.storeName || 'ORBIT Secure Checkout'}
-                </span>
-                <span className="text-caption-2-medium text-text-tertiary font-mono block">
-                  Order #{config.orderId}
-                </span>
-              </span>
-            </span>
-
-            <span className="flex flex-col sm:items-end self-start sm:self-center">
-              <span className="text-title-2-medium text-text-primary font-mono tabular-nums tnum">
-                {formatBDT(uniqueAmount)}
-              </span>
-              {offsetCents > 0 && (
-                <span className="text-caption-2-medium text-text-tertiary tabular-nums">
-                  Base {formatBDT(baseAmount)} + {formatBDT(offsetCents / 100)} code
-                </span>
-              )}
-            </span>
-          </span>
+          <div className="pe-2">
+            <CheckoutDisplayHeader
+              storeName={storeName}
+              orderId={orderId || config.orderId || ''}
+              vertical={vertical}
+              display={display}
+              baseAmount={baseAmount}
+              uniqueAmount={uniqueAmount}
+              offsetCents={offsetCents}
+              isSessionLoading={isSessionLoading}
+            />
+          </div>
         }
       />
 
@@ -84,23 +95,35 @@ export function CheckoutModal({ isOpen, onClose, config }: CheckoutModalProps) {
         <div className="w-full">
           {currentStep === 'POLLING' || currentStep === 'SUCCESS' ? (
             <PollingStatus
-              orderId={config.orderId}
+              orderId={orderId || config.orderId || ''}
               expectedAmount={verifiedData?.amount ?? (Number(paidAmount) || uniqueAmount)}
               provider={selectedProvider}
               trxId={verifiedData?.trxId || trxId}
               senderNumber={senderNumber}
-              merchantId={config.merchantId}
+              merchantId={merchantId}
               initialVerified={currentStep === 'SUCCESS'}
               initialMatchType={verifiedData?.matchType ?? null}
+              initialStatus={pollingStatus}
+              initialEscalationReason={escalationReason}
+              receiptUrl={receiptUrl}
+              returnUrl={returnUrl}
+              cancelUrl={cancelUrl}
+              graceExpiresAt={graceExpiresAt}
+              submitAttempts={submitAttempts}
+              maxSubmitAttempts={maxSubmitAttempts}
+              onEditSubmission={editSubmission}
+              onStatusChange={handlePollStateChange}
               onVerified={markVerified}
               onClose={handleClose}
             />
           ) : (
             <CheckoutStepper
+              initialStep={preferredStepperStep}
               baseAmount={baseAmount}
               uniqueAmount={uniqueAmount}
               offsetCents={offsetCents}
-              orderId={config.orderId}
+              orderId={orderId || config.orderId || ''}
+              expiresAt={expiresAt}
               selectedProvider={selectedProvider}
               onSelectProvider={setSelectedProvider}
               activeWallet={activeWallet}
@@ -111,6 +134,18 @@ export function CheckoutModal({ isOpen, onClose, config }: CheckoutModalProps) {
               onChangePaidAmount={setPaidAmount}
               trxId={trxId}
               onChangeTrxId={setTrxId}
+              verificationMode={verificationMode}
+              receiptPolicy={receiptPolicy}
+              deviceStatus={deviceStatus}
+              sessionToken={sessionToken}
+              receiptUrl={receiptUrl}
+              receiptUploadCount={receiptUploadCount}
+              receiptMaxUploads={receiptMaxUploads}
+              isUploadingReceipt={isUploadingReceipt}
+              receiptError={receiptError}
+              onUploadReceipt={uploadReceipt}
+              submitAttempts={submitAttempts}
+              maxSubmitAttempts={maxSubmitAttempts}
               onSubmit={submitPayment}
               isSubmitting={isSubmitting}
               isSessionLoading={isSessionLoading}

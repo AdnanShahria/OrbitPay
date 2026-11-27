@@ -3,8 +3,8 @@ import { ZodError } from 'zod';
 import { eq, and, isNull, gt } from 'drizzle-orm';
 import { getDb, type AppDb } from '../db/client';
 import { merchants, merchantUsers, authSessions, merchantDevices } from '../db/schema';
-import { hashDeviceApiKey, timingSafeEqual, verifyJwt } from './crypto';
-import { AppError, UnauthorizedError, ValidationError } from './errors';
+import { hashDeviceApiKey, hashSha256, timingSafeEqual, verifyJwt } from './crypto';
+import { AppError, ForbiddenError, UnauthorizedError } from './errors';
 import type { AppContextEnv, Env } from './types';
 
 export interface OrbitJwtClaims extends Record<string, unknown> {
@@ -20,9 +20,27 @@ export interface OrbitJwtClaims extends Record<string, unknown> {
 
 /**
  * Resolves the HMAC secret used to sign & verify Orbit JWTs.
+ * Fails closed in production if no secret is configured.
  */
 export function resolveJwtSecret(env: Env): string {
-  return env.JWT_SECRET || env.ENCRYPTION_PEPPER || env.MASTER_ADMIN_KEY || 'orbit_dev_jwt_secret_2026';
+  const configured =
+    env.JWT_SECRET?.trim() ||
+    env.ENCRYPTION_PEPPER?.trim() ||
+    env.MASTER_ADMIN_KEY?.trim();
+
+  if (configured) {
+    return configured;
+  }
+
+  if (env.ENVIRONMENT === 'production') {
+    throw new AppError(
+      'JWT_SECRET (or ENCRYPTION_PEPPER / MASTER_ADMIN_KEY) is not configured in production',
+      500,
+      'JWT_NOT_CONFIGURED'
+    );
+  }
+
+  return 'orbit_dev_jwt_secret_2026';
 }
 
 /**
@@ -36,10 +54,34 @@ export function resolveMasterAdminKey(env: Env): string | undefined {
 }
 
 /**
+ * Safely schedules a background promise on Cloudflare Worker ExecutionContext.waitUntil(),
+ * falling back to detached promise execution with error logging in non-Worker runtimes.
+ */
+export function safeWaitUntil(
+  c: Context<AppContextEnv> | undefined,
+  promise: Promise<unknown>
+): void {
+  const guarded = promise.catch((err) => {
+    console.error('[Background Task Error]:', err);
+  });
+
+  try {
+    if (c && typeof c.executionCtx?.waitUntil === 'function') {
+      c.executionCtx.waitUntil(guarded);
+      return;
+    }
+  } catch {
+    // c.executionCtx throws outside Workers fetch lifecycle (e.g. unit tests)
+  }
+
+  void guarded;
+}
+
+/**
  * Verifies a 3-segment Bearer JWT, ensures the auth_sessions row is active and unrevoked,
  * and loads the active merchant + user context onto Hono variables.
  */
-async function authenticateJwtSession(
+export async function authenticateJwtSession(
   c: Context<AppContextEnv>,
   db: AppDb,
   token: string,
@@ -99,6 +141,7 @@ async function authenticateJwtSession(
   c.set('userId', userRes[0].id);
   c.set('sessionId', sessionRes[0].id);
   c.set('userRole', userRes[0].role);
+  c.set('authType', 'jwt');
 }
 
 /**
@@ -125,29 +168,56 @@ export const dbMiddleware: MiddlewareHandler<AppContextEnv> = async (c, next) =>
 
 /**
  * Merchant Authentication Middleware
- * Accepts EITHER:
- * - X-Merchant-Secret header (or Authorization: Bearer <webhookSecret>)
+ * Accepts:
  * - Authorization: Bearer <jwt> (3 dot-separated segments, checked against auth_sessions)
+ * - X-Merchant-Api-Key (sk_live_... SHA-256 hashed lookup against merchants.apiKeyHash)
+ * - X-Merchant-Secret header (or Authorization: Bearer <webhookSecret>)
  */
 export const authMerchantMiddleware: MiddlewareHandler<AppContextEnv> = async (c, next) => {
   const db = c.get('db') || getDb(c.env.DB);
-  const secretHeader = c.req.header('x-merchant-secret');
+  const apiKeyHeader = c.req.header('x-merchant-api-key')?.trim();
+  const secretHeader = c.req.header('x-merchant-secret')?.trim();
   const bearerToken = extractBearerToken(c.req.header('authorization'));
-  const merchantIdHeader = c.req.header('x-merchant-id');
+  const merchantIdHeader = c.req.header('x-merchant-id')?.trim();
 
-  // Prefer Bearer JWT when no X-Merchant-Secret is given and Bearer has 3 JWT segments
-  if (!secretHeader && bearerToken && bearerToken.split('.').length === 3) {
+  // 1. Bearer JWT when no API key or webhook secret header is given
+  if (!apiKeyHeader && !secretHeader && bearerToken && bearerToken.split('.').length === 3) {
     await authenticateJwtSession(c, db, bearerToken, merchantIdHeader);
     await next();
     return;
   }
 
-  const secret = secretHeader || bearerToken;
-  if (!secret) {
-    throw new UnauthorizedError('Missing merchant credentials (X-Merchant-Secret or Authorization: Bearer)');
+  // 2. X-Merchant-Api-Key (or Bearer sk_live_...)
+  const candidateApiKey =
+    apiKeyHeader || (bearerToken && bearerToken.startsWith('sk_live_') ? bearerToken : undefined);
+
+  if (candidateApiKey) {
+    const apiKeyHash = await hashSha256(candidateApiKey);
+    const apiConditions = merchantIdHeader
+      ? and(eq(merchants.id, merchantIdHeader), eq(merchants.apiKeyHash, apiKeyHash), eq(merchants.isActive, true))
+      : and(eq(merchants.apiKeyHash, apiKeyHash), eq(merchants.isActive, true));
+
+    const results = await db.select().from(merchants).where(apiConditions).limit(1);
+    const merchant = results[0];
+    if (!merchant) {
+      throw new UnauthorizedError('Invalid merchant API key or merchant is inactive');
+    }
+
+    c.set('merchant', merchant);
+    c.set('merchantId', merchant.id);
+    c.set('authType', 'api_key');
+    await next();
+    return;
   }
 
-  // Fallback to webhookSecret check
+  // 3. Fallback to X-Merchant-Secret / Bearer webhookSecret
+  const secret = secretHeader || bearerToken;
+  if (!secret) {
+    throw new UnauthorizedError(
+      'Missing merchant credentials (X-Merchant-Api-Key, X-Merchant-Secret, or Authorization: Bearer)'
+    );
+  }
+
   const conditions = merchantIdHeader
     ? and(eq(merchants.id, merchantIdHeader), eq(merchants.webhookSecret, secret), eq(merchants.isActive, true))
     : and(eq(merchants.webhookSecret, secret), eq(merchants.isActive, true));
@@ -161,35 +231,39 @@ export const authMerchantMiddleware: MiddlewareHandler<AppContextEnv> = async (c
 
   c.set('merchant', merchant);
   c.set('merchantId', merchant.id);
+  c.set('authType', 'webhook_secret');
   await next();
 };
 
 /**
  * Android Device Companion Authentication Middleware
  * Accepts EITHER:
- * - Authorization: Bearer <jwt> (3 segments, checked against auth_sessions so session revocation is enforced)
+ * - Authorization: Bearer <jwt> (3 segments, checked against auth_sessions)
  * - X-Device-Key (checked against merchant_devices.device_key_hash first, falling back to merchants.device_api_key_hash)
+ * Updates BOTH merchant_devices.last_seen_at and merchants.last_seen_at on every authenticated device request.
  */
 export const authDeviceMiddleware: MiddlewareHandler<AppContextEnv> = async (c, next) => {
   const db = c.get('db') || getDb(c.env.DB);
   const deviceKey = c.req.header('x-device-key')?.trim();
   const bearerToken = extractBearerToken(c.req.header('authorization'));
   const merchantIdHeader = c.req.header('x-merchant-id')?.trim();
+  const now = new Date();
 
-  // When a Bearer JWT is present, always enforce session & user validity first so
-  // admin session revocations, password resets, and user deactivations take effect immediately.
   if (bearerToken && bearerToken.split('.').length === 3) {
     await authenticateJwtSession(c, db, bearerToken, merchantIdHeader);
+    const merchantId = c.get('merchantId')!;
+
+    await db.update(merchants).set({ lastSeenAt: now }).where(eq(merchants.id, merchantId));
 
     if (deviceKey) {
       const pepper = c.env.ENCRYPTION_PEPPER || '';
       const keyHash = await hashDeviceApiKey(deviceKey, pepper);
       await db
         .update(merchantDevices)
-        .set({ lastSeenAt: new Date() })
+        .set({ lastSeenAt: now })
         .where(
           and(
-            eq(merchantDevices.merchantId, c.get('merchantId')!),
+            eq(merchantDevices.merchantId, merchantId),
             eq(merchantDevices.deviceKeyHash, keyHash),
             eq(merchantDevices.isActive, true)
           )
@@ -204,7 +278,6 @@ export const authDeviceMiddleware: MiddlewareHandler<AppContextEnv> = async (c, 
     const pepper = c.env.ENCRYPTION_PEPPER || '';
     const keyHash = await hashDeviceApiKey(deviceKey, pepper);
 
-    // 1. Check per-device key in merchant_devices first
     const deviceConditions = merchantIdHeader
       ? and(
           eq(merchantDevices.merchantId, merchantIdHeader),
@@ -228,13 +301,14 @@ export const authDeviceMiddleware: MiddlewareHandler<AppContextEnv> = async (c, 
         throw new UnauthorizedError('Merchant is inactive or not found');
       }
 
-      await db
-        .update(merchantDevices)
-        .set({ lastSeenAt: new Date() })
-        .where(eq(merchantDevices.id, device.id));
+      await Promise.all([
+        db.update(merchantDevices).set({ lastSeenAt: now }).where(eq(merchantDevices.id, device.id)),
+        db.update(merchants).set({ lastSeenAt: now }).where(eq(merchants.id, merchant.id)),
+      ]);
 
       c.set('merchant', merchant);
       c.set('merchantId', merchant.id);
+      c.set('authType', 'device');
       if (device.userId) {
         c.set('userId', device.userId);
       }
@@ -242,7 +316,7 @@ export const authDeviceMiddleware: MiddlewareHandler<AppContextEnv> = async (c, 
       return;
     }
 
-    // 2. Fallback to legacy merchants.device_api_key_hash
+    // Fallback to legacy merchants.device_api_key_hash
     const merchantConditions = merchantIdHeader
       ? and(
           eq(merchants.id, merchantIdHeader),
@@ -258,8 +332,11 @@ export const authDeviceMiddleware: MiddlewareHandler<AppContextEnv> = async (c, 
       throw new UnauthorizedError('Invalid device API key or merchant is inactive');
     }
 
+    await db.update(merchants).set({ lastSeenAt: now }).where(eq(merchants.id, merchant.id));
+
     c.set('merchant', merchant);
     c.set('merchantId', merchant.id);
+    c.set('authType', 'device');
     await next();
     return;
   }
@@ -268,7 +345,7 @@ export const authDeviceMiddleware: MiddlewareHandler<AppContextEnv> = async (c, 
 };
 
 /**
- * Combined Middleware accepting either Merchant Auth (Secret / JWT) or Device Auth (X-Device-Key / JWT).
+ * Combined Middleware accepting either Merchant Auth (API Key / Secret / JWT) or Device Auth (X-Device-Key / JWT).
  */
 export const authMerchantOrDeviceMiddleware: MiddlewareHandler<AppContextEnv> = async (c, next) => {
   const bearerToken = extractBearerToken(c.req.header('authorization'));
@@ -280,11 +357,26 @@ export const authMerchantOrDeviceMiddleware: MiddlewareHandler<AppContextEnv> = 
 };
 
 /**
+ * Blocks MERCHANT_STAFF (and device keys) from owner-only portal/configuration mutations.
+ */
+export const requireOwnerRoleMiddleware: MiddlewareHandler<AppContextEnv> = async (c, next) => {
+  const role = c.get('userRole');
+  const authType = c.get('authType');
+  if (role === 'MERCHANT_STAFF') {
+    throw new ForbiddenError('Merchant owner role required for this action');
+  }
+  if (authType === 'device') {
+    throw new ForbiddenError('Device credentials cannot perform owner-level configuration actions');
+  }
+  await next();
+};
+
+/**
  * Master Admin Key Middleware
- * Validates 'X-Admin-Key' (or optional 'adminKey' query param) against MASTER_ADMIN_KEY in constant time.
+ * Validates 'X-Admin-Key' header against MASTER_ADMIN_KEY in constant time.
  */
 export const authMasterAdminMiddleware: MiddlewareHandler<AppContextEnv> = async (c, next) => {
-  const adminKey = (c.req.header('x-admin-key') || c.req.query('adminKey'))?.trim();
+  const adminKey = c.req.header('x-admin-key')?.trim();
   const expectedKey = resolveMasterAdminKey(c.env);
 
   if (!expectedKey) {

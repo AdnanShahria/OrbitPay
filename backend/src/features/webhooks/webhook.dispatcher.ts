@@ -9,27 +9,68 @@ import {
 import { pushToMerchantWebSockets } from '../../router/push-hub';
 import { routeSmsOrPush } from '../../router/sms';
 import { generateSecureToken } from '../../shared/crypto';
+import { checkSafeWebhookUrl, parseAllowedOrigins } from '../../shared/ssrf';
 import type { Env } from '../../shared/types';
-import { buildWebhookPayload, generateHmacSignature } from './webhook.service';
+import {
+  buildWebhookPayload,
+  generateHmacSignature,
+  generateHmacSignatureV2,
+} from './webhook.service';
 
 const RETRY_INTERVALS_MS = [
-  60 * 1000,         // Attempt 1: 1 min
-  5 * 60 * 1000,     // Attempt 2: 5 min
-  15 * 60 * 1000,    // Attempt 3: 15 min
-  60 * 60 * 1000,    // Attempt 4: 1 hour
-  24 * 60 * 60 * 1000 // Attempt 5: 24 hours
+  60 * 1000,         // Retry 1: 1 min
+  5 * 60 * 1000,     // Retry 2: 5 min
+  15 * 60 * 1000,    // Retry 3: 15 min
+  60 * 60 * 1000,    // Retry 4: 1 hour
+  24 * 60 * 60 * 1000 // Retry 5: 24 hours
 ];
 
 export interface DispatchResult {
   success: boolean;
   statusCode?: number;
   deliveryId: string;
+  eventId?: string;
   error?: string;
+}
+
+export interface DynamicPushAction {
+  id: string;
+  label: string;
+  style?: 'primary' | 'secondary' | 'danger';
+  webhookEvent?: string;
+}
+
+export interface DynamicPushPayload {
+  event: string;
+  paymentIntentId?: string;
+  externalRefId: string;
+  appName: string;
+  appDomain?: string;
+  category?: string;
+  referenceLabel?: string;
+  title: string;
+  subtitle?: string;
+  amountFormatted: string;
+  provider?: string;
+  paymentStatus: string;
+  adminDeepLink?: string;
+  actions?: DynamicPushAction[];
+  extraData?: Record<string, string>;
+}
+
+function sanitizeResponseBody(raw: string): string {
+  return raw
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 500);
 }
 
 /**
  * Dispatches an authenticated webhook payload to the merchant's external storefront.
- * Handles timeouts, saves audit logs in webhook_deliveries, and configures retries.
+ * Enforces SSRF protection, disables HTTP redirects, emits v1+v2 HMAC signatures,
+ * preserves eventId & payloadJson on retries, and records audit logs in webhook_deliveries.
  */
 export async function dispatchWebhook(
   db: AppDb,
@@ -38,27 +79,60 @@ export async function dispatchWebhook(
   data: Record<string, unknown>,
   attemptCount = 1,
   existingDeliveryId?: string,
-  targetUrlOverride?: string | null
+  targetUrlOverride?: string | null,
+  env?: Env,
+  prebuiltPayloadJson?: string
 ): Promise<DispatchResult> {
   const deliveryId = existingDeliveryId || `whd_${generateSecureToken(16)}`;
-  const externalOrderId = String(data.externalOrderId || data.orderId || 'UNKNOWN');
-  const payloadObj = buildWebhookPayload(event, data);
-  const payloadJson = JSON.stringify(payloadObj);
+  const externalOrderId = String(
+    data.externalRefId || data.externalOrderId || data.orderId || 'UNKNOWN'
+  );
+
+  let payloadJson: string;
+  let eventId: string;
+  let timestamp: number;
+
+  if (prebuiltPayloadJson) {
+    payloadJson = prebuiltPayloadJson;
+    try {
+      const parsed = JSON.parse(prebuiltPayloadJson) as {
+        eventId?: string;
+        timestamp?: number;
+      };
+      eventId = parsed.eventId || `evt_${generateSecureToken(12)}`;
+      timestamp = typeof parsed.timestamp === 'number' ? parsed.timestamp : Date.now();
+    } catch {
+      const fallback = buildWebhookPayload(event, data);
+      payloadJson = JSON.stringify(fallback);
+      eventId = fallback.eventId;
+      timestamp = fallback.timestamp;
+    }
+  } else {
+    const payloadObj = buildWebhookPayload(event, data);
+    payloadJson = JSON.stringify(payloadObj);
+    eventId = payloadObj.eventId;
+    timestamp = payloadObj.timestamp;
+  }
+
   const targetUrl = (targetUrlOverride || merchant.webhookUrl || '').trim();
 
-  // Skip new webhook dispatches when no callback URL is configured (e.g. during testing)
   if (!targetUrl && !existingDeliveryId) {
     return {
       success: false,
       deliveryId: 'skipped_no_webhook_url',
+      eventId,
       error: 'No webhook URL configured (skipped)',
     };
   }
 
   let signature = '';
+  let signatureV2 = '';
   try {
-    signature = await generateHmacSignature(payloadJson, merchant.webhookSecret);
-  } catch (err: any) {
+    [signature, signatureV2] = await Promise.all([
+      generateHmacSignature(payloadJson, merchant.webhookSecret),
+      generateHmacSignatureV2(timestamp, payloadJson, merchant.webhookSecret),
+    ]);
+  } catch (err) {
     console.error(`[Webhook] HMAC generation failed for merchant ${merchant.id}:`, err);
   }
 
@@ -66,34 +140,49 @@ export async function dispatchWebhook(
   let responseBody: string | null = null;
   let isSuccess = false;
 
-  // Only attempt HTTP dispatch if URL is valid
-  if (targetUrl && targetUrl.startsWith('http')) {
+  const allowedOrigins = targetUrlOverride
+    ? parseAllowedOrigins(merchant.allowedCallbackOriginsJson)
+    : undefined;
+  const ssrfCheck = checkSafeWebhookUrl(targetUrl, env, allowedOrigins);
+
+  if (ssrfCheck.ok && ssrfCheck.url) {
     try {
-      const response = await fetch(targetUrl, {
+      const response = await fetch(ssrfCheck.url.toString(), {
         method: 'POST',
+        redirect: 'manual',
         headers: {
           'Content-Type': 'application/json',
-          'User-Agent': 'OrbitPaymentEngine/1.0',
+          'User-Agent': 'OrbitPaymentEngine/2.0',
+          'X-Orbit-Event': event,
+          'X-Orbit-Event-Id': eventId,
+          'X-Orbit-Timestamp': String(timestamp),
           'X-Orbit-Signature': signature,
-          'X-Orbit-Event-Id': payloadObj.eventId,
+          'X-Orbit-Signature-V2': signatureV2,
           'X-Orbit-Delivery-Attempt': String(attemptCount),
         },
         body: payloadJson,
-        signal: AbortSignal.timeout(10000), // 10 second timeout
+        signal: AbortSignal.timeout(10000),
       });
 
       responseCode = response.status;
-      const text = await response.text();
-      responseBody = text.substring(0, 1000); // Truncate body for DB storage
-
-      if (response.status >= 200 && response.status < 300) {
-        isSuccess = true;
+      if (response.status >= 300 && response.status < 400) {
+        responseBody = `Redirect blocked by SSRF policy (HTTP ${response.status})`;
+      } else {
+        const text = await response.text().catch(() => '');
+        responseBody = sanitizeResponseBody(text);
+        if (response.status >= 200 && response.status < 300) {
+          isSuccess = true;
+        }
       }
     } catch (err: any) {
-      responseBody = `Fetch error: ${err.message || 'Connection timeout or network failure'}`;
+      responseBody = sanitizeResponseBody(
+        `Fetch error: ${err?.message || 'Connection timeout or network failure'}`
+      );
     }
   } else {
-    responseBody = `Invalid or unconfigured webhook URL: ${targetUrl}`;
+    responseBody = sanitizeResponseBody(
+      `Blocked webhook URL: ${ssrfCheck.reason || 'Invalid URL'}`
+    );
   }
 
   const now = new Date();
@@ -101,7 +190,7 @@ export async function dispatchWebhook(
   let status: 'DELIVERED' | 'FAILED' | 'RETRYING' = 'DELIVERED';
 
   if (!isSuccess) {
-    if (attemptCount < RETRY_INTERVALS_MS.length) {
+    if (attemptCount <= RETRY_INTERVALS_MS.length) {
       status = 'RETRYING';
       const delayMs = RETRY_INTERVALS_MS[attemptCount - 1];
       nextRetryAt = new Date(now.getTime() + delayMs);
@@ -110,7 +199,6 @@ export async function dispatchWebhook(
     }
   }
 
-  // Update or insert into webhook_deliveries
   if (existingDeliveryId) {
     await db
       .update(webhookDeliveries)
@@ -146,15 +234,18 @@ export async function dispatchWebhook(
     success: isSuccess,
     statusCode: responseCode || undefined,
     deliveryId,
-    error: isSuccess ? undefined : (responseBody || 'Dispatch failed'),
+    eventId,
+    error: isSuccess ? undefined : responseBody || 'Dispatch failed',
   };
 }
 
 /**
- * Worker / cron process that runs through pending retry deliveries.
+ * Worker / cron process that runs through pending retry deliveries,
+ * preserving the original immutable payloadJson & eventId.
  */
 export async function processWebhookRetries(
-  db: AppDb
+  db: AppDb,
+  env?: Env
 ): Promise<{ processed: number; succeeded: number; failed: number }> {
   const now = new Date();
   const pendingDeliveries = await db
@@ -167,7 +258,11 @@ export async function processWebhookRetries(
   let failed = 0;
 
   for (const delivery of pendingDeliveries) {
-    const merchantResult = await db.select().from(merchants).where(eq(merchants.id, delivery.merchantId)).limit(1);
+    const merchantResult = await db
+      .select()
+      .from(merchants)
+      .where(eq(merchants.id, delivery.merchantId))
+      .limit(1);
     const merchant = merchantResult[0];
 
     if (!merchant || !merchant.isActive) {
@@ -182,10 +277,13 @@ export async function processWebhookRetries(
     try {
       const parsedData = JSON.parse(delivery.payloadJson);
       const innerData = parsedData.data || parsedData;
-      const targetUrlOverride =
-        typeof innerData?.storeCallbackUrl === 'string' && innerData.storeCallbackUrl.startsWith('http')
-          ? innerData.storeCallbackUrl
-          : undefined;
+      const candidateOverride =
+        typeof innerData?.callbackUrl === 'string' && innerData.callbackUrl
+          ? innerData.callbackUrl
+          : typeof innerData?.storeCallbackUrl === 'string' && innerData.storeCallbackUrl
+            ? innerData.storeCallbackUrl
+            : undefined;
+
       const res = await dispatchWebhook(
         db,
         merchant,
@@ -193,7 +291,9 @@ export async function processWebhookRetries(
         innerData,
         delivery.attemptCount + 1,
         delivery.id,
-        targetUrlOverride
+        candidateOverride,
+        env,
+        delivery.payloadJson
       );
 
       if (res.success) {
@@ -214,7 +314,6 @@ function normalizePushEnv(fcmServerKeyOrEnv: string | Env | undefined): Env | nu
     return null;
   }
   if (typeof fcmServerKeyOrEnv === 'string') {
-    // Legacy callers passing raw FCM_SERVER_KEY string have no FCM v1 service account JSON
     return { FCM_SERVER_KEY: fcmServerKeyOrEnv } as Env;
   }
   return fcmServerKeyOrEnv;
@@ -251,10 +350,6 @@ async function sendFcmPushDetailed(
   return { ok: res.success, unregistered };
 }
 
-/**
- * Sends a push notification to the merchant's Android companion app via the unified SMS/Push router.
- * Delegates provider selection and fallback to `backend/src/router/sms.ts` (FCM HTTP v1).
- */
 export async function sendFcmPush(
   fcmServerKeyOrEnv: string | Env | undefined,
   fcmToken: string | null | undefined,
@@ -358,9 +453,7 @@ async function sendFcmToMerchantTokens(
 }
 
 /**
- * Dispatches a push notification across the 2 active server tiers for a merchant:
- * - Tier 1 (Primary): Self-hosted Cloudflare Durable Object WebSocket hub (`MerchantPushHub`)
- * - Tier 2 (Optional Backup): FCM HTTP v1 across `merchant.fcmToken` and active `merchant_devices.fcmToken` rows
+ * Dispatches a push notification across Cloudflare Durable Object WebSocket hub and FCM HTTP v1.
  */
 export async function sendPushToMerchantDevicesDetailed(
   db: AppDb,
@@ -399,7 +492,7 @@ export async function sendPushToMerchantDevicesDetailed(
 }
 
 /**
- * Backward-compatible wrapper returning total push deliveries (WebSocket + FCM v1) for a merchant.
+ * Backward-compatible wrapper returning total push deliveries for a merchant.
  */
 export async function sendPushToMerchantDevices(
   db: AppDb,
@@ -418,4 +511,83 @@ export async function sendPushToMerchantDevices(
     data
   );
   return res.totalDelivered;
+}
+
+/**
+ * Dispatches a universal, server-driven multi-vertical push payload to merchant devices
+ * (Android Companion + Web Portal) with zero vertical hardcoding.
+ */
+export async function sendDynamicPushToMerchantDevices(
+  db: AppDb,
+  env: Env | undefined,
+  merchant: MerchantRecord,
+  payload: DynamicPushPayload
+): Promise<DetailedPushResult> {
+  const pushTitle = `${payload.appName}: ${payload.title}`;
+  const bodyParts = [payload.amountFormatted];
+  if (payload.provider) bodyParts.push(payload.provider);
+  if (payload.subtitle) bodyParts.push(payload.subtitle);
+  const pushBody = bodyParts.join(' • ');
+
+  const dataRecord: Record<string, string> = {
+    ...(payload.extraData || {}),
+    event: payload.event,
+    ...(payload.paymentIntentId ? { paymentIntentId: payload.paymentIntentId } : {}),
+    externalRefId: payload.externalRefId,
+    appName: payload.appName,
+    ...(payload.appDomain ? { appDomain: payload.appDomain } : {}),
+    ...(payload.category ? { category: payload.category } : {}),
+    ...(payload.referenceLabel ? { referenceLabel: payload.referenceLabel } : {}),
+    title: payload.title,
+    ...(payload.subtitle ? { subtitle: payload.subtitle } : {}),
+    amountFormatted: payload.amountFormatted,
+    ...(payload.provider ? { provider: payload.provider } : {}),
+    paymentStatus: payload.paymentStatus,
+    ...(payload.adminDeepLink ? { adminDeepLink: payload.adminDeepLink } : {}),
+    actionsJson: JSON.stringify(payload.actions || []),
+  };
+
+  return sendPushToMerchantDevicesDetailed(db, env, merchant, pushTitle, pushBody, dataRecord);
+}
+
+/**
+ * Sends a real-time office alert to the merchant's configured Telegram Bot + Chat ID.
+ */
+export async function sendTelegramOfficeAlert(
+  merchant: MerchantRecord,
+  message: string
+): Promise<boolean> {
+  const botToken = merchant.telegramBotToken?.trim();
+  const chatId = merchant.telegramChatId?.trim();
+  if (!botToken || !chatId) {
+    return false;
+  }
+
+  try {
+    const modules = JSON.parse(merchant.enabledModulesJson || '{}') as {
+      telegram_alerts?: boolean;
+    };
+    if (modules.telegram_alerts === false) {
+      return false;
+    }
+  } catch {
+    // Proceed if modules JSON is malformed but token+chatId are present
+  }
+
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${encodeURIComponent(botToken)}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: message,
+        disable_web_page_preview: true,
+      }),
+      signal: AbortSignal.timeout(8000),
+    });
+    return res.ok;
+  } catch (err) {
+    console.warn('[Telegram Office Alert Error]:', err);
+    return false;
+  }
 }

@@ -6,7 +6,10 @@ import androidx.lifecycle.viewModelScope
 import com.orbitsaas.payment.R
 import com.orbitsaas.payment.data.local.PreferencesManager
 import com.orbitsaas.payment.data.remote.LedgerDto
+import com.orbitsaas.payment.data.remote.MerchantOrderDto
 import com.orbitsaas.payment.data.remote.OrbitApiClient
+import com.orbitsaas.payment.data.remote.PaymentIntentDto
+import com.orbitsaas.payment.service.DynamicPushDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -38,7 +41,24 @@ data class RankedQueueCandidate(
     val sameSender: Boolean
 )
 
+enum class VerifyTab {
+    REVIEW_QUEUE,
+    UNCLAIMED_SMS,
+    ORDER_PAY
+}
+
 data class VerifyUiState(
+    val selectedTab: VerifyTab = VerifyTab.REVIEW_QUEUE,
+    val serverUrl: String = "",
+    val storeName: String = "",
+    val reviewIntents: List<PaymentIntentDto> = emptyList(),
+    val isLoadingReviewIntents: Boolean = false,
+    val reviewIntentsError: String? = null,
+    val actionInProgressIntentId: String? = null,
+    val unpaidOrders: List<MerchantOrderDto> = emptyList(),
+    val isLoadingUnpaidOrders: Boolean = false,
+    val unpaidOrdersError: String? = null,
+    val actionInProgressOrderId: String? = null,
     val unclaimedItems: List<LedgerDto> = emptyList(),
     val isLoadingUnclaimed: Boolean = false,
     val unclaimedError: String? = null,
@@ -55,11 +75,210 @@ class VerifyViewModel(application: Application) : AndroidViewModel(application) 
     private val preferences = PreferencesManager(application)
     private val apiClient = OrbitApiClient(preferences)
 
-    private val _uiState = MutableStateFlow(VerifyUiState())
+    private val _uiState = MutableStateFlow(
+        VerifyUiState(
+            serverUrl = preferences.serverUrl,
+            storeName = preferences.storeName
+        )
+    )
     val uiState: StateFlow<VerifyUiState> = _uiState.asStateFlow()
 
     init {
+        loadReviewIntents()
         loadUnclaimed()
+        loadUnpaidOrders()
+        viewModelScope.launch {
+            DynamicPushDispatcher.refreshEvents.collect {
+                loadReviewIntents()
+                loadUnclaimed()
+                loadUnpaidOrders()
+            }
+        }
+    }
+
+    fun selectTab(tab: VerifyTab) {
+        _uiState.update { it.copy(selectedTab = tab) }
+        when (tab) {
+            VerifyTab.REVIEW_QUEUE -> loadReviewIntents()
+            VerifyTab.UNCLAIMED_SMS -> loadUnclaimed()
+            VerifyTab.ORDER_PAY -> loadUnpaidOrders()
+        }
+    }
+
+    fun refreshActiveTab() {
+        when (_uiState.value.selectedTab) {
+            VerifyTab.REVIEW_QUEUE -> loadReviewIntents()
+            VerifyTab.UNCLAIMED_SMS -> loadUnclaimed()
+            VerifyTab.ORDER_PAY -> loadUnpaidOrders()
+        }
+    }
+
+    fun loadReviewIntents() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingReviewIntents = true, reviewIntentsError = null) }
+            val result = withContext(Dispatchers.IO) {
+                apiClient.listPaymentIntents(limit = 50)
+            }
+            result.onSuccess { data ->
+                val actionable = data.items.filter { intent ->
+                    intent.status.uppercase(Locale.US) in setOf(
+                        "MANUAL_REVIEW_REQUIRED",
+                        "WAITING_FOR_SMS",
+                        "OPEN"
+                    )
+                }.sortedByDescending { intent ->
+                    when (intent.status.uppercase(Locale.US)) {
+                        "MANUAL_REVIEW_REQUIRED" -> 3
+                        "WAITING_FOR_SMS" -> 2
+                        else -> 1
+                    }
+                }
+                _uiState.update {
+                    it.copy(
+                        reviewIntents = actionable,
+                        isLoadingReviewIntents = false,
+                        reviewIntentsError = null
+                    )
+                }
+            }.onFailure { err ->
+                val detail = err.message ?: getApplication<Application>().getString(R.string.history_detail_unknown)
+                _uiState.update {
+                    it.copy(
+                        isLoadingReviewIntents = false,
+                        reviewIntentsError = detail
+                    )
+                }
+            }
+        }
+    }
+
+    fun loadUnpaidOrders() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingUnpaidOrders = true, unpaidOrdersError = null) }
+            val result = withContext(Dispatchers.IO) {
+                apiClient.fetchOrders()
+            }
+            result.onSuccess { data ->
+                val pending = data.items.filter { order ->
+                    order.paymentStatus.uppercase(Locale.US) != "PAID" &&
+                        order.orderStatus.uppercase(Locale.US) != "CANCELLED"
+                }
+                _uiState.update {
+                    it.copy(
+                        unpaidOrders = pending,
+                        isLoadingUnpaidOrders = false,
+                        unpaidOrdersError = null
+                    )
+                }
+            }.onFailure { err ->
+                val detail = err.message ?: getApplication<Application>().getString(R.string.history_detail_unknown)
+                _uiState.update {
+                    it.copy(
+                        isLoadingUnpaidOrders = false,
+                        unpaidOrdersError = detail
+                    )
+                }
+            }
+        }
+    }
+
+    fun resolvePaymentIntent(
+        intentId: String,
+        decision: String,
+        expectedStateVersion: Int? = null,
+        reason: String? = null
+    ) {
+        if (_uiState.value.actionInProgressIntentId != null) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(actionInProgressIntentId = intentId) }
+            val result = withContext(Dispatchers.IO) {
+                apiClient.resolvePaymentIntent(
+                    intentId = intentId,
+                    decision = decision,
+                    expectedStateVersion = expectedStateVersion,
+                    reason = reason
+                )
+            }
+            result.onSuccess { data ->
+                val ref = data.paymentIntent?.externalRefId ?: intentId
+                val verb = if (decision.equals("APPROVE", ignoreCase = true)) "approved" else "rejected"
+                _uiState.update {
+                    it.copy(
+                        actionInProgressIntentId = null,
+                        feedbackMessage = "Payment $ref $verb"
+                    )
+                }
+                loadReviewIntents()
+                loadUnpaidOrders()
+            }.onFailure { err ->
+                _uiState.update {
+                    it.copy(
+                        actionInProgressIntentId = null,
+                        feedbackMessage = "Resolve failed: ${err.message ?: "Unknown error"}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun triggerIntentAction(intentId: String, actionId: String, actionLabel: String) {
+        if (_uiState.value.actionInProgressIntentId != null) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(actionInProgressIntentId = intentId) }
+            val result = withContext(Dispatchers.IO) {
+                apiClient.triggerPaymentAction(intentId = intentId, actionId = actionId)
+            }
+            result.onSuccess { data ->
+                val syncSuffix = if (data.webhookDispatched) " · Webhook dispatched" else ""
+                _uiState.update {
+                    it.copy(
+                        actionInProgressIntentId = null,
+                        feedbackMessage = "$actionLabel (${data.externalRefId})$syncSuffix"
+                    )
+                }
+                loadReviewIntents()
+            }.onFailure { err ->
+                _uiState.update {
+                    it.copy(
+                        actionInProgressIntentId = null,
+                        feedbackMessage = "$actionLabel failed: ${err.message ?: "Unknown error"}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun performOrderAction(externalOrderId: String, action: String) {
+        if (_uiState.value.actionInProgressOrderId != null) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(actionInProgressOrderId = externalOrderId) }
+            val result = withContext(Dispatchers.IO) {
+                apiClient.performOrderAction(externalOrderId, action)
+            }
+            result.onSuccess { data ->
+                val actionLabel = when (action.uppercase(Locale.US)) {
+                    "MARK_PAID" -> "marked Paid"
+                    "CONFIRM" -> "confirmed"
+                    "CANCEL" -> "cancelled"
+                    else -> action.lowercase(Locale.US)
+                }
+                val syncSuffix = if (data.webhookDispatched) " · Storefront updated" else ""
+                _uiState.update {
+                    it.copy(
+                        actionInProgressOrderId = null,
+                        feedbackMessage = "Order #$externalOrderId $actionLabel$syncSuffix"
+                    )
+                }
+                loadUnpaidOrders()
+            }.onFailure { err ->
+                _uiState.update {
+                    it.copy(
+                        actionInProgressOrderId = null,
+                        feedbackMessage = "Order update failed: ${err.message ?: "Unknown error"}"
+                    )
+                }
+            }
+        }
     }
 
     fun loadUnclaimed() {

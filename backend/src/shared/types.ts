@@ -80,6 +80,8 @@ export interface Env {
   TURSO_AUTH_TOKEN?: string;
 }
 
+export type AuthType = 'jwt' | 'api_key' | 'webhook_secret' | 'device';
+
 export interface AppVariables {
   db: AppDb;
   merchant?: MerchantRecord;
@@ -87,6 +89,7 @@ export interface AppVariables {
   userId?: string;
   sessionId?: string;
   userRole?: string;
+  authType?: AuthType;
 }
 
 export type AppContextEnv = {

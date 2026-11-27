@@ -16,69 +16,73 @@ object MfsParser {
 
     private const val AMT = """([0-9][0-9,]*(?:\.[0-9]{1,2})?)"""
     private const val TK = """(?:Tk\.?|BDT)"""
+    private const val PHONE_CAPTURE = """((?:\+?88)?01[3-9]\d{8})"""
+    private const val ROCKET_PHONE_CAPTURE = """((?:\+?88)?01[3-9]\d{8}[A-Za-z0-9]?)"""
+    private const val TRX_CAPTURE = """(?:TrxID|TxnID|TxnId):?\s*([A-Za-z0-9]+)"""
+    private val BD_PHONE_REGEX = Regex("""^01[3-9]\d{8}$""")
 
     private val OUTGOING_OR_OTP_REGEX = Pattern.compile(
-        """(?:\b(?:verification code|otp|one[- ]time password|security code|pin reset|login code)\b|\b(?:you have sent|send money|cash out|mobile recharge|pay bill)\b|\bpaid\s+$TK|\bpayment\s+(?:of\s+)?$TK\s*$AMT\s+to\b)""",
+        """(?:\b(?:verification code|otp|one[- ]time password|security code|pin reset|login code|pin is|do not share this code)\b|\b(?:you have sent|send money|cash out|mobile recharge|pay bill|bill pay)\b|\bpaid\s+$TK|\bpayment\s+(?:of\s+)?$TK\s*$AMT\s+to\b|^\s*(?:payment of|sent\s+$TK|transferred\s+$TK))""",
         Pattern.CASE_INSENSITIVE or Pattern.DOTALL
     )
 
     // 1. bKash Patterns
     private val BKASH_PERSONAL_REGEX = Pattern.compile(
-        """You have received\s+(?:payment\s+)?$TK\s*$AMT\.?\s+from\s+([0-9+]+).*?TrxID:?\s*([A-Za-z0-9]+)""",
+        """You have received\s+(?:payment\s+)?$TK\s*$AMT\.?\s+from\s+$PHONE_CAPTURE(?!\d).*?$TRX_CAPTURE""",
         Pattern.CASE_INSENSITIVE or Pattern.DOTALL
     )
 
     private val BKASH_PRA_REGEX = Pattern.compile(
-        """Payment received\s+$TK\s*$AMT\.?\s+from\s+([0-9+]+).*?TrxID:?\s*([A-Za-z0-9]+)""",
+        """Payment received\s+$TK\s*$AMT\.?\s+from\s+$PHONE_CAPTURE(?!\d).*?$TRX_CAPTURE""",
         Pattern.CASE_INSENSITIVE or Pattern.DOTALL
     )
 
     private val BKASH_CASHIN_REGEX = Pattern.compile(
-        """Cash In\s+$TK\s*$AMT\.?\s+from\s+([0-9+]+).*?TrxID:?\s*([A-Za-z0-9]+)""",
+        """Cash\s+In\s+$TK\s*$AMT\.?\s+from\s+$PHONE_CAPTURE(?!\d).*?$TRX_CAPTURE""",
         Pattern.CASE_INSENSITIVE or Pattern.DOTALL
     )
 
     private val BKASH_FALLBACK_REGEX = Pattern.compile(
-        """(?:received|Payment)\s+(?:$TK\s*)?$AMT\.?\s+from\s+([0-9+]+).*?TrxID:?\s*([A-Za-z0-9]+)""",
+        """(?:received|Payment)\s+(?:$TK\s*)?$AMT\.?\s+from\s+$PHONE_CAPTURE(?!\d).*?$TRX_CAPTURE""",
         Pattern.CASE_INSENSITIVE or Pattern.DOTALL
     )
 
     // 2. Nagad Patterns
     private val NAGAD_STANDARD_REGEX = Pattern.compile(
-        """(?:received|credited)\s+$TK\s*$AMT\.?\s+from\s+([0-9+]+).*?TxnID:?\s*([A-Za-z0-9]+)""",
+        """(?:received|credited)\s+$TK\s*$AMT\.?\s+from\s+$PHONE_CAPTURE(?!\d).*?$TRX_CAPTURE""",
         Pattern.CASE_INSENSITIVE or Pattern.DOTALL
     )
 
     private val NAGAD_KEYVALUE_REGEX = Pattern.compile(
-        """Amount:\s*(?:$TK\s*)?$AMT\.?.*?Sender:\s*([0-9+]+).*?TxnID:?\s*([A-Za-z0-9]+)""",
+        """Amount:\s*(?:$TK\s*)?$AMT\.?.*?Sender:\s*$PHONE_CAPTURE(?!\d).*?$TRX_CAPTURE""",
         Pattern.CASE_INSENSITIVE or Pattern.DOTALL
     )
 
     private val NAGAD_ALT_REGEX = Pattern.compile(
-        """$TK\s*$AMT\.?.*?from\s+([0-9+]+).*?TxnID:?\s*([A-Za-z0-9]+)""",
+        """$TK\s*$AMT\.?.*?from\s+$PHONE_CAPTURE(?!\d).*?$TRX_CAPTURE""",
         Pattern.CASE_INSENSITIVE or Pattern.DOTALL
     )
 
     // 3. Rocket Patterns (Supports 16216 A/C:01912345678X & legacy 12-digit DBBL numbers)
     private val ROCKET_AC_REGEX = Pattern.compile(
-        """$TK\s*$AMT\.?\s*received\s+from\s+(?:A/C:?\s*)?([0-9+A-Za-z]{11,14}).*?(?:TxnId|TxnID|TrxID):?\s*([A-Za-z0-9]+)""",
+        """$TK\s*$AMT\.?\s+received\s+from\s+(?:A/C:?\s*)?$ROCKET_PHONE_CAPTURE(?!\d).*?$TRX_CAPTURE""",
         Pattern.CASE_INSENSITIVE or Pattern.DOTALL
     )
 
     private val ROCKET_STANDARD_REGEX = Pattern.compile(
-        """(?:You have received|Payment(?:\s+received)?)\s+$TK\s*$AMT\.?\s+from\s+(?:A/C:?\s*)?([0-9+A-Za-z]{11,14}).*?(?:TrxID|TxnID|TxnId):?\s*([A-Za-z0-9]+)""",
+        """(?:You have received|Payment(?:\s+received)?|received)\s+$TK\s*$AMT\.?\s+from\s+(?:A/C:?\s*)?$ROCKET_PHONE_CAPTURE(?!\d).*?$TRX_CAPTURE""",
         Pattern.CASE_INSENSITIVE or Pattern.DOTALL
     )
 
     // 4. Upay Patterns
     private val UPAY_STANDARD_REGEX = Pattern.compile(
-        """(?:You have received|Received)\s+$TK\s*$AMT\.?\s+from\s+([0-9+]+).*?(?:TrxID|TxnID):?\s*([A-Za-z0-9]+)""",
+        """(?:You have received|Received)\s+$TK\s*$AMT\.?\s+from\s+$PHONE_CAPTURE(?!\d).*?$TRX_CAPTURE""",
         Pattern.CASE_INSENSITIVE or Pattern.DOTALL
     )
 
     // 5. Cellfin Patterns
     private val CELLFIN_STANDARD_REGEX = Pattern.compile(
-        """(?:You have received|received|credited)\s+$TK\s*$AMT\.?\s+from\s+([0-9+]+).*?(?:TrxID|TxnID):?\s*([A-Za-z0-9]+)""",
+        """(?:You have received|received|credited)\s+$TK\s*$AMT\.?\s+from\s+$PHONE_CAPTURE(?!\d).*?$TRX_CAPTURE""",
         Pattern.CASE_INSENSITIVE or Pattern.DOTALL
     )
 
@@ -204,9 +208,10 @@ object MfsParser {
             val trxIdStr = matcher.group(3) ?: return null
 
             val amount = amountStr.toDoubleOrNull() ?: return null
-            if (amount <= 0.0) return null
+            if (!amount.isFinite() || amount <= 0.0) return null
 
             val normalizedSender = sanitizePhoneNumber(senderStr, provider)
+            if (!BD_PHONE_REGEX.matches(normalizedSender)) return null
             val normalizedTrxId = trxIdStr.trim().uppercase()
 
             if (normalizedTrxId.length < 5) return null
@@ -244,6 +249,8 @@ object MfsParser {
         } else if (cleaned.startsWith("88")) {
             cleaned = cleaned.substring(2)
         }
+
+        cleaned = cleaned.replace("+", "")
 
         if (!cleaned.startsWith("0") && cleaned.length in 10..11) {
             cleaned = "0$cleaned"

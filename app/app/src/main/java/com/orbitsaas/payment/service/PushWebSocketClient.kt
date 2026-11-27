@@ -1,18 +1,9 @@
 package com.orbitsaas.payment.service
 
-import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.Context
-import android.content.Intent
 import android.util.Log
-import androidx.core.app.NotificationCompat
 import com.orbitsaas.payment.BuildConfig
-import com.orbitsaas.payment.OrbitApplication
-import com.orbitsaas.payment.R
-import com.orbitsaas.payment.data.local.OrbitDatabase
 import com.orbitsaas.payment.data.local.PreferencesManager
-import com.orbitsaas.payment.ui.MainActivity
-import com.orbitsaas.payment.update.AppUpdateManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -354,153 +345,14 @@ class PushWebSocketClient(
         body: String?,
         data: Map<String, String>
     ) {
-        val trxIdFromData = data["trxId"]?.trim().orEmpty()
-        when {
-            event == "app.update_available" -> {
-                Log.i(TAG, "Received app.update_available via WebSocket; triggering background update check.")
-                AppUpdateManager.checkForUpdates(
-                    context = appContext,
-                    userInitiated = false,
-                    autoDownload = true,
-                    forceCheck = true
-                )
-            }
-
-            event == "payment.verified" || trxIdFromData.isNotBlank() -> {
-                val orderId = (data["orderId"] ?: data["externalOrderId"]).orEmpty().trim()
-                val amount = data["amount"].orEmpty().trim()
-                val provider = data["provider"]?.trim()?.takeIf { it.isNotBlank() } ?: "MFS"
-
-                if (trxIdFromData.isNotBlank()) {
-                    try {
-                        val updatedRows = OrbitDatabase.getDatabase(appContext)
-                            .smsDao()
-                            .markVerifiedByTrxId(
-                                trxId = trxIdFromData,
-                                externalOrderId = orderId
-                            )
-                        Log.i(
-                            TAG,
-                            "WS verified TrxID $trxIdFromData in Room DB ($updatedRows rows updated)"
-                        )
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Error updating verified transaction from WS: ${e.message}", e)
-                    }
-
-                    val notifTitle = title ?: appContext.getString(R.string.core_notif_verified_title, provider)
-                    val summary = body ?: "TrxID: $trxIdFromData • Order: $orderId ${if (amount.isNotBlank()) "• ৳$amount" else ""}".trim()
-                    val expanded = body ?: appContext.getString(
-                        R.string.core_notif_verified_body,
-                        orderId.ifBlank { "-" },
-                        provider,
-                        trxIdFromData,
-                        amount.ifBlank { "0" }
-                    )
-                    postAlertNotification(
-                        requestCode = trxIdFromData.hashCode(),
-                        title = notifTitle,
-                        summary = summary,
-                        expanded = expanded
-                    )
-                } else if (!title.isNullOrBlank() || !body.isNullOrBlank()) {
-                    val key = id.ifBlank { System.currentTimeMillis().toString() }
-                    postAlertNotification(
-                        requestCode = ("push_$key").hashCode(),
-                        title = title ?: appContext.getString(R.string.app_name),
-                        summary = body.orEmpty(),
-                        expanded = body.orEmpty()
-                    )
-                }
-            }
-
-            event == "order.created" || event == "order.action_required" -> {
-                val orderId = (data["externalOrderId"] ?: data["orderId"]).orEmpty().trim()
-                val shouldNotify = if (orderId.isNotBlank()) {
-                    preferencesManager.markOrderSeen(orderId)
-                } else {
-                    true
-                }
-                if (!shouldNotify) {
-                    Log.d(TAG, "Skipping duplicate WS order alert for #$orderId")
-                    return
-                }
-
-                val paymentMethod = (data["paymentMethod"] ?: data["method"] ?: "COD").uppercase()
-                val amount = (data["amount"] ?: data["baseAmount"]).orEmpty().trim()
-                val customerName = data["customerName"].orEmpty().trim()
-
-                val prefix = if (event == "order.action_required") {
-                    appContext.getString(R.string.core_notif_action_required_prefix, paymentMethod)
-                } else {
-                    appContext.getString(R.string.core_notif_new_order_prefix, paymentMethod)
-                }
-
-                val notifTitle = title ?: buildString {
-                    append(prefix)
-                    if (orderId.isNotBlank()) append(" #$orderId")
-                    if (amount.isNotBlank()) append(" • ৳$amount")
-                }
-
-                val notifBody = body ?: buildString {
-                    append(appContext.getString(R.string.core_notif_order_tap_review))
-                    if (orderId.isNotBlank()) append(" #$orderId")
-                    if (customerName.isNotBlank()) append(" ($customerName)")
-                    append(".")
-                }
-
-                val key = orderId.ifBlank { id.ifBlank { System.currentTimeMillis().toString() } }
-                postAlertNotification(
-                    requestCode = ("order_$key").hashCode(),
-                    title = notifTitle,
-                    summary = notifBody,
-                    expanded = notifBody
-                )
-            }
-
-            !title.isNullOrBlank() || !body.isNullOrBlank() -> {
-                val key = id.ifBlank { System.currentTimeMillis().toString() }
-                postAlertNotification(
-                    requestCode = ("push_$key").hashCode(),
-                    title = title ?: appContext.getString(R.string.app_name),
-                    summary = body.orEmpty(),
-                    expanded = body.orEmpty()
-                )
-            }
-        }
-    }
-
-    private fun postAlertNotification(
-        requestCode: Int,
-        title: String,
-        summary: String,
-        expanded: String
-    ) {
-        val openAppIntent = Intent(appContext, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-        }
-        val pendingIntent = PendingIntent.getActivity(
-            appContext,
-            requestCode,
-            openAppIntent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        DynamicPushDispatcher.handlePush(
+            context = appContext,
+            id = id,
+            event = event,
+            title = title,
+            body = body,
+            data = data
         )
-
-        val notification = NotificationCompat.Builder(appContext, OrbitApplication.ORBIT_ALERT_CHANNEL)
-            .setSmallIcon(R.drawable.ic_stat_orbit)
-            .setContentTitle(title)
-            .setContentText(summary)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(expanded))
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setAutoCancel(true)
-            .setContentIntent(pendingIntent)
-            .build()
-
-        try {
-            val nm = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            nm.notify(requestCode, notification)
-        } catch (se: SecurityException) {
-            Log.w(TAG, "Notification permission missing: ${se.message}")
-        }
     }
 
     companion object {

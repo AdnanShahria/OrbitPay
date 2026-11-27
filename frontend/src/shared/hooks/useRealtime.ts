@@ -46,6 +46,8 @@ export function useRealtime() {
           queryClient.invalidateQueries({ queryKey: ['device', 'stats'] });
           queryClient.invalidateQueries({ queryKey: ['wallets'] });
           queryClient.invalidateQueries({ queryKey: ['verification-queue'] });
+          queryClient.invalidateQueries({ queryKey: ['payment-intents'] });
+          queryClient.invalidateQueries({ queryKey: ['payment-intents'] });
         } catch {
           // ignore
         }
@@ -58,6 +60,8 @@ export function useRealtime() {
           queryClient.invalidateQueries({ queryKey: ['transactions'] });
           queryClient.invalidateQueries({ queryKey: ['device', 'stats'] });
           queryClient.invalidateQueries({ queryKey: ['verification-queue'] });
+          queryClient.invalidateQueries({ queryKey: ['payment-intents'] });
+          queryClient.invalidateQueries({ queryKey: ['payment-intents'] });
         } catch {
           // ignore
         }
@@ -78,6 +82,7 @@ export function useRealtime() {
           const data = JSON.parse(e.data);
           setLastEvent({ type: 'QUEUE_UPDATED', data, timestamp: new Date().toISOString() });
           queryClient.invalidateQueries({ queryKey: ['verification-queue'] });
+          queryClient.invalidateQueries({ queryKey: ['payment-intents'] });
         } catch {
           // ignore
         }

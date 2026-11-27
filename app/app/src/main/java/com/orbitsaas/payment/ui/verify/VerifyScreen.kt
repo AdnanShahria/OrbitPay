@@ -22,8 +22,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material.icons.filled.Warning
@@ -71,7 +74,13 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.orbitsaas.payment.R
 import com.orbitsaas.payment.data.remote.LedgerDto
+import com.orbitsaas.payment.data.remote.MerchantOrderDto
+import com.orbitsaas.payment.data.remote.PaymentIntentDto
+import com.orbitsaas.payment.ui.components.ApproveIntentDialog
+import com.orbitsaas.payment.ui.components.PaymentIntentCard
 import com.orbitsaas.payment.ui.components.ProviderDot
+import com.orbitsaas.payment.ui.components.RejectIntentDialog
+import com.orbitsaas.payment.ui.components.SegmentedPillTabs
 import com.orbitsaas.payment.ui.components.StatusPill
 import com.orbitsaas.payment.ui.components.TrustWarningBadge
 import com.orbitsaas.payment.ui.components.formatBdtAmount
@@ -79,6 +88,7 @@ import com.orbitsaas.payment.ui.components.formatRelativeTime
 import com.orbitsaas.payment.ui.components.parseIsoEpochMs
 import com.orbitsaas.payment.ui.components.providerDisplayName
 import com.orbitsaas.payment.ui.components.trustFlagDescription
+import com.orbitsaas.payment.ui.theme.OrbitSemanticColors
 import com.orbitsaas.payment.ui.theme.StatusAmber
 import com.orbitsaas.payment.ui.theme.StatusAmberBg
 import com.orbitsaas.payment.ui.theme.StatusGray
@@ -88,7 +98,9 @@ import com.orbitsaas.payment.ui.theme.StatusGreenBg
 import com.orbitsaas.payment.ui.theme.StatusRed
 import com.orbitsaas.payment.ui.theme.StatusRedBg
 import com.orbitsaas.payment.ui.viewmodel.RankedQueueCandidate
+import com.orbitsaas.payment.ui.viewmodel.VerifyTab
 import com.orbitsaas.payment.ui.viewmodel.VerifyViewModel
+import java.util.Locale
 
 private data class PendingMatchConfirmation(
     val sms: LedgerDto,
@@ -104,6 +116,14 @@ fun VerifyScreen(
     val state by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     var pendingConfirm by remember { mutableStateOf<PendingMatchConfirmation?>(null) }
+    var pendingApproveIntent by remember { mutableStateOf<PaymentIntentDto?>(null) }
+    var pendingRejectIntent by remember { mutableStateOf<PaymentIntentDto?>(null) }
+
+    val isActiveTabLoading = when (state.selectedTab) {
+        VerifyTab.REVIEW_QUEUE -> state.isLoadingReviewIntents
+        VerifyTab.UNCLAIMED_SMS -> state.isLoadingUnclaimed
+        VerifyTab.ORDER_PAY -> state.isLoadingUnpaidOrders
+    }
 
     LaunchedEffect(state.feedbackMessage) {
         state.feedbackMessage?.let { msg ->
@@ -134,11 +154,11 @@ fun VerifyScreen(
                 },
                 actions = {
                     IconButton(
-                        onClick = { viewModel.loadUnclaimed() },
-                        enabled = !state.isLoadingUnclaimed,
+                        onClick = { viewModel.refreshActiveTab() },
+                        enabled = !isActiveTabLoading,
                         modifier = Modifier.size(48.dp)
                     ) {
-                        if (state.isLoadingUnclaimed) {
+                        if (isActiveTabLoading) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(20.dp),
                                 strokeWidth = 2.dp
@@ -160,38 +180,154 @@ fun VerifyScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         containerColor = MaterialTheme.colorScheme.background
     ) { innerPadding ->
-        LazyColumn(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
                 .padding(horizontal = 16.dp),
-            contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            if (state.unclaimedError != null && state.unclaimedItems.isEmpty()) {
-                item {
-                    VerifyErrorCard(
-                        message = state.unclaimedError.orEmpty(),
-                        onRetry = { viewModel.loadUnclaimed() }
-                    )
+            SegmentedPillTabs(
+                options = listOf(
+                    stringResource(R.string.verify_tab_review_queue, state.reviewIntents.size),
+                    stringResource(R.string.verify_tab_unclaimed_sms, state.unclaimedItems.size),
+                    stringResource(R.string.verify_tab_order_pay, state.unpaidOrders.size)
+                ),
+                selectedIndex = state.selectedTab.ordinal,
+                onSelect = { idx ->
+                    val tab = VerifyTab.entries.getOrElse(idx) { VerifyTab.REVIEW_QUEUE }
+                    viewModel.selectTab(tab)
                 }
-            } else if (state.isLoadingUnclaimed && state.unclaimedItems.isEmpty()) {
-                item {
-                    VerifyLoadingCard(label = stringResource(R.string.verify_loading_unclaimed))
-                }
-            } else if (state.unclaimedItems.isEmpty()) {
-                item {
-                    VerifyEmptyCard(onRefresh = { viewModel.loadUnclaimed() })
-                }
-            } else {
-                items(state.unclaimedItems, key = { it.id }) { sms ->
-                    UnclaimedSmsCard(
-                        sms = sms,
-                        onClick = { viewModel.selectSms(sms) }
-                    )
+            )
+
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(top = 4.dp, bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                when (state.selectedTab) {
+                    VerifyTab.REVIEW_QUEUE -> {
+                        if (state.reviewIntentsError != null && state.reviewIntents.isEmpty()) {
+                            item {
+                                VerifyErrorCard(
+                                    message = state.reviewIntentsError.orEmpty(),
+                                    onRetry = { viewModel.loadReviewIntents() }
+                                )
+                            }
+                        } else if (state.isLoadingReviewIntents && state.reviewIntents.isEmpty()) {
+                            item {
+                                VerifyLoadingCard(label = stringResource(R.string.dashboard_loading_intents))
+                            }
+                        } else if (state.reviewIntents.isEmpty()) {
+                            item {
+                                VerifySectionEmptyCard(
+                                    title = stringResource(R.string.verify_review_empty_title),
+                                    desc = stringResource(R.string.verify_review_empty_desc),
+                                    onRefresh = { viewModel.loadReviewIntents() }
+                                )
+                            }
+                        } else {
+                            items(state.reviewIntents, key = { it.id }) { intent ->
+                                PaymentIntentCard(
+                                    intent = intent,
+                                    serverBaseUrl = state.serverUrl,
+                                    fallbackAppName = state.storeName,
+                                    isActionInProgress = state.actionInProgressIntentId == intent.id,
+                                    onApproveClick = { pendingApproveIntent = intent },
+                                    onRejectClick = { pendingRejectIntent = intent },
+                                    onDynamicActionClick = { action ->
+                                        viewModel.triggerIntentAction(intent.id, action.id, action.label)
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    VerifyTab.UNCLAIMED_SMS -> {
+                        if (state.unclaimedError != null && state.unclaimedItems.isEmpty()) {
+                            item {
+                                VerifyErrorCard(
+                                    message = state.unclaimedError.orEmpty(),
+                                    onRetry = { viewModel.loadUnclaimed() }
+                                )
+                            }
+                        } else if (state.isLoadingUnclaimed && state.unclaimedItems.isEmpty()) {
+                            item {
+                                VerifyLoadingCard(label = stringResource(R.string.verify_loading_unclaimed))
+                            }
+                        } else if (state.unclaimedItems.isEmpty()) {
+                            item {
+                                VerifyEmptyCard(onRefresh = { viewModel.loadUnclaimed() })
+                            }
+                        } else {
+                            items(state.unclaimedItems, key = { it.id }) { sms ->
+                                UnclaimedSmsCard(
+                                    sms = sms,
+                                    onClick = { viewModel.selectSms(sms) }
+                                )
+                            }
+                        }
+                    }
+
+                    VerifyTab.ORDER_PAY -> {
+                        if (state.unpaidOrdersError != null && state.unpaidOrders.isEmpty()) {
+                            item {
+                                VerifyErrorCard(
+                                    message = state.unpaidOrdersError.orEmpty(),
+                                    onRetry = { viewModel.loadUnpaidOrders() }
+                                )
+                            }
+                        } else if (state.isLoadingUnpaidOrders && state.unpaidOrders.isEmpty()) {
+                            item {
+                                VerifyLoadingCard(label = stringResource(R.string.dashboard_loading_orders))
+                            }
+                        } else if (state.unpaidOrders.isEmpty()) {
+                            item {
+                                VerifySectionEmptyCard(
+                                    title = stringResource(R.string.verify_orders_empty_title),
+                                    desc = stringResource(R.string.verify_orders_empty_desc),
+                                    onRefresh = { viewModel.loadUnpaidOrders() }
+                                )
+                            }
+                        } else {
+                            items(state.unpaidOrders, key = { it.externalOrderId }) { order ->
+                                VerifyOrderActionCard(
+                                    order = order,
+                                    isActionInProgress = state.actionInProgressOrderId == order.externalOrderId,
+                                    onActionClick = { action ->
+                                        viewModel.performOrderAction(order.externalOrderId, action)
+                                    }
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
+    }
+
+    pendingApproveIntent?.let { intent ->
+        ApproveIntentDialog(
+            intent = intent,
+            isSubmitting = state.actionInProgressIntentId == intent.id,
+            onDismiss = { pendingApproveIntent = null },
+            onConfirmApprove = {
+                viewModel.resolvePaymentIntent(intent.id, "APPROVE", intent.stateVersion, null)
+                pendingApproveIntent = null
+            }
+        )
+    }
+
+    pendingRejectIntent?.let { intent ->
+        RejectIntentDialog(
+            intent = intent,
+            isSubmitting = state.actionInProgressIntentId == intent.id,
+            onDismiss = { pendingRejectIntent = null },
+            onConfirmReject = { reason ->
+                viewModel.resolvePaymentIntent(intent.id, "REJECT", intent.stateVersion, reason)
+                pendingRejectIntent = null
+            }
+        )
     }
 
     state.selectedSms?.let { selectedSms ->
@@ -416,8 +552,248 @@ private fun UnclaimedSmsCard(
                 )
             }
 
-            sms.trustFlag?.takeIf { it.isNotBlank() }?.let { flag ->
-                TrustWarningBadge(trustFlag = flag, compact = true)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                StatusPill(
+                    label = stringResource(R.string.status_unclaimed),
+                    foreground = OrbitSemanticColors.statusGray,
+                    background = StatusGrayBg
+                )
+                sms.trustFlag?.takeIf { it.isNotBlank() }?.let { flag ->
+                    TrustWarningBadge(trustFlag = flag, compact = true)
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun VerifyOrderActionCard(
+    order: MerchantOrderDto,
+    isActionInProgress: Boolean,
+    onActionClick: (String) -> Unit
+) {
+    val cardShape = RoundedCornerShape(20.dp)
+    val orderStatusUpper = order.orderStatus.uppercase(Locale.US)
+    val payStatusUpper = order.paymentStatus.uppercase(Locale.US)
+    val methodUpper = order.paymentMethod.uppercase(Locale.US)
+
+    val (orderFg, orderBg) = when (orderStatusUpper) {
+        "CONFIRMED", "SHIPPED" -> OrbitSemanticColors.statusGreen to StatusGreenBg
+        "CANCELLED" -> OrbitSemanticColors.statusRed to StatusRedBg
+        else -> OrbitSemanticColors.statusAmber to StatusAmberBg
+    }
+    val (payFg, payBg) = when (payStatusUpper) {
+        "PAID" -> OrbitSemanticColors.statusGreen to StatusGreenBg
+        "FAILED" -> OrbitSemanticColors.statusRed to StatusRedBg
+        else -> OrbitSemanticColors.statusAmber to StatusAmberBg
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, MaterialTheme.colorScheme.outline, cardShape),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        shape = cardShape
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "#${order.externalOrderId}",
+                    style = MaterialTheme.typography.titleMedium.copy(fontFeatureSettings = "tnum"),
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = formatBdtAmount(order.baseAmount),
+                    style = MaterialTheme.typography.titleMedium.copy(fontFeatureSettings = "tnum"),
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                StatusPill(
+                    label = methodUpper,
+                    foreground = MaterialTheme.colorScheme.onSurfaceVariant,
+                    background = StatusGrayBg
+                )
+                StatusPill(
+                    label = stringResource(R.string.order_status_label, orderStatusUpper.replace("_", " ")),
+                    foreground = orderFg,
+                    background = orderBg
+                )
+                StatusPill(
+                    label = stringResource(R.string.payment_status_label, payStatusUpper.replace("_", " ")),
+                    foreground = payFg,
+                    background = payBg
+                )
+            }
+
+            val customerLine = listOfNotNull(
+                order.customerName?.takeIf { it.isNotBlank() },
+                order.customerPhone?.takeIf { it.isNotBlank() }
+            ).joinToString(" · ")
+            if (customerLine.isNotBlank()) {
+                Text(
+                    text = customerLine,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum"),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                val btnShape = RoundedCornerShape(12.dp)
+
+                if (payStatusUpper != "PAID") {
+                    Button(
+                        onClick = { onActionClick("MARK_PAID") },
+                        enabled = !isActionInProgress,
+                        modifier = Modifier.heightIn(min = 48.dp),
+                        shape = btnShape,
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        )
+                    ) {
+                        if (isActionInProgress) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.onPrimary
+                            )
+                        } else {
+                            Icon(Icons.Default.Payments, contentDescription = null, modifier = Modifier.size(16.dp))
+                        }
+                        Spacer(modifier = Modifier.size(6.dp))
+                        Text(
+                            text = stringResource(R.string.order_action_mark_paid),
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
+                }
+
+                if (orderStatusUpper in setOf("NEW", "PENDING", "AWAITING_CONFIRMATION")) {
+                    OutlinedButton(
+                        onClick = { onActionClick("CONFIRM") },
+                        enabled = !isActionInProgress,
+                        modifier = Modifier.heightIn(min = 48.dp),
+                        shape = btnShape,
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
+                    ) {
+                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.size(6.dp))
+                        Text(
+                            text = stringResource(R.string.order_action_confirm),
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
+                }
+
+                if (orderStatusUpper != "SHIPPED" && orderStatusUpper != "CANCELLED") {
+                    OutlinedButton(
+                        onClick = { onActionClick("CANCEL") },
+                        enabled = !isActionInProgress,
+                        modifier = Modifier.heightIn(min = 48.dp),
+                        shape = btnShape,
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                        border = BorderStroke(1.dp, StatusRed.copy(alpha = 0.45f)),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = OrbitSemanticColors.statusRed)
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.size(6.dp))
+                        Text(
+                            text = stringResource(R.string.order_action_cancel),
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun VerifySectionEmptyCard(
+    title: String,
+    desc: String,
+    onRefresh: () -> Unit
+) {
+    val cardShape = RoundedCornerShape(20.dp)
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, MaterialTheme.colorScheme.outline, cardShape),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        shape = cardShape
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.VerifiedUser,
+                contentDescription = null,
+                tint = StatusGreen,
+                modifier = Modifier.size(36.dp)
+            )
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                textAlign = TextAlign.Center
+            )
+            Text(
+                text = desc,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
+            OutlinedButton(
+                onClick = onRefresh,
+                modifier = Modifier.heightIn(min = 48.dp),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+            ) {
+                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.size(6.dp))
+                Text(
+                    text = stringResource(R.string.common_refresh),
+                    style = MaterialTheme.typography.labelLarge
+                )
             }
         }
     }

@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { AppContextEnv } from '../../shared/types';
-import { authMerchantMiddleware } from '../../shared/middleware';
+import { authMerchantMiddleware, requireOwnerRoleMiddleware } from '../../shared/middleware';
 import { createWalletSchema, updateWalletSchema } from './wallets.schema';
 import { listWallets, createWallet, updateWallet, deleteWallet } from './wallets.service';
 
@@ -22,9 +22,9 @@ router.get('/', async (c) => {
 
 /**
  * POST /api/v1/wallets
- * Registers a new SIM wallet with rotation limits.
+ * Registers a new SIM wallet with rotation limits (owner-only).
  */
-router.post('/', async (c) => {
+router.post('/', requireOwnerRoleMiddleware, async (c) => {
   const db = c.get('db');
   const merchantId = c.get('merchantId')!;
   const body = await c.req.json();
@@ -35,9 +35,9 @@ router.post('/', async (c) => {
 
 /**
  * PATCH /api/v1/wallets/:id
- * Updates an existing SIM wallet's parameters or status.
+ * Updates an existing SIM wallet's parameters or status (owner-only).
  */
-router.patch('/:id', async (c) => {
+router.patch('/:id', requireOwnerRoleMiddleware, async (c) => {
   const db = c.get('db');
   const merchantId = c.get('merchantId')!;
   const walletId = c.req.param('id');
@@ -49,9 +49,9 @@ router.patch('/:id', async (c) => {
 
 /**
  * DELETE /api/v1/wallets/:id
- * Deletes a registered wallet.
+ * Deletes a registered wallet (owner-only).
  */
-router.delete('/:id', async (c) => {
+router.delete('/:id', requireOwnerRoleMiddleware, async (c) => {
   const db = c.get('db');
   const merchantId = c.get('merchantId')!;
   const walletId = c.req.param('id');

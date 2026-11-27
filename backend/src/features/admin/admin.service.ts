@@ -70,7 +70,7 @@ export interface AdminOverviewStats {
 export async function getAdminOverview(db: AppDb): Promise<AdminOverviewStats> {
   const allMerchants = await db.select().from(merchants);
   const now = Date.now();
-  const onlineThresholdMs = 90 * 1000;
+  const onlineThresholdMs = 5 * 60 * 1000;
 
   let activeProjects = 0;
   let onlineDevices = 0;
@@ -143,7 +143,7 @@ export async function getAdminOverview(db: AppDb): Promise<AdminOverviewStats> {
 export async function getAdminProjects(db: AppDb): Promise<AdminProjectSummary[]> {
   const allMerchants = await db.select().from(merchants).orderBy(desc(merchants.createdAt));
   const now = Date.now();
-  const onlineThresholdMs = 90 * 1000;
+  const onlineThresholdMs = 5 * 60 * 1000;
 
   const result: AdminProjectSummary[] = [];
 
@@ -238,7 +238,7 @@ export async function createAdminProject(
     updatedAt: now,
   });
 
-  // Seed default bKash and Nagad wallets
+  // Seed sample bKash and Nagad wallets as inactive until merchant configures real wallet numbers
   const walletsInsert = db.insert(merchantWallets).values([
     {
       id: `wlt_${generateSecureToken(12)}`,
@@ -249,7 +249,7 @@ export async function createAdminProject(
       monthlyVolumeLimit: 300000,
       currentMonthVolume: 0,
       isPrimary: true,
-      isActive: true,
+      isActive: false,
       priorityOrder: 1,
     },
     {
@@ -261,7 +261,7 @@ export async function createAdminProject(
       monthlyVolumeLimit: 300000,
       currentMonthVolume: 0,
       isPrimary: false,
-      isActive: true,
+      isActive: false,
       priorityOrder: 2,
     },
   ]);

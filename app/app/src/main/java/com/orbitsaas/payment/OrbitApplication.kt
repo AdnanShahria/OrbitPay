@@ -66,7 +66,7 @@ class OrbitApplication : Application() {
                 setShowBadge(false)
             }
 
-            // 2. Alert Channel (High importance, payment verified heads-up notification)
+            // 2. Alert Channel (High importance, legacy compatibility)
             val alertChannel = NotificationChannel(
                 ORBIT_ALERT_CHANNEL,
                 getString(R.string.alert_channel_name),
@@ -77,7 +77,46 @@ class OrbitApplication : Application() {
                 setShowBadge(true)
             }
 
-            notificationManager.createNotificationChannels(listOf(syncChannel, alertChannel))
+            // 3. Urgent Payment Reviews Channel (High importance + sound & vibration)
+            val urgentPaymentsChannel = NotificationChannel(
+                ORBIT_PAYMENTS_URGENT_CHANNEL,
+                getString(R.string.channel_urgent_name),
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = getString(R.string.channel_urgent_desc)
+                enableVibration(true)
+                setShowBadge(true)
+            }
+
+            // 4. Verified Payments Channel (Default importance)
+            val verifiedPaymentsChannel = NotificationChannel(
+                ORBIT_PAYMENTS_VERIFIED_CHANNEL,
+                getString(R.string.channel_verified_name),
+                NotificationManager.IMPORTANCE_DEFAULT
+            ).apply {
+                description = getString(R.string.channel_verified_desc)
+                setShowBadge(true)
+            }
+
+            // 5. Payment Status & Updates Channel (Low/quiet importance)
+            val statusPaymentsChannel = NotificationChannel(
+                ORBIT_PAYMENTS_STATUS_CHANNEL,
+                getString(R.string.channel_status_name),
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = getString(R.string.channel_status_desc)
+                setShowBadge(false)
+            }
+
+            notificationManager.createNotificationChannels(
+                listOf(
+                    syncChannel,
+                    alertChannel,
+                    urgentPaymentsChannel,
+                    verifiedPaymentsChannel,
+                    statusPaymentsChannel
+                )
+            )
             Log.d(TAG, "Notification channels registered successfully.")
         }
     }
@@ -107,6 +146,9 @@ class OrbitApplication : Application() {
 
         const val ORBIT_SYNC_CHANNEL = "orbit_sync_channel"
         const val ORBIT_ALERT_CHANNEL = "orbit_alert_channel"
+        const val ORBIT_PAYMENTS_URGENT_CHANNEL = "orbit_payments_urgent"
+        const val ORBIT_PAYMENTS_VERIFIED_CHANNEL = "orbit_payments_verified"
+        const val ORBIT_PAYMENTS_STATUS_CHANNEL = "orbit_payments_status"
 
         lateinit var instance: OrbitApplication
             private set

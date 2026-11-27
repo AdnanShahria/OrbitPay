@@ -44,7 +44,7 @@ router.post('/manual-match', async (c) => {
   const body = await c.req.json();
   const input = manualMatchSchema.parse(body);
 
-  const matched = await manualMatchTransaction(db, merchant, input, c.env);
+  const matched = await manualMatchTransaction(db, merchant, input, c.env, c);
   return c.json({ success: true, data: matched });
 });
 

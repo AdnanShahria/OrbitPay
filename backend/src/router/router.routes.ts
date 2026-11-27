@@ -1,14 +1,27 @@
 import { Hono, type MiddlewareHandler } from 'hono';
 import { z } from 'zod';
-import { desc } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 import { routerProviderLogs } from '../db/schema';
-import { BadRequestError, UnauthorizedError } from '../shared/errors';
+import { BadRequestError, ForbiddenError, UnauthorizedError } from '../shared/errors';
 import { toExactArrayBuffer } from '../shared/crypto';
-import { authDeviceMiddleware, authMasterAdminMiddleware, authMerchantMiddleware } from '../shared/middleware';
+import {
+  authDeviceMiddleware,
+  authMasterAdminMiddleware,
+  authMerchantMiddleware,
+  resolveJwtSecret,
+} from '../shared/middleware';
 import type { AppContextEnv } from '../shared/types';
 import { getDatabaseProviderCapabilities, checkPrimaryDatabaseHealth, routeKvDelete, routeKvGet, routeKvSet } from './database';
 import { getEmailProviderCapabilities, routeEmail } from './email';
-import { base64ToUint8, getImageProviderCapabilities, routeImageDelete, routeImageDownload, routeImageUpload } from './image';
+import {
+  base64ToUint8,
+  getImageProviderCapabilities,
+  getMediaAssetRecord,
+  routeImageDelete,
+  routeImageDownload,
+  routeImageUpload,
+  verifyProofAssetToken,
+} from './image';
 import { createHealthSnapshot } from './secrets';
 import { getSmsProviderCapabilities, routeSmsOrPush } from './sms';
 
@@ -16,9 +29,7 @@ const router = new Hono<AppContextEnv>();
 
 /**
  * Backend Verification Gate
- * Ensures every router operation (email, sms, image upload/delete, database KV)
- * is invoked by an authenticated Admin, Merchant Storefront, or Android Device.
- * Zero secrets are ever sent to or read from the frontend.
+ * Ensures every router operation is invoked by an authenticated Admin, Merchant, or Device.
  */
 const authRouterCallerMiddleware: MiddlewareHandler<AppContextEnv> = async (c, next) => {
   const adminKey = c.req.header('x-admin-key');
@@ -34,15 +45,33 @@ const authRouterCallerMiddleware: MiddlewareHandler<AppContextEnv> = async (c, n
     return authDeviceMiddleware(c, next);
   }
 
-  const merchantSecret = c.req.header('x-merchant-secret') || c.req.header('authorization');
-  if (merchantSecret) {
+  const merchantCredential =
+    c.req.header('x-merchant-api-key') ||
+    c.req.header('x-merchant-secret') ||
+    c.req.header('authorization');
+  if (merchantCredential) {
     return authMerchantMiddleware(c, next);
   }
 
   throw new UnauthorizedError(
-    'Backend verification required: provide X-Merchant-Secret, Authorization: Bearer, X-Device-Key, or X-Admin-Key'
+    'Backend verification required: provide X-Merchant-Api-Key, X-Merchant-Secret, Authorization: Bearer, X-Device-Key, or X-Admin-Key'
   );
 };
+
+/**
+ * Blocks X-Device-Key credentials from accessing privileged messaging, KV, or asset deletion endpoints.
+ */
+const blockDeviceKeyMiddleware: MiddlewareHandler<AppContextEnv> = async (c, next) => {
+  if (c.get('authType') === 'device' || Boolean(c.req.header('x-device-key')?.trim())) {
+    throw new ForbiddenError('Device credentials are not permitted on this router endpoint');
+  }
+  await next();
+};
+
+function scopeTenantKvKey(callerId: string | undefined, key: string): string {
+  const tenant = callerId || 'anonymous';
+  return `tenant:${tenant}:${key}`;
+}
 
 const sendEmailSchema = z.object({
   to: z.union([z.string().email(), z.array(z.string().email()).min(1).max(50)]),
@@ -98,7 +127,6 @@ const kvSetSchema = z.object({
 
 /**
  * GET /api/v1/router/health
- * Safe provider capability & cooldown snapshot (never returns any secret values).
  */
 router.get('/health', authRouterCallerMiddleware, async (c) => {
   const snapshot = createHealthSnapshot({
@@ -112,24 +140,30 @@ router.get('/health', authRouterCallerMiddleware, async (c) => {
 
 /**
  * GET /api/v1/router/logs
- * Returns recent failover & routing audit logs from D1.
+ * Tenant-scoped failover & routing audit logs from D1.
  */
 router.get('/logs', authRouterCallerMiddleware, async (c) => {
   const db = c.get('db');
-  const logs = await db
-    .select()
-    .from(routerProviderLogs)
-    .orderBy(desc(routerProviderLogs.createdAt))
-    .limit(50);
+  const callerId = c.get('merchantId');
 
+  const query =
+    callerId === 'master_admin'
+      ? db.select().from(routerProviderLogs).orderBy(desc(routerProviderLogs.createdAt)).limit(50)
+      : db
+          .select()
+          .from(routerProviderLogs)
+          .where(eq(routerProviderLogs.callerId, callerId || ''))
+          .orderBy(desc(routerProviderLogs.createdAt))
+          .limit(50);
+
+  const logs = await query;
   return c.json({ success: true, data: logs });
 });
 
 /**
  * POST /api/v1/router/email/send
- * Routes email dispatch through configured email providers with automatic fallback.
  */
-router.post('/email/send', authRouterCallerMiddleware, async (c) => {
+router.post('/email/send', authRouterCallerMiddleware, blockDeviceKeyMiddleware, async (c) => {
   const db = c.get('db');
   const callerId = c.get('merchantId');
   const body = await c.req.json();
@@ -140,15 +174,14 @@ router.post('/email/send', authRouterCallerMiddleware, async (c) => {
   return c.json(result, status);
 });
 
-router.get('/email/providers', authRouterCallerMiddleware, (c) => {
+router.get('/email/providers', authRouterCallerMiddleware, blockDeviceKeyMiddleware, (c) => {
   return c.json({ success: true, data: getEmailProviderCapabilities(c.env) });
 });
 
 /**
  * POST /api/v1/router/sms/send
- * Routes SMS or FCM push notification with automatic fallback.
  */
-router.post('/sms/send', authRouterCallerMiddleware, async (c) => {
+router.post('/sms/send', authRouterCallerMiddleware, blockDeviceKeyMiddleware, async (c) => {
   const db = c.get('db');
   const callerId = c.get('merchantId');
   const body = await c.req.json();
@@ -159,14 +192,12 @@ router.post('/sms/send', authRouterCallerMiddleware, async (c) => {
   return c.json(result, status);
 });
 
-router.get('/sms/providers', authRouterCallerMiddleware, (c) => {
+router.get('/sms/providers', authRouterCallerMiddleware, blockDeviceKeyMiddleware, (c) => {
   return c.json({ success: true, data: getSmsProviderCapabilities(c.env) });
 });
 
 /**
  * POST /api/v1/router/image/upload
- * Supports multipart/form-data (`file`) OR JSON `{ fileName, mimeType, base64 }`.
- * Automatically cascades across R2 -> ImgBB -> Supabase -> MongoDB -> D1.
  */
 router.post('/image/upload', authRouterCallerMiddleware, async (c) => {
   const db = c.get('db');
@@ -222,11 +253,49 @@ router.get('/image/providers', authRouterCallerMiddleware, (c) => {
 
 /**
  * GET /api/v1/router/image/:id
- * Unified image loader: resolves asset from primary or fallback storage and streams bytes.
+ * Unified image loader with hardened security headers and private authorization for payment proofs.
  */
 router.get('/image/:id', async (c) => {
   const db = c.get('db');
   const assetId = c.req.param('id');
+  const assetMeta = await getMediaAssetRecord(db, assetId);
+
+  const isPrivateProof = assetMeta.storageKey.startsWith('proofs/');
+  if (isPrivateProof) {
+    let authorized = false;
+    const token = c.req.query('token')?.trim();
+
+    if (token) {
+      try {
+        authorized = await verifyProofAssetToken(assetId, token, resolveJwtSecret(c.env));
+      } catch {
+        authorized = false;
+      }
+    }
+
+    if (!authorized) {
+      const hasCallerAuth = Boolean(
+        c.req.header('x-admin-key') ||
+          c.req.header('x-device-key') ||
+          c.req.header('x-merchant-api-key') ||
+          c.req.header('x-merchant-secret') ||
+          c.req.header('authorization')
+      );
+      if (hasCallerAuth) {
+        await authRouterCallerMiddleware(c, async () => {
+          const callerId = c.get('merchantId');
+          if (callerId === 'master_admin' || (callerId && callerId === assetMeta.merchantId)) {
+            authorized = true;
+          }
+        });
+      }
+    }
+
+    if (!authorized) {
+      throw new UnauthorizedError('Valid signed token or merchant authorization is required to view payment proofs');
+    }
+  }
+
   const loaded = await routeImageDownload(c.env, db, assetId);
 
   return new Response(toExactArrayBuffer(loaded.bytes), {
@@ -234,7 +303,9 @@ router.get('/image/:id', async (c) => {
     headers: {
       'Content-Type': loaded.mimeType,
       'Content-Disposition': `inline; filename="${loaded.fileName}"`,
-      'Cache-Control': 'public, max-age=86400',
+      'Cache-Control': isPrivateProof ? 'private, max-age=300' : 'public, max-age=86400',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': "default-src 'none'; sandbox",
       'X-Orbit-Storage-Provider': loaded.providerUsed,
       'X-Orbit-Fallback-Triggered': String(loaded.fallbackTriggered),
     },
@@ -243,12 +314,12 @@ router.get('/image/:id', async (c) => {
 
 /**
  * DELETE /api/v1/router/image/:id
- * Deletes an image asset from its backing storage provider and D1 registry.
  */
-router.delete('/image/:id', authRouterCallerMiddleware, async (c) => {
+router.delete('/image/:id', authRouterCallerMiddleware, blockDeviceKeyMiddleware, async (c) => {
   const db = c.get('db');
+  const callerId = c.get('merchantId');
   const assetId = c.req.param('id');
-  const result = await routeImageDelete(c.env, db, assetId);
+  const result = await routeImageDelete(c.env, db, assetId, callerId);
   return c.json({ success: true, data: result });
 });
 
@@ -264,13 +335,13 @@ router.get('/database/health', authRouterCallerMiddleware, async (c) => {
 /**
  * POST /api/v1/router/database/kv
  */
-router.post('/database/kv', authRouterCallerMiddleware, async (c) => {
+router.post('/database/kv', authRouterCallerMiddleware, blockDeviceKeyMiddleware, async (c) => {
   const db = c.get('db');
   const callerId = c.get('merchantId');
   const body = await c.req.json();
   const input = kvSetSchema.parse(body);
 
-  const result = await routeKvSet(c.env, db, input.key, input.value, {
+  const result = await routeKvSet(c.env, db, scopeTenantKvKey(callerId, input.key), input.value, {
     ttlSeconds: input.ttlSeconds,
     preferredProvider: input.preferredProvider,
     callerId,
@@ -281,22 +352,22 @@ router.post('/database/kv', authRouterCallerMiddleware, async (c) => {
 /**
  * GET /api/v1/router/database/kv/:key
  */
-router.get('/database/kv/:key', authRouterCallerMiddleware, async (c) => {
+router.get('/database/kv/:key', authRouterCallerMiddleware, blockDeviceKeyMiddleware, async (c) => {
   const db = c.get('db');
   const callerId = c.get('merchantId');
   const key = c.req.param('key');
-  const result = await routeKvGet(c.env, db, key, { callerId });
+  const result = await routeKvGet(c.env, db, scopeTenantKvKey(callerId, key), { callerId });
   return c.json(result, result.success ? 200 : 404);
 });
 
 /**
  * DELETE /api/v1/router/database/kv/:key
  */
-router.delete('/database/kv/:key', authRouterCallerMiddleware, async (c) => {
+router.delete('/database/kv/:key', authRouterCallerMiddleware, blockDeviceKeyMiddleware, async (c) => {
   const db = c.get('db');
   const callerId = c.get('merchantId');
   const key = c.req.param('key');
-  const result = await routeKvDelete(c.env, db, key, { callerId });
+  const result = await routeKvDelete(c.env, db, scopeTenantKvKey(callerId, key), { callerId });
   return c.json(result, result.success ? 200 : 502);
 });
 

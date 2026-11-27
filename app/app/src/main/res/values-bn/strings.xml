@@ -9,6 +9,12 @@
     <string name="sync_channel_desc">ব্যাকগ্রাউন্ড এমএফএস সিঙ্ক অবস্থা ও চলমান লিসেনার দেখায়</string>
     <string name="alert_channel_name">ORBIT পেমেন্ট অ্যালার্ট</string>
     <string name="alert_channel_desc">যাচাইকৃত স্টোর পেমেন্টের তাৎক্ষণিক অ্যালার্ট</string>
+    <string name="channel_urgent_name">জরুরি পেমেন্ট পর্যালোচনা</string>
+    <string name="channel_urgent_desc">ম্যানুয়াল রিভিউ, এসকেলেশন ও নতুন পেমেন্টের উচ্চ-গুরুত্বের অ্যালার্ট</string>
+    <string name="channel_verified_name">যাচাইকৃত পেমেন্ট</string>
+    <string name="channel_verified_desc">পেমেন্ট যাচাই বা অনুমোদনের নিশ্চিতকরণ বার্তা</string>
+    <string name="channel_status_name">পেমেন্ট অবস্থা ও আপডেট</string>
+    <string name="channel_status_desc">ব্যাকগ্রাউন্ড সার্ভিস অবস্থা ও অ্যাকশন নিশ্চিতকরণ</string>
 
     <!-- Common Actions & Content Descriptions -->
     <string name="action_back">পিছনে</string>
@@ -188,4 +194,44 @@
     <string name="update_notif_ready_title">ORBIT Pay v%1$s প্রস্তুত</string>
     <string name="update_notif_ready_body">আপডেট ডাউনলোড ও যাচাই সম্পন্ন। v%1$s ইনস্টল করতে ট্যাপ করুন।</string>
     <string name="update_notif_required_body">আবশ্যিক আপডেট v%1$s প্রস্তুত। এখনই ইনস্টল করতে ট্যাপ করুন।</string>
+
+    <!-- Dynamic Payment Intents & Notification Actions -->
+    <string name="dashboard_tab_payments">পেমেন্ট (%1$d)</string>
+    <string name="dashboard_tab_orders_short">অর্ডার (%1$d)</string>
+    <string name="dashboard_tab_mfs_short">MFS (%1$d)</string>
+    <string name="dashboard_loading_intents">পেমেন্ট ইন্টেন্ট লোড হচ্ছে…</string>
+    <string name="dashboard_empty_intents_title">এখনো কোনো পেমেন্ট ইন্টেন্ট নেই</string>
+    <string name="dashboard_empty_intents_desc">আপনার সংযুক্ত অ্যাপগুলো থেকে আসা পেমেন্টগুলো রিয়েল-টাইম যাচাই ও নিয়ন্ত্রণের জন্য এখানে দেখা যাবে।</string>
+    <string name="action_refresh_intents">পেমেন্ট রিফ্রেশ করুন</string>
+    <string name="intent_approve">অনুমোদন করুন</string>
+    <string name="intent_reject">প্রত্যাখ্যান করুন</string>
+    <string name="intent_open_admin">অ্যাডমিন খুলুন</string>
+    <string name="intent_view_receipt">রসিদ দেখুন</string>
+    <string name="intent_receipt_attached">রসিদ সংযুক্ত</string>
+    <string name="intent_device_offline_submit">সাবমিটের সময় ডিভাইস অফলাইন ছিল</string>
+    <string name="intent_reject_dialog_title">পেমেন্ট প্রত্যাখ্যান করুন</string>
+    <string name="intent_reject_dialog_body">%1$s (%2$s)-এর পেমেন্ট প্রত্যাখ্যান করবেন? এটি সংযুক্ত অ্যাপে জানানো হবে।</string>
+    <string name="intent_reject_reason_label">প্রত্যাখ্যানের কারণ (ঐচ্ছিক)</string>
+    <string name="intent_reject_reason_placeholder">যেমন: TrxID পাওয়া যায়নি বা টাকার পরিমাণ অমিল</string>
+    <string name="intent_approve_dialog_title">পেমেন্ট অনুমোদন করুন</string>
+    <string name="intent_approve_dialog_body">%1$s-এর জন্য %2$s অনুমোদন করবেন? এটি পেমেন্ট যাচাইকৃত হিসেবে চিহ্নিত করবে এবং ওয়েবহুক পাঠাবে।</string>
+    <string name="intent_status_open">খোলা</string>
+    <string name="intent_status_waiting_sms">SMS-এর অপেক্ষায়</string>
+    <string name="intent_status_manual_review">ম্যানুয়াল রিভিউ</string>
+    <string name="intent_status_verified">যাচাইকৃত</string>
+    <string name="intent_status_rejected">প্রত্যাখ্যাত</string>
+    <string name="intent_status_expired">মেয়াদোত্তীর্ণ</string>
+    <string name="intent_status_refunded">রিফান্ডকৃত</string>
+    <string name="notif_action_approve">অনুমোদন</string>
+    <string name="notif_action_reject">প্রত্যাখ্যান</string>
+    <string name="notif_action_open_admin">অ্যাডমিন খুলুন</string>
+    <string name="notif_action_result_title">অ্যাকশন সম্পন্ন</string>
+    <string name="notif_action_failed_title">অ্যাকশন ব্যর্থ হয়েছে</string>
+    <string name="verify_tab_review_queue">রিভিউ (%1$d)</string>
+    <string name="verify_tab_unclaimed_sms">SMS (%1$d)</string>
+    <string name="verify_tab_order_pay">অর্ডার (%1$d)</string>
+    <string name="verify_review_empty_title">পর্যালোচনার জন্য কোনো পেমেন্ট নেই</string>
+    <string name="verify_review_empty_desc">ম্যানুয়াল অনুমোদনের অপেক্ষায় থাকা পেমেন্টগুলো এখানে দেখা যাবে।</string>
+    <string name="verify_orders_empty_title">কোনো অপরিশোধিত অর্ডার নেই</string>
+    <string name="verify_orders_empty_desc">পেমেন্ট নিশ্চিতকরণ বা COD সংগ্রহের অপেক্ষায় থাকা অর্ডারগুলো এখানে দেখা যাবে।</string>
 </resources>

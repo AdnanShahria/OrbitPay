@@ -100,6 +100,7 @@ data class TransactionsPageDto(
 @Serializable
 data class QueueItemDto(
     val id: String = "",
+    val paymentIntentId: String? = null,
     val provider: String = "",
     val externalOrderId: String = "",
     val customerEmail: String? = null,
@@ -109,6 +110,7 @@ data class QueueItemDto(
     val submittedAmount: Double? = null,
     val submittedTrxId: String? = null,
     val submittedSender: String? = null,
+    val escalationReason: String? = null,
     val status: String = "",
     val expiresAt: String? = null,
     val createdAt: String? = null
@@ -263,4 +265,114 @@ data class OrderActionResponse(
     val data: OrderActionData? = null,
     val error: String? = null,
     val message: String? = null
+)
+
+@Serializable
+data class DynamicPaymentActionDto(
+    val id: String = "",
+    val label: String = "",
+    val style: String = "secondary",
+    val webhookEvent: String? = null
+)
+
+@Serializable
+data class DisplayHighlightDto(
+    val label: String = "",
+    val value: String = ""
+)
+
+@Serializable
+data class PaymentDisplayDto(
+    val appName: String? = null,
+    val appDomain: String? = null,
+    val category: String? = null,
+    val referenceLabel: String? = null,
+    val title: String? = null,
+    val subtitle: String? = null,
+    val highlights: List<DisplayHighlightDto> = emptyList(),
+    val adminDeepLink: String? = null
+)
+
+@Serializable
+data class PaymentCustomerDto(
+    val name: String? = null,
+    val email: String? = null,
+    val phone: String? = null
+)
+
+@Serializable
+data class PaymentIntentDto(
+    val id: String = "",
+    val merchantId: String = "",
+    val vertical: String = "custom",
+    val externalRefId: String = "",
+    val verificationMode: String = "AUTO",
+    val status: String = "OPEN",
+    val baseAmount: Double = 0.0,
+    val uniqueAmount: Double = 0.0,
+    val paidAmount: Double? = null,
+    val provider: String? = null,
+    val trxId: String? = null,
+    val senderNumber: String? = null,
+    val receiptAssetId: String? = null,
+    val receiptUrl: String? = null,
+    val matchType: String? = null,
+    val trustFlag: String? = null,
+    val deviceOnlineAtSubmit: Boolean? = null,
+    val smsLedgerId: String? = null,
+    val smsReconciliationState: String? = null,
+    val escalationReason: String? = null,
+    val resolutionSource: String? = null,
+    val rejectionReason: String? = null,
+    val customer: PaymentCustomerDto? = null,
+    val display: PaymentDisplayDto = PaymentDisplayDto(),
+    val actions: List<DynamicPaymentActionDto> = emptyList(),
+    val stateVersion: Int = 1,
+    val submitAttempts: Int = 0,
+    val graceExpiresAt: String? = null,
+    val expiresAt: String? = null,
+    val verifiedAt: String? = null,
+    val resolvedAt: String? = null,
+    val createdAt: String? = null,
+    val updatedAt: String? = null
+)
+
+@Serializable
+data class PaymentIntentsListData(
+    val items: List<PaymentIntentDto> = emptyList(),
+    val total: Int = 0,
+    val limit: Int = 50,
+    val offset: Int = 0
+)
+
+@Serializable
+data class ResolvePaymentRequest(
+    val decision: String,
+    val expectedStateVersion: Int? = null,
+    val resolutionSource: String = "ORBIT_ANDROID",
+    val reason: String? = null,
+    val trxId: String? = null
+)
+
+@Serializable
+data class ResolvePaymentData(
+    val paymentIntent: PaymentIntentDto? = null,
+    val alreadyResolved: Boolean = false
+)
+
+@Serializable
+data class TriggerActionRequest(
+    val actionId: String,
+    val note: String? = null
+)
+
+@Serializable
+data class TriggerActionData(
+    val paymentIntentId: String = "",
+    val externalRefId: String = "",
+    val actionId: String = "",
+    val event: String = "",
+    val webhookDispatched: Boolean = false,
+    val deliveryId: String? = null,
+    val statusCode: Int? = null
 )

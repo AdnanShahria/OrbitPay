@@ -119,7 +119,7 @@ router.get('/webhooks', requireAdminAuth, async (c) => {
  */
 router.post('/webhooks/retry', requireAdminAuth, async (c) => {
   const db = c.get('db');
-  const result = await processWebhookRetries(db);
+  const result = await processWebhookRetries(db, c.env);
   return c.json({ success: true, data: result });
 });
 

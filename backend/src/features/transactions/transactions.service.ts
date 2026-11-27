@@ -1,16 +1,20 @@
-import { eq, and, desc, sql, like, or, type SQL } from 'drizzle-orm';
+import { and, desc, eq, inArray, like, or, sql, type SQL } from 'drizzle-orm';
+import type { Context } from 'hono';
 import type { AppDb } from '../../db/client';
 import {
+  consumedTrxIds,
+  paymentIntents,
   smsLedger,
   verificationQueue,
   type MerchantRecord,
   type SmsLedgerRecord,
 } from '../../db/schema';
-import { NotFoundError, BadRequestError } from '../../shared/errors';
-import type { Env } from '../../shared/types';
+import { BadRequestError, ConflictError, NotFoundError } from '../../shared/errors';
+import { safeWaitUntil } from '../../shared/middleware';
+import type { AppContextEnv, Env } from '../../shared/types';
+import { syncVerifiedOrderAndSession } from '../payments/verification.engine';
 import { incrementWalletVolume } from '../wallets/wallets.service';
 import { dispatchWebhook, sendPushToMerchantDevices } from '../webhooks/webhook.dispatcher';
-import { syncVerifiedOrderAndSession } from '../checkout/checkout.service';
 import type { ListTransactionsQuery, ManualMatchInput } from './transactions.schema';
 
 export interface ListTransactionsResult {
@@ -61,14 +65,12 @@ export async function listTransactions(
 
   const whereClause = and(...conditions);
 
-  // Get total count
   const countRes = await db
     .select({ count: sql<number>`COUNT(*)` })
     .from(smsLedger)
     .where(whereClause);
   const total = Number(countRes[0]?.count || 0);
 
-  // Get paginated items
   const items = await db
     .select()
     .from(smsLedger)
@@ -87,15 +89,16 @@ export async function listTransactions(
 
 /**
  * Manual Match Resolver
- * Allows merchant in dashboard to resolve customer typos by manually linking an UNCLAIMED SMS
- * to an external order ID.
+ * Links an UNCLAIMED SMS ledger entry to an external order ID with atomic CAS + consumed_trx_ids.
  */
 export async function manualMatchTransaction(
   db: AppDb,
   merchant: MerchantRecord,
   payload: ManualMatchInput,
-  fcmServerKeyOrEnv?: string | Env
+  fcmServerKeyOrEnv?: string | Env,
+  ctx?: Context<AppContextEnv>
 ): Promise<SmsLedgerRecord> {
+  const env = typeof fcmServerKeyOrEnv === 'string' ? undefined : fcmServerKeyOrEnv;
   const existing = await db
     .select()
     .from(smsLedger)
@@ -111,37 +114,95 @@ export async function manualMatchTransaction(
     throw new BadRequestError(`Transaction is already marked as ${row.status}`);
   }
 
-  const now = new Date();
+  const existingConsumed = await db
+    .select()
+    .from(consumedTrxIds)
+    .where(and(eq(consumedTrxIds.merchantId, merchant.id), eq(consumedTrxIds.trxId, row.trxId)))
+    .limit(1);
 
-  // 1. Update sms_ledger
-  await db
+  if (existingConsumed[0]) {
+    throw new ConflictError(`Transaction ID '${row.trxId}' has already been consumed`);
+  }
+
+  const now = new Date();
+  const intentRows = await db
+    .select()
+    .from(paymentIntents)
+    .where(
+      and(
+        eq(paymentIntents.merchantId, merchant.id),
+        eq(paymentIntents.externalRefId, payload.externalOrderId)
+      )
+    )
+    .limit(1);
+  const intent = intentRows[0];
+
+  const claimed = await db
     .update(smsLedger)
     .set({
       status: 'MANUAL_VERIFIED',
       matchType: 'MANUAL_VERIFIED',
       externalOrderId: payload.externalOrderId,
+      paymentIntentId: intent?.id ?? null,
       verifiedAt: now,
     })
-    .where(eq(smsLedger.id, row.id));
+    .where(and(eq(smsLedger.id, row.id), eq(smsLedger.status, 'UNCLAIMED')))
+    .returning();
 
-  // 2. Resolve matching verification_queue item if one was waiting
+  if (!claimed[0]) {
+    throw new ConflictError('Transaction was already claimed concurrently');
+  }
+
+  await db
+    .insert(consumedTrxIds)
+    .values({
+      merchantId: merchant.id,
+      trxId: row.trxId,
+      provider: row.provider,
+      paymentIntentId: intent?.id ?? null,
+      externalRefId: payload.externalOrderId,
+      resolutionSource: ctx?.get('authType') === 'device' ? 'ORBIT_ANDROID' : 'ORBIT_DASHBOARD',
+      consumedAt: now,
+    })
+    .onConflictDoNothing();
+
+  if (intent) {
+    await db
+      .update(paymentIntents)
+      .set({
+        status: 'VERIFIED',
+        provider: row.provider,
+        trxId: row.trxId,
+        paidAmount: row.amount,
+        matchType: 'MANUAL_VERIFIED',
+        smsLedgerId: row.id,
+        smsReconciliationState: 'RECONCILED',
+        resolutionSource: ctx?.get('authType') === 'device' ? 'ORBIT_ANDROID' : 'ORBIT_DASHBOARD',
+        stateVersion: intent.stateVersion + 1,
+        verifiedAt: now,
+        resolvedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(paymentIntents.id, intent.id));
+  }
+
   await db
     .update(verificationQueue)
-    .set({ status: 'MATCHED' })
+    .set({ status: 'MANUALLY_APPROVED', resolvedAt: now })
     .where(
       and(
         eq(verificationQueue.merchantId, merchant.id),
         eq(verificationQueue.externalOrderId, payload.externalOrderId),
-        eq(verificationQueue.status, 'WAITING_FOR_SMS')
+        inArray(verificationQueue.status, ['WAITING_FOR_SMS', 'MANUAL_REVIEW_REQUIRED'])
       )
     );
 
-  // 3. Sync checkout_sessions and merchant_orders
   await syncVerifiedOrderAndSession(db, {
     merchantId: merchant.id,
     externalOrderId: payload.externalOrderId,
-    baseAmount: row.amount,
-    uniqueAmount: row.amount,
+    paymentIntentId: intent?.id ?? null,
+    baseAmount: intent?.baseAmount ?? row.amount,
+    uniqueAmount: intent?.uniqueAmount ?? row.amount,
     paidAmount: row.amount,
     trxId: row.trxId,
     matchType: 'MANUAL_VERIFIED',
@@ -149,12 +210,12 @@ export async function manualMatchTransaction(
     customerPhone: row.senderNumber,
   });
 
-  // 4. Update wallet volume
   await incrementWalletVolume(db, merchant.id, row.provider, row.amount);
 
-  // 5. Dispatch storefront HMAC webhook
   const webhookData = {
+    paymentIntentId: intent?.id ?? null,
     merchantId: merchant.id,
+    externalRefId: payload.externalOrderId,
     externalOrderId: payload.externalOrderId,
     provider: row.provider,
     trxId: row.trxId,
@@ -163,41 +224,54 @@ export async function manualMatchTransaction(
     matchType: 'MANUAL_VERIFIED',
     senderNumber: row.senderNumber,
     status: 'MANUAL_VERIFIED',
+    callbackUrl: intent?.callbackUrl,
     verifiedAt: now.getTime(),
   };
 
-  dispatchWebhook(db, merchant, 'payment.verified', webhookData).catch((err) => {
-    console.error('[Manual Match Webhook Error]:', err);
-  });
+  safeWaitUntil(
+    ctx,
+    Promise.allSettled([
+      dispatchWebhook(
+        db,
+        merchant,
+        'payment.verified',
+        webhookData,
+        1,
+        undefined,
+        intent?.callbackUrl || undefined,
+        env
+      ),
+      sendPushToMerchantDevices(
+        db,
+        fcmServerKeyOrEnv,
+        merchant,
+        'Manual Match Completed',
+        `Order #${payload.externalOrderId} manually verified (৳${row.amount} via ${row.provider})`,
+        {
+          orderId: payload.externalOrderId,
+          trxId: row.trxId,
+          status: 'MANUAL_VERIFIED',
+        }
+      ),
+    ])
+  );
 
-  // 6. Notify companion app devices
-  sendPushToMerchantDevices(
-    db,
-    fcmServerKeyOrEnv,
-    merchant,
-    'Manual Match Completed',
-    `Order #${payload.externalOrderId} manually verified (৳${row.amount} via ${row.provider})`,
-    {
-      orderId: payload.externalOrderId,
-      trxId: row.trxId,
-      status: 'MANUAL_VERIFIED',
-    }
-  ).catch((err) => {
-    console.warn('[FCM Push Error]:', err);
-  });
-
-  const updated = await db.select().from(smsLedger).where(eq(smsLedger.id, row.id)).limit(1);
-  return updated[0];
+  return claimed[0];
 }
 
 /**
- * Lists waiting/pending verification queue items for the authenticated merchant.
+ * Lists waiting or escalated verification queue items for the authenticated merchant.
  */
 export async function listPendingQueue(db: AppDb, merchantId: string) {
   return db
     .select()
     .from(verificationQueue)
-    .where(and(eq(verificationQueue.merchantId, merchantId), eq(verificationQueue.status, 'WAITING_FOR_SMS')))
+    .where(
+      and(
+        eq(verificationQueue.merchantId, merchantId),
+        inArray(verificationQueue.status, ['WAITING_FOR_SMS', 'MANUAL_REVIEW_REQUIRED'])
+      )
+    )
     .orderBy(desc(verificationQueue.createdAt))
     .limit(50);
 }

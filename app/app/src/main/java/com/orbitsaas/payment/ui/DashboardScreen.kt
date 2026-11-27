@@ -61,6 +61,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -78,6 +79,10 @@ import androidx.compose.ui.unit.dp
 import com.orbitsaas.payment.R
 import com.orbitsaas.payment.data.local.SmsEntity
 import com.orbitsaas.payment.data.remote.MerchantOrderDto
+import com.orbitsaas.payment.data.remote.PaymentIntentDto
+import com.orbitsaas.payment.ui.components.ApproveIntentDialog
+import com.orbitsaas.payment.ui.components.PaymentIntentCard
+import com.orbitsaas.payment.ui.components.RejectIntentDialog
 import com.orbitsaas.payment.ui.theme.ColorBkash
 import com.orbitsaas.payment.ui.theme.OrbitSemanticColors
 import com.orbitsaas.payment.ui.theme.StatusAmber
@@ -103,11 +108,23 @@ fun DashboardScreen(
     onToggleTheme: () -> Unit,
     onClearFeedback: () -> Unit,
     onOrderAction: (externalOrderId: String, action: String) -> Unit = { _, _ -> },
-    onRefreshOrders: () -> Unit = {}
+    onRefreshOrders: () -> Unit = {},
+    onResolveIntent: (intentId: String, decision: String, expectedStateVersion: Int?, reason: String?) -> Unit = { _, _, _, _ -> },
+    onTriggerIntentAction: (intentId: String, actionId: String, actionLabel: String) -> Unit = { _, _, _ -> },
+    onRefreshIntents: () -> Unit = {},
+    onClearFocusedIntent: () -> Unit = {}
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     var selectedFeedTab by rememberSaveable { mutableIntStateOf(0) }
+    var pendingApproveIntent by remember { mutableStateOf<PaymentIntentDto?>(null) }
+    var pendingRejectIntent by remember { mutableStateOf<PaymentIntentDto?>(null) }
     val amberTextColor = OrbitSemanticColors.statusAmber
+
+    LaunchedEffect(state.focusedPaymentIntentId) {
+        if (!state.focusedPaymentIntentId.isNullOrBlank()) {
+            selectedFeedTab = 0
+        }
+    }
 
     LaunchedEffect(state.feedbackMessage) {
         state.feedbackMessage?.let { msg ->
@@ -133,7 +150,11 @@ fun DashboardScreen(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
-                            if (state.pendingOrderCount > 0) {
+                            val manualReviewCount = state.paymentIntents.count {
+                                it.status.uppercase() in setOf("MANUAL_REVIEW_REQUIRED", "WAITING_FOR_SMS")
+                            }
+                            val totalPendingBadge = state.pendingOrderCount + manualReviewCount
+                            if (totalPendingBadge > 0) {
                                 Surface(
                                     shape = RoundedCornerShape(8.dp),
                                     color = StatusAmberBg,
@@ -146,8 +167,8 @@ fun DashboardScreen(
                                     Text(
                                         text = pluralStringResource(
                                             R.plurals.dashboard_pending_orders,
-                                            state.pendingOrderCount,
-                                            state.pendingOrderCount
+                                            totalPendingBadge,
+                                            totalPendingBadge
                                         ),
                                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                                         style = MaterialTheme.typography.labelMedium.copy(
@@ -285,61 +306,129 @@ fun DashboardScreen(
                 )
             }
 
-            // 3. Segmented Feed Toggle: Orders & Alerts vs Live MFS Feed
+            // 3. Segmented Feed Toggle: Payments vs Orders vs Live MFS Feed
             item {
                 FeedSegmentedToggle(
                     selectedTab = selectedFeedTab,
+                    intentsCount = state.paymentIntents.size,
                     ordersCount = state.orders.size,
                     pendingOrderCount = state.pendingOrderCount,
                     transactionsCount = state.transactions.size,
                     onSelectTab = { tab ->
                         selectedFeedTab = tab
-                        if (tab == 0) {
-                            onRefreshOrders()
+                        when (tab) {
+                            0 -> onRefreshIntents()
+                            1 -> onRefreshOrders()
                         }
                     }
                 )
             }
 
             // 4. Tab Content
-            if (selectedFeedTab == 0) {
-                if (state.isOrdersLoading && state.orders.isEmpty()) {
-                    item {
-                        OrdersLoadingCard()
-                    }
-                } else if (state.orders.isEmpty()) {
-                    item {
-                        EmptyOrdersStateCard(onRefresh = onRefreshOrders)
-                    }
-                } else {
-                    items(state.orders, key = { it.externalOrderId }) { order ->
-                        MerchantOrderCard(
-                            order = order,
-                            isActionInProgress = state.actionInProgressOrderId == order.externalOrderId,
-                            onActionClick = { action ->
-                                onOrderAction(order.externalOrderId, action)
-                            }
-                        )
+            when (selectedFeedTab) {
+                0 -> {
+                    if (state.isIntentsLoading && state.paymentIntents.isEmpty()) {
+                        item {
+                            IntentsLoadingCard()
+                        }
+                    } else if (state.paymentIntents.isEmpty()) {
+                        item {
+                            EmptyIntentsStateCard(onRefresh = onRefreshIntents)
+                        }
+                    } else {
+                        items(state.paymentIntents, key = { it.id }) { intent ->
+                            val isFocused = state.focusedPaymentIntentId != null &&
+                                (intent.id == state.focusedPaymentIntentId ||
+                                    intent.externalRefId == state.focusedPaymentIntentId)
+                            PaymentIntentCard(
+                                intent = intent,
+                                serverBaseUrl = state.serverUrl,
+                                fallbackAppName = state.storeName,
+                                isHighlighted = isFocused,
+                                isActionInProgress = state.actionInProgressIntentId == intent.id,
+                                onApproveClick = {
+                                    if (isFocused) onClearFocusedIntent()
+                                    pendingApproveIntent = intent
+                                },
+                                onRejectClick = {
+                                    if (isFocused) onClearFocusedIntent()
+                                    pendingRejectIntent = intent
+                                },
+                                onDynamicActionClick = { action ->
+                                    if (isFocused) onClearFocusedIntent()
+                                    onTriggerIntentAction(intent.id, action.id, action.label)
+                                }
+                            )
+                        }
                     }
                 }
-            } else {
-                if (state.transactions.isEmpty()) {
-                    item {
-                        EmptyStateCard()
+
+                1 -> {
+                    if (state.isOrdersLoading && state.orders.isEmpty()) {
+                        item {
+                            OrdersLoadingCard()
+                        }
+                    } else if (state.orders.isEmpty()) {
+                        item {
+                            EmptyOrdersStateCard(onRefresh = onRefreshOrders)
+                        }
+                    } else {
+                        items(state.orders, key = { it.externalOrderId }) { order ->
+                            MerchantOrderCard(
+                                order = order,
+                                isActionInProgress = state.actionInProgressOrderId == order.externalOrderId,
+                                onActionClick = { action ->
+                                    onOrderAction(order.externalOrderId, action)
+                                }
+                            )
+                        }
                     }
-                } else {
-                    items(state.transactions, key = { it.id }) { sms ->
-                        TransactionItemCard(sms = sms)
+                }
+
+                else -> {
+                    if (state.transactions.isEmpty()) {
+                        item {
+                            EmptyStateCard()
+                        }
+                    } else {
+                        items(state.transactions, key = { it.id }) { sms ->
+                            TransactionItemCard(sms = sms)
+                        }
                     }
                 }
             }
         }
+    }
+
+    pendingApproveIntent?.let { intent ->
+        ApproveIntentDialog(
+            intent = intent,
+            isSubmitting = state.actionInProgressIntentId == intent.id,
+            onDismiss = { pendingApproveIntent = null },
+            onConfirmApprove = {
+                onResolveIntent(intent.id, "APPROVE", intent.stateVersion, null)
+                pendingApproveIntent = null
+            }
+        )
+    }
+
+    pendingRejectIntent?.let { intent ->
+        RejectIntentDialog(
+            intent = intent,
+            isSubmitting = state.actionInProgressIntentId == intent.id,
+            onDismiss = { pendingRejectIntent = null },
+            onConfirmReject = { reason ->
+                onResolveIntent(intent.id, "REJECT", intent.stateVersion, reason)
+                pendingRejectIntent = null
+            }
+        )
     }
 }
 
 @Composable
 fun FeedSegmentedToggle(
     selectedTab: Int,
+    intentsCount: Int,
     ordersCount: Int,
     pendingOrderCount: Int,
     transactionsCount: Int,
@@ -363,8 +452,9 @@ fun FeedSegmentedToggle(
         ) {
             val displayOrderCount = if (pendingOrderCount > 0) pendingOrderCount else ordersCount
             val tabs = listOf(
-                stringResource(R.string.dashboard_tab_orders_alerts, displayOrderCount),
-                stringResource(R.string.dashboard_tab_live_mfs_feed, transactionsCount)
+                stringResource(R.string.dashboard_tab_payments, intentsCount),
+                stringResource(R.string.dashboard_tab_orders_short, displayOrderCount),
+                stringResource(R.string.dashboard_tab_mfs_short, transactionsCount)
             )
 
             tabs.forEachIndexed { index, title ->
@@ -784,7 +874,7 @@ fun MerchantOrderCard(
                         }
                     }
 
-                    if (normalizedOrderStatus == "SHIPPED" && normalizedPaymentStatus != "PAID") {
+                    if (normalizedPaymentStatus != "PAID") {
                         Button(
                             onClick = { onActionClick("MARK_PAID") },
                             enabled = !isActionInProgress,
@@ -824,6 +914,94 @@ fun MerchantOrderCard(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun IntentsLoadingCard() {
+    val cardShape = RoundedCornerShape(16.dp)
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, MaterialTheme.colorScheme.outline, cardShape),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        shape = cardShape
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(24.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(20.dp),
+                strokeWidth = 2.dp,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Spacer(modifier = Modifier.size(12.dp))
+            Text(
+                text = stringResource(R.string.dashboard_loading_intents),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+fun EmptyIntentsStateCard(onRefresh: () -> Unit) {
+    val cardShape = RoundedCornerShape(16.dp)
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, MaterialTheme.colorScheme.outline, cardShape),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        shape = cardShape
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Payments,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.outlineVariant,
+                modifier = Modifier.size(36.dp)
+            )
+            Text(
+                text = stringResource(R.string.dashboard_empty_intents_title),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = stringResource(R.string.dashboard_empty_intents_desc),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 8.dp),
+                textAlign = TextAlign.Center
+            )
+            OutlinedButton(
+                onClick = onRefresh,
+                modifier = Modifier.heightIn(min = 48.dp),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
+            ) {
+                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.size(8.dp))
+                Text(
+                    text = stringResource(R.string.action_refresh_intents),
+                    style = MaterialTheme.typography.labelLarge
+                )
             }
         }
     }
