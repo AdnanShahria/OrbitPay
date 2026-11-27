@@ -1,7 +1,8 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { getAuthToken, UNAUTHORIZED_EVENT } from '@/shared/utils/api';
+import { authFetch, getAuthToken, UNAUTHORIZED_EVENT } from '@/shared/utils/api';
 import {
+  adminFetch,
   ADMIN_UNAUTHORIZED_EVENT,
   getStoredAdminKey,
   getStoredAdminToken,
@@ -75,17 +76,20 @@ export function useRealtime(options?: UseRealtimeOptions) {
       cleanupCurrentSource();
       setStatus('connecting');
 
+      let hasOpened = false;
       const es = new EventSource(streamUrl);
       eventSourceRef.current = es;
 
       es.onopen = () => {
         if (cancelled) return;
+        hasOpened = true;
         attempt = 0;
         setStatus('connected');
       };
 
       es.addEventListener('CONNECTED', (e) => {
         if (cancelled) return;
+        hasOpened = true;
         attempt = 0;
         setStatus('connected');
         try {
@@ -194,6 +198,44 @@ export function useRealtime(options?: UseRealtimeOptions) {
         if (cancelled) return;
         // Stop immediately if credentials were cleared or stream disabled
         if (!resolveStreamUrl()) {
+          return;
+        }
+
+        // If the initial SSE handshake failed (e.g. 401 expired/revoked JWT), verify auth
+        // once so adminFetch/authFetch clears invalid credentials and stops reconnect spam.
+        if (!hasOpened) {
+          const checkRes =
+            mode === 'admin'
+              ? adminFetch('/api/v1/admin/auth/me')
+              : authFetch('/api/v1/auth/me');
+          void checkRes
+            .then((res) => {
+              if (cancelled || res.status === 401 || !resolveStreamUrl()) {
+                return;
+              }
+              const delayMs =
+                BACKOFF_STEPS_MS[Math.min(attempt, BACKOFF_STEPS_MS.length - 1)];
+              attempt += 1;
+              clearTimeout(reconnectTimeout);
+              reconnectTimeout = setTimeout(() => {
+                if (!cancelled && resolveStreamUrl()) {
+                  connect();
+                }
+              }, delayMs);
+            })
+            .catch(() => {
+              // Network offline — retry with backoff
+              if (cancelled || !resolveStreamUrl()) return;
+              const delayMs =
+                BACKOFF_STEPS_MS[Math.min(attempt, BACKOFF_STEPS_MS.length - 1)];
+              attempt += 1;
+              clearTimeout(reconnectTimeout);
+              reconnectTimeout = setTimeout(() => {
+                if (!cancelled && resolveStreamUrl()) {
+                  connect();
+                }
+              }, delayMs);
+            });
           return;
         }
 
