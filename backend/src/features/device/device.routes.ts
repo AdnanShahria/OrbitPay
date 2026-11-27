@@ -1,12 +1,18 @@
 import { Hono } from 'hono';
 import type { AppContextEnv } from '../../shared/types';
 import { authDeviceMiddleware, authMerchantOrDeviceMiddleware } from '../../shared/middleware';
-import { ingestSmsBatchSchema, heartbeatSchema, deviceSyncQuerySchema } from './device.schema';
+import {
+  ingestSmsBatchSchema,
+  heartbeatSchema,
+  deviceSyncQuerySchema,
+  preflightCheckSchema,
+} from './device.schema';
 import {
   ingestDeviceSmsBatch,
   getDeviceStats,
   recordDeviceHeartbeat,
   getSyncPayload,
+  getDevicePreflight,
 } from './device.service';
 import { listOrdersQuerySchema, orderActionSchema } from '../orders/orders.schema';
 import { listOrders, performOrderAction } from '../orders/orders.service';
@@ -177,6 +183,30 @@ router.post('/orders/:externalOrderId/action', authDeviceMiddleware, async (c) =
 
   const result = await performOrderAction(db, merchant, externalOrderId, input, c.env);
   return c.json({ success: true, data: result });
+});
+
+/**
+ * GET /api/v1/device/preflight
+ * Returns ORBIT Hub wallet readiness, webhook health, and online status for the Android app.
+ */
+router.get('/preflight', authDeviceMiddleware, async (c) => {
+  const db = c.get('db');
+  const merchant = c.get('merchant')!;
+  const data = await getDevicePreflight(db, c.env, merchant);
+  return c.json({ success: true, data });
+});
+
+/**
+ * POST /api/v1/device/preflight/check
+ * Runs full system readiness + SIM slot number profile match against active ORBIT wallets.
+ */
+router.post('/preflight/check', authDeviceMiddleware, async (c) => {
+  const db = c.get('db');
+  const merchant = c.get('merchant')!;
+  const body = await c.req.json().catch(() => ({}));
+  const input = preflightCheckSchema.parse(body);
+  const data = await getDevicePreflight(db, c.env, merchant, input);
+  return c.json({ success: true, data });
 });
 
 export default router;

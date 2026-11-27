@@ -376,3 +376,78 @@ data class TriggerActionData(
     val deliveryId: String? = null,
     val statusCode: Int? = null
 )
+
+@Serializable
+data class PreflightSimSlotDto(
+    val slotIndex: Int? = null,
+    val carrierName: String? = null,
+    val phoneNumber: String,
+    val source: String = "HARDWARE"
+)
+
+@Serializable
+data class PreflightCheckRequest(
+    val deviceSimNumbers: List<PreflightSimSlotDto> = emptyList(),
+    val smsPermission: Boolean? = null,
+    val listenerEnabled: Boolean? = null,
+    val batteryOptimizationIgnored: Boolean? = null,
+    val fcmEnabled: Boolean? = null
+)
+
+@Serializable
+data class PreflightMerchantDto(
+    val id: String = "",
+    val storeName: String = "",
+    val verificationMode: String = "AUTO",
+    val webhookConfigured: Boolean = false,
+    val webhookUrl: String? = null
+)
+
+@Serializable
+data class PreflightWalletSummaryDto(
+    val totalCount: Int = 0,
+    val activeCount: Int = 0,
+    val placeholderOnly: Boolean = false,
+    val hasPlaceholderWallets: Boolean = false
+)
+
+@Serializable
+data class PreflightWalletDto(
+    val id: String = "",
+    val provider: String = "",
+    val accountType: String = "PERSONAL",
+    val walletNumber: String = "",
+    val isPrimary: Boolean = false,
+    val isActive: Boolean = true,
+    val isPlaceholder: Boolean = false
+)
+
+@Serializable
+data class PreflightProfileMatchDto(
+    val walletId: String = "",
+    val provider: String = "",
+    val walletNumber: String = "",
+    val status: String = "SIM_NUMBER_UNAVAILABLE",
+    val matchedSimSlot: Int? = null,
+    val matchedCarrier: String? = null,
+    val message: String = ""
+)
+
+@Serializable
+data class PreflightDeviceStatusDto(
+    val online: Boolean = false,
+    val lastSeenAt: String? = null,
+    val activeSockets: Int = 0
+)
+
+@Serializable
+data class DevicePreflightData(
+    val overallStatus: String = "ACTION_REQUIRED",
+    val checkedAt: String = "",
+    val merchant: PreflightMerchantDto = PreflightMerchantDto(),
+    val walletSummary: PreflightWalletSummaryDto = PreflightWalletSummaryDto(),
+    val wallets: List<PreflightWalletDto> = emptyList(),
+    val profileMatches: List<PreflightProfileMatchDto> = emptyList(),
+    val deviceStatus: PreflightDeviceStatusDto = PreflightDeviceStatusDto(),
+    val recommendations: List<String> = emptyList()
+)

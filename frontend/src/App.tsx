@@ -790,21 +790,23 @@ function AuthenticatedMerchantPortal({ onEnterAdmin }: { onEnterAdmin: () => voi
       </div>
 
       {/* Interactive Demo Checkout Modal */}
-      <CheckoutModal
-        isOpen={isDemoModalOpen}
-        onClose={() => setIsDemoModalOpen(false)}
-        config={{
-          merchantId,
-          orderId: demoOrderId,
-          amount: demoAmount,
-          customerEmail: demoCustomerEmail || undefined,
-          storeName,
-          onSuccess: (data) => {
-            setDemoVerifiedResult(data);
-            setIsDemoModalOpen(false);
-          },
-        }}
-      />
+      {isDemoModalOpen && (
+        <CheckoutModal
+          isOpen={isDemoModalOpen}
+          onClose={() => setIsDemoModalOpen(false)}
+          config={{
+            merchantId,
+            orderId: demoOrderId,
+            amount: demoAmount,
+            customerEmail: demoCustomerEmail || undefined,
+            storeName,
+            onSuccess: (data) => {
+              setDemoVerifiedResult(data);
+              setIsDemoModalOpen(false);
+            },
+          }}
+        />
+      )}
     </div>
   );
 }

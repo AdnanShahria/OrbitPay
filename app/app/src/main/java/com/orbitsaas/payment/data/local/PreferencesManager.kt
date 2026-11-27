@@ -5,10 +5,24 @@ import android.content.SharedPreferences
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+
+@Serializable
+data class ConfirmedSimSlot(
+    val slotIndex: Int,
+    val carrierName: String = "",
+    val phoneNumber: String = ""
+)
 
 class PreferencesManager(context: Context) {
 
     private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private val simJson = Json {
+        ignoreUnknownKeys = true
+        encodeDefaults = true
+    }
 
     private val _serverUrlFlow = MutableStateFlow(serverUrl)
     val serverUrlFlow: StateFlow<String> = _serverUrlFlow.asStateFlow()
@@ -193,6 +207,42 @@ class PreferencesManager(context: Context) {
             _appLanguageFlow.value = normalized
         }
 
+    var confirmedSimNumbersJson: String
+        get() = prefs.getString(KEY_CONFIRMED_SIM_NUMBERS, "[]") ?: "[]"
+        set(value) {
+            prefs.edit().putString(KEY_CONFIRMED_SIM_NUMBERS, value).apply()
+        }
+
+    fun getConfirmedSimSlots(): List<ConfirmedSimSlot> {
+        val raw = confirmedSimNumbersJson
+        if (raw.isBlank()) return emptyList()
+        return runCatching {
+            simJson.decodeFromString<List<ConfirmedSimSlot>>(raw)
+        }.getOrDefault(emptyList())
+    }
+
+    fun saveConfirmedSimSlot(slotIndex: Int, number: String, carrierName: String = "") {
+        val trimmedNumber = number.trim()
+        val updated = getConfirmedSimSlots()
+            .filterNot { it.slotIndex == slotIndex }
+            .toMutableList()
+        if (trimmedNumber.isNotBlank()) {
+            updated.add(
+                ConfirmedSimSlot(
+                    slotIndex = slotIndex,
+                    carrierName = carrierName.trim(),
+                    phoneNumber = trimmedNumber
+                )
+            )
+        }
+        updated.sortBy { it.slotIndex }
+        confirmedSimNumbersJson = simJson.encodeToString(updated)
+    }
+
+    fun clearConfirmedSimSlots() {
+        confirmedSimNumbersJson = "[]"
+    }
+
     fun isConfigured(): Boolean {
         return merchantId.isNotBlank() && deviceKey.isNotBlank()
     }
@@ -259,5 +309,6 @@ class PreferencesManager(context: Context) {
         private const val KEY_LAST_SYNC_AT = "last_sync_at"
         private const val KEY_SEEN_ORDER_IDS = "seen_order_ids"
         private const val KEY_APP_LANGUAGE = "app_language"
+        private const val KEY_CONFIRMED_SIM_NUMBERS = "confirmed_sim_numbers"
     }
 }

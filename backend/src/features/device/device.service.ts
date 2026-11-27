@@ -13,7 +13,9 @@ import {
   type MerchantRecord,
   type MerchantOrderRecord,
   type MfsProvider,
+  type AccountType,
   type SmsLedgerRecord,
+  type VerificationMode,
 } from '../../db/schema';
 import { generateSecureToken, hashDeviceApiKey } from '../../shared/crypto';
 import { safeWaitUntil } from '../../shared/middleware';
@@ -28,14 +30,18 @@ import {
   parseDisplayMetadata,
   syncVerifiedOrderAndSession,
 } from '../payments/verification.engine';
-import { incrementWalletVolume } from '../wallets/wallets.service';
+import {
+  incrementWalletVolume,
+  isPlaceholderWalletNumber,
+  listWallets,
+} from '../wallets/wallets.service';
 import {
   dispatchWebhook,
   sendDynamicPushToMerchantDevices,
   sendTelegramOfficeAlert,
 } from '../webhooks/webhook.dispatcher';
 import { realtimeHub } from '../realtime/realtime.service';
-import type { IngestMessageDTO } from './device.schema';
+import type { IngestMessageDTO, PreflightCheckDTO } from './device.schema';
 
 export interface IngestBatchResult {
   ingestedCount: number;
@@ -733,5 +739,267 @@ export async function getSyncPayload(
     })),
     orders,
     pendingConfirmationCount: Number(pendingRes[0]?.count || 0),
+  };
+}
+
+export type PreflightOverallStatus = 'READY' | 'ACTION_REQUIRED' | 'ERROR';
+
+export type ProfileMatchStatus =
+  | 'MATCHED'
+  | 'MISMATCH'
+  | 'SIM_NUMBER_UNAVAILABLE'
+  | 'PLACEHOLDER_NUMBER';
+
+export interface PreflightWalletItem {
+  id: string;
+  provider: MfsProvider;
+  accountType: AccountType;
+  walletNumber: string;
+  isPrimary: boolean;
+  isActive: boolean;
+  isPlaceholder: boolean;
+}
+
+export interface PreflightProfileMatch {
+  walletId: string;
+  provider: MfsProvider;
+  walletNumber: string;
+  accountType: AccountType;
+  isPrimary: boolean;
+  isActive: boolean;
+  isPlaceholder: boolean;
+  status: ProfileMatchStatus;
+  matchedSimSlot: number | null;
+  matchedCarrier: string | null;
+  message: string;
+}
+
+export interface DevicePreflightResult {
+  overallStatus: PreflightOverallStatus;
+  checkedAt: string;
+  merchant: {
+    id: string;
+    storeName: string;
+    verificationMode: VerificationMode;
+    webhookConfigured: boolean;
+    webhookUrl: string;
+  };
+  walletSummary: {
+    totalCount: number;
+    activeCount: number;
+    placeholderOnly: boolean;
+    hasPlaceholderWallets: boolean;
+  };
+  wallets: PreflightWalletItem[];
+  profileMatches: PreflightProfileMatch[];
+  deviceStatus: {
+    online: boolean;
+    lastSeenAt: string | null;
+    activeSockets: number;
+  };
+  recommendations: string[];
+}
+
+const PREFLIGHT_PHONE_REGEX = /^01[3-9]\d{8,9}$/;
+
+/**
+ * Computes ORBIT Hub readiness and compares active merchant wallets against
+ * SIM slot numbers reported or confirmed on the Android companion device.
+ */
+export async function getDevicePreflight(
+  db: AppDb,
+  env: Env | undefined,
+  merchant: MerchantRecord,
+  input?: PreflightCheckDTO
+): Promise<DevicePreflightResult> {
+  const [rawWallets, onlineStatus] = await Promise.all([
+    listWallets(db, merchant.id),
+    computeDeviceOnlineStatus(db, env, merchant),
+  ]);
+
+  const validDeviceSims = (input?.deviceSimNumbers ?? [])
+    .map((slot) => ({
+      ...slot,
+      normalizedNumber: sanitizePhoneNumber(slot.phoneNumber || ''),
+    }))
+    .filter((slot) => PREFLIGHT_PHONE_REGEX.test(slot.normalizedNumber));
+
+  const wallets: PreflightWalletItem[] = rawWallets.map((w) => ({
+    id: w.id,
+    provider: w.provider,
+    accountType: w.accountType,
+    walletNumber: w.walletNumber,
+    isPrimary: w.isPrimary,
+    isActive: w.isActive,
+    isPlaceholder: isPlaceholderWalletNumber(w.walletNumber),
+  }));
+
+  const activeWallets = wallets.filter((w) => w.isActive && !w.isPlaceholder);
+  const placeholderOnly = wallets.length > 0 && wallets.every((w) => w.isPlaceholder);
+  const hasPlaceholderWallets = wallets.some((w) => w.isPlaceholder);
+
+  const profileMatches: PreflightProfileMatch[] = [];
+
+  for (const w of wallets) {
+    if (w.isPlaceholder) {
+      profileMatches.push({
+        walletId: w.id,
+        provider: w.provider,
+        walletNumber: w.walletNumber,
+        accountType: w.accountType,
+        isPrimary: w.isPrimary,
+        isActive: w.isActive,
+        isPlaceholder: true,
+        status: 'PLACEHOLDER_NUMBER',
+        matchedSimSlot: null,
+        matchedCarrier: null,
+        message: 'Replace placeholder number with your real MFS SIM number.',
+      });
+      continue;
+    }
+
+    if (!w.isActive) {
+      continue;
+    }
+
+    if (validDeviceSims.length === 0) {
+      profileMatches.push({
+        walletId: w.id,
+        provider: w.provider,
+        walletNumber: w.walletNumber,
+        accountType: w.accountType,
+        isPrimary: w.isPrimary,
+        isActive: w.isActive,
+        isPlaceholder: false,
+        status: 'SIM_NUMBER_UNAVAILABLE',
+        matchedSimSlot: null,
+        matchedCarrier: null,
+        message: 'Device SIM number hidden by carrier or not confirmed yet.',
+      });
+      continue;
+    }
+
+    const normalizedWallet = sanitizePhoneNumber(w.walletNumber, w.provider);
+    const matchedSim = validDeviceSims.find(
+      (sim) => sanitizePhoneNumber(sim.phoneNumber, w.provider) === normalizedWallet
+    );
+
+    if (matchedSim) {
+      profileMatches.push({
+        walletId: w.id,
+        provider: w.provider,
+        walletNumber: w.walletNumber,
+        accountType: w.accountType,
+        isPrimary: w.isPrimary,
+        isActive: w.isActive,
+        isPlaceholder: false,
+        status: 'MATCHED',
+        matchedSimSlot: matchedSim.slotIndex ?? null,
+        matchedCarrier: matchedSim.carrierName ?? null,
+        message: 'Matches phone SIM',
+      });
+    } else {
+      profileMatches.push({
+        walletId: w.id,
+        provider: w.provider,
+        walletNumber: w.walletNumber,
+        accountType: w.accountType,
+        isPrimary: w.isPrimary,
+        isActive: w.isActive,
+        isPlaceholder: false,
+        status: 'MISMATCH',
+        matchedSimSlot: null,
+        matchedCarrier: null,
+        message: 'Configured wallet does not match detected phone SIM numbers.',
+      });
+    }
+  }
+
+  const webhookConfigured = Boolean(
+    merchant.webhookUrl && merchant.webhookUrl.trim().startsWith('https://')
+  );
+
+  const hasMismatch = profileMatches.some((m) => m.status === 'MISMATCH');
+  const hasSimUnavailable = profileMatches.some((m) => m.status === 'SIM_NUMBER_UNAVAILABLE');
+
+  let overallStatus: PreflightOverallStatus = 'READY';
+  if (activeWallets.length === 0) {
+    overallStatus = 'ERROR';
+  } else if (
+    hasPlaceholderWallets ||
+    hasMismatch ||
+    hasSimUnavailable ||
+    !webhookConfigured ||
+    input?.smsPermission === false
+  ) {
+    overallStatus = 'ACTION_REQUIRED';
+  }
+
+  const recommendations: string[] = [];
+  if (activeWallets.length === 0) {
+    recommendations.push(
+      'No active real MFS wallets configured. Add or activate a bKash, Nagad, Rocket, or Upay SIM wallet in ORBIT Hub or sync from your storefront.'
+    );
+  }
+  if (hasPlaceholderWallets) {
+    recommendations.push(
+      'Seeded placeholder wallet numbers (01700000000 / 01800000000) detected. Replace them with your real MFS SIM numbers.'
+    );
+  }
+  if (hasSimUnavailable) {
+    recommendations.push(
+      'Device SIM numbers could not be read automatically. Grant phone permissions or confirm SIM 1 / SIM 2 numbers locally.'
+    );
+  }
+  if (hasMismatch) {
+    recommendations.push(
+      'One or more active ORBIT wallets do not match the SIM numbers on this phone. Insert the matching SIM or update your storefront/ORBIT wallet numbers.'
+    );
+  }
+  if (!webhookConfigured) {
+    recommendations.push(
+      'Storefront HTTPS webhook URL is missing or invalid. Configure an https:// webhook URL in ORBIT Storefront & Webhook settings.'
+    );
+  }
+  if (input?.smsPermission === false) {
+    recommendations.push(
+      'SMS permission is disabled. Grant SMS permission so ORBIT Companion can auto-reconcile incoming payments.'
+    );
+  }
+  if (input?.listenerEnabled === false) {
+    recommendations.push(
+      'Notification Listener access is disabled. Enable ORBIT Notification Listener for backup MFS notification capture.'
+    );
+  }
+  if (input?.batteryOptimizationIgnored === false) {
+    recommendations.push(
+      'Battery optimization is active. Exempt ORBIT Companion from battery restrictions to keep background capture running.'
+    );
+  }
+
+  return {
+    overallStatus,
+    checkedAt: new Date().toISOString(),
+    merchant: {
+      id: merchant.id,
+      storeName: merchant.storeName,
+      verificationMode: merchant.verificationMode,
+      webhookConfigured,
+      webhookUrl: merchant.webhookUrl,
+    },
+    walletSummary: {
+      totalCount: wallets.length,
+      activeCount: activeWallets.length,
+      placeholderOnly,
+      hasPlaceholderWallets,
+    },
+    wallets,
+    profileMatches,
+    deviceStatus: {
+      online: onlineStatus.online,
+      lastSeenAt: onlineStatus.lastSeenAt ? onlineStatus.lastSeenAt.toISOString() : null,
+      activeSockets: onlineStatus.activeSockets,
+    },
+    recommendations,
   };
 }

@@ -8,6 +8,7 @@ import { Chip } from '@/components/base/badges/chip';
 import { StatusDot } from '@/components/base/badges/status-dot';
 import { Switch } from '@/components/base/switch/switch';
 import { Skeleton } from '@/components/base/skeleton/skeleton';
+import { Notification } from '@/components/base/notification/notification';
 import { toast } from '@/components/base/toast/toast';
 import { MFS_METADATA } from '@/shared/utils/format';
 import { cx } from '@/utils/cx';
@@ -18,7 +19,14 @@ import {
   RiCheckLine,
   RiStarFill,
   RiFlashlightLine,
+  RiErrorWarningLine,
 } from '@remixicon/react';
+
+const PLACEHOLDER_WALLET_NUMBERS = new Set(['01700000000', '01800000000']);
+
+function isPlaceholderWallet(walletNumber: string): boolean {
+  return PLACEHOLDER_WALLET_NUMBERS.has(walletNumber.trim());
+}
 
 export function WalletManager() {
   const [isAddOpen, setIsAddOpen] = useState(false);
@@ -26,6 +34,13 @@ export function WalletManager() {
 
   const { data: wallets, isLoading } = useWallets();
   const toggleMutation = useToggleWalletStatusMutation();
+
+  const placeholderWallets = (wallets ?? []).filter((w) => isPlaceholderWallet(w.walletNumber));
+  const activeRealWalletCount = (wallets ?? []).filter(
+    (w) => w.isActive && !isPlaceholderWallet(w.walletNumber)
+  ).length;
+  const hasPlaceholderWallets = placeholderWallets.length > 0;
+  const showReadinessWarning = !isLoading && (activeRealWalletCount === 0 || hasPlaceholderWallets);
 
   const handleCopy = (num: string) => {
     navigator.clipboard.writeText(num);
@@ -73,6 +88,33 @@ export function WalletManager() {
           </Button>
         </CardContent>
       </Card>
+
+      {showReadinessWarning && (
+        <Notification
+          status="error"
+          icon={RiErrorWarningLine}
+          dismissible={false}
+          title={
+            activeRealWalletCount === 0 && hasPlaceholderWallets
+              ? 'Placeholder SIM wallets detected — no active real MFS numbers'
+              : activeRealWalletCount === 0
+                ? 'No active MFS SIM wallets'
+                : 'Placeholder SIM wallet detected'
+          }
+          description={
+            hasPlaceholderWallets
+              ? 'Placeholder numbers (01700000000 / 01800000000) cannot receive payments. Add or activate your real MFS SIM numbers here, or save Payment Gateways in your connected storefront to sync automatically.'
+              : 'Activate an existing SIM below, add a new SIM, or save Payment Gateways in your connected storefront so checkout can display a live payment number.'
+          }
+          actions={[
+            {
+              label: 'Add real SIM',
+              onClick: () => setIsAddOpen(true),
+              variant: 'primary',
+            },
+          ]}
+        />
+      )}
 
       {/* Grid of SIM Wallets */}
       <div className="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
@@ -169,7 +211,7 @@ export function WalletManager() {
                   />
 
                   {/* Badges footer */}
-                  <div className="flex items-center justify-between gap-2 border-t border-separator-border pt-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-t border-separator-border pt-3">
                     {wallet.isPrimary ? (
                       <Chip variant="bold" color="lime" className="gap-1.5">
                         <StatusDot color="green" />
@@ -178,6 +220,12 @@ export function WalletManager() {
                     ) : (
                       <Chip variant="bold" color="neutral">
                         Standby rotation
+                      </Chip>
+                    )}
+
+                    {isPlaceholderWallet(wallet.walletNumber) && (
+                      <Chip variant="caption" color="orange">
+                        Placeholder
                       </Chip>
                     )}
 

@@ -33,7 +33,27 @@ export const deviceSyncQuerySchema = z.object({
   ),
 });
 
+export const preflightSimSlotSchema = z.object({
+  slotIndex: z.number().int().min(0).max(3).optional(),
+  carrierName: z.string().trim().max(80).optional(),
+  phoneNumber: z.string().trim().optional().default(''),
+  source: z
+    .enum(['HARDWARE', 'CONFIRMED', 'SIM_SUBSCRIPTION', 'MANUAL_CONFIRM'])
+    .optional()
+    .default('HARDWARE'),
+});
+
+export const preflightCheckSchema = z.object({
+  deviceSimNumbers: z.array(preflightSimSlotSchema).optional().default([]),
+  smsPermission: z.boolean().optional(),
+  listenerEnabled: z.boolean().optional(),
+  batteryOptimizationIgnored: z.boolean().optional(),
+  fcmEnabled: z.boolean().optional(),
+});
+
 export type IngestMessageDTO = z.infer<typeof ingestMessageSchema>;
 export type IngestSmsBatchDTO = z.infer<typeof ingestSmsBatchSchema>;
 export type HeartbeatDTO = z.infer<typeof heartbeatSchema>;
 export type DeviceSyncQueryDTO = z.infer<typeof deviceSyncQuerySchema>;
+export type PreflightSimSlotDTO = z.infer<typeof preflightSimSlotSchema>;
+export type PreflightCheckDTO = z.infer<typeof preflightCheckSchema>;

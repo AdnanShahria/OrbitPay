@@ -24,8 +24,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.LightMode
@@ -37,6 +39,8 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ShoppingBag
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.VerifiedUser
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.Button
@@ -78,6 +82,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.orbitsaas.payment.R
 import com.orbitsaas.payment.data.local.SmsEntity
+import com.orbitsaas.payment.data.remote.DevicePreflightData
 import com.orbitsaas.payment.data.remote.MerchantOrderDto
 import com.orbitsaas.payment.data.remote.PaymentIntentDto
 import com.orbitsaas.payment.ui.components.ApproveIntentDialog
@@ -112,7 +117,8 @@ fun DashboardScreen(
     onResolveIntent: (intentId: String, decision: String, expectedStateVersion: Int?, reason: String?) -> Unit = { _, _, _, _ -> },
     onTriggerIntentAction: (intentId: String, actionId: String, actionLabel: String) -> Unit = { _, _, _ -> },
     onRefreshIntents: () -> Unit = {},
-    onClearFocusedIntent: () -> Unit = {}
+    onClearFocusedIntent: () -> Unit = {},
+    onOpenDiagnostics: () -> Unit = {}
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     var selectedFeedTab by rememberSaveable { mutableIntStateOf(0) }
@@ -295,6 +301,16 @@ fun DashboardScreen(
                     isSyncing = state.isSyncing,
                     pendingCount = state.pendingUploadCount
                 )
+            }
+
+            // 1b. Preflight / Number Profile Banner
+            state.preflightState?.let { preflight ->
+                item {
+                    PreflightStatusBanner(
+                        preflight = preflight,
+                        onClick = onOpenDiagnostics
+                    )
+                }
             }
 
             // 2. Three Metric Cards
@@ -1089,6 +1105,115 @@ fun EmptyOrdersStateCard(onRefresh: () -> Unit) {
                 Text(
                     text = stringResource(R.string.action_refresh_orders),
                     style = MaterialTheme.typography.labelLarge
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun PreflightStatusBanner(
+    preflight: DevicePreflightData,
+    onClick: () -> Unit
+) {
+    val normalizedStatus = preflight.overallStatus.uppercase(Locale.US)
+    val isReady = normalizedStatus == "READY"
+    val isError = normalizedStatus == "ERROR"
+
+    val bgColor = when {
+        isReady -> StatusGreenBg
+        isError -> StatusRedBg
+        else -> StatusAmberBg
+    }
+    val borderColor = when {
+        isReady -> StatusGreen
+        isError -> StatusRed
+        else -> StatusAmber
+    }
+    val fgColor = when {
+        isReady -> OrbitSemanticColors.statusGreen
+        isError -> OrbitSemanticColors.statusRed
+        else -> OrbitSemanticColors.statusAmber
+    }
+    val leadingIcon = when {
+        isReady -> Icons.Default.VerifiedUser
+        isError -> Icons.Default.Error
+        else -> Icons.Default.Warning
+    }
+    val titleText = when {
+        isReady -> stringResource(R.string.dashboard_preflight_ready_title)
+        isError -> stringResource(R.string.dashboard_preflight_error_title)
+        else -> stringResource(R.string.dashboard_preflight_action_title)
+    }
+    val subtitleText = if (isReady) {
+        stringResource(R.string.dashboard_preflight_ready_desc, preflight.walletSummary.activeCount)
+    } else {
+        preflight.recommendations.firstOrNull()?.takeIf { it.isNotBlank() }
+            ?: stringResource(R.string.dashboard_preflight_action_fallback, preflight.walletSummary.activeCount)
+    }
+    val actionLabel = stringResource(
+        if (isReady) R.string.dashboard_preflight_tap_view else R.string.dashboard_preflight_tap_fix
+    )
+    val shape = RoundedCornerShape(16.dp)
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .clip(shape)
+            .border(1.dp, borderColor.copy(alpha = 0.38f), shape)
+            .clickable(onClick = onClick),
+        color = bgColor,
+        shape = shape
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Icon(
+                imageVector = leadingIcon,
+                contentDescription = null,
+                tint = fgColor,
+                modifier = Modifier.size(20.dp)
+            )
+
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = titleText,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = fgColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = subtitleText,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = actionLabel,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = fgColor
+                )
+                Icon(
+                    imageVector = Icons.Default.ChevronRight,
+                    contentDescription = null,
+                    tint = fgColor,
+                    modifier = Modifier.size(18.dp)
                 )
             }
         }

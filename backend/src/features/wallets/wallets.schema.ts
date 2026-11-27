@@ -28,5 +28,22 @@ export const updateWalletSchema = z.object({
   priorityOrder: z.number().int().optional(),
 });
 
+export const syncWalletsSchema = z.object({
+  wallets: z
+    .array(
+      z.object({
+        provider: z.enum(MFS_PROVIDERS),
+        walletNumber: z.string().trim().min(10),
+        accountType: z.enum(ACCOUNT_TYPES).default('PERSONAL'),
+        isActive: z.boolean().default(true),
+        isPrimary: z.boolean().optional(),
+        monthlyVolumeLimit: z.number().positive().optional(),
+      })
+    )
+    .max(20),
+  replacePlaceholders: z.boolean().default(true),
+});
+
 export type CreateWalletInput = z.infer<typeof createWalletSchema>;
 export type UpdateWalletInput = z.infer<typeof updateWalletSchema>;
+export type SyncWalletsInput = z.infer<typeof syncWalletsSchema>;

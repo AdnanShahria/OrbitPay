@@ -107,6 +107,7 @@ class MainActivity : AppCompatActivity() {
         viewModel.refreshStatsFromServer()
         viewModel.refreshOrders()
         viewModel.refreshPaymentIntents()
+        viewModel.refreshPreflight()
         lifecycleScope.launch {
             AppUpdateManager.checkForUpdates(
                 context = this@MainActivity,
@@ -333,7 +334,8 @@ fun OrbitPaymentApp(
                         viewModel.triggerPaymentIntentAction(intentId, actionId, actionLabel)
                     },
                     onRefreshIntents = { viewModel.refreshPaymentIntents() },
-                    onClearFocusedIntent = { viewModel.clearFocusedPaymentIntent() }
+                    onClearFocusedIntent = { viewModel.clearFocusedPaymentIntent() },
+                    onOpenDiagnostics = { navigateTopLevel(Screen.Diagnostics.route) }
                 )
             }
 

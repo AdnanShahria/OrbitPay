@@ -15,6 +15,7 @@ import com.orbitsaas.payment.data.local.LocalStats
 import com.orbitsaas.payment.data.local.OrbitDatabase
 import com.orbitsaas.payment.data.local.PreferencesManager
 import com.orbitsaas.payment.data.local.SmsEntity
+import com.orbitsaas.payment.data.remote.DevicePreflightData
 import com.orbitsaas.payment.data.remote.IngestSmsItem
 import com.orbitsaas.payment.data.remote.MerchantOrderDto
 import com.orbitsaas.payment.data.remote.OrbitApiClient
@@ -24,6 +25,7 @@ import com.orbitsaas.payment.interceptors.InboxScanner
 import com.orbitsaas.payment.service.DynamicPushDispatcher
 import com.orbitsaas.payment.service.FcmTokenRegistrar
 import com.orbitsaas.payment.service.StickyForegroundService
+import com.orbitsaas.payment.util.SimSlotReader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -60,7 +62,9 @@ data class DashboardUiState(
     val loginError: String? = null,
     val isForegroundEnabled: Boolean = true,
     val isOnboardingCompleted: Boolean = false,
-    val feedbackMessage: String? = null
+    val feedbackMessage: String? = null,
+    val preflightState: DevicePreflightData? = null,
+    val isCheckingPreflight: Boolean = false
 )
 
 private data class CoreStatusBundle(
@@ -122,6 +126,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _isLoggingIn = MutableStateFlow(false)
     private val _loginError = MutableStateFlow<String?>(null)
 
+    private val _preflightState = MutableStateFlow<DevicePreflightData?>(null)
+    private val _isCheckingPreflight = MutableStateFlow(false)
+
     // Flow of recent 50 transactions
     val recentTransactions: StateFlow<List<SmsEntity>> = database.smsDao()
         .getRecentTransactions(50)
@@ -182,6 +189,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         LoginProgressBundle(isLoggingIn, loginError, serverUrl, isFgEnabled)
     }
 
+    private val preflightBundleFlow = combine(
+        _preflightState,
+        _isCheckingPreflight,
+        ::Pair
+    )
+
     // Combined UI State
     val uiState: StateFlow<DashboardUiState> = combine(
         combine(coreBundleFlow, ordersBundleFlow, intentsBundleFlow) { core, orders, intents ->
@@ -191,8 +204,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             auth to loginProg
         },
         recentTransactions,
-        statsFlow
-    ) { (core, ordersBundle, intentsBundle), (auth, loginProg), transactions, stats ->
+        statsFlow,
+        preflightBundleFlow
+    ) { (core, ordersBundle, intentsBundle), (auth, loginProg), transactions, stats, preflightBundle ->
         val loggedIn = auth.authToken.isNotBlank() || (auth.merchantId.isNotBlank() && auth.deviceKey.isNotBlank())
 
         DashboardUiState(
@@ -222,7 +236,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             loginError = loginProg.loginError,
             isForegroundEnabled = loginProg.isForegroundEnabled,
             isOnboardingCompleted = preferences.isOnboardingCompleted,
-            feedbackMessage = core.feedbackMessage
+            feedbackMessage = core.feedbackMessage,
+            preflightState = preflightBundle.first,
+            isCheckingPreflight = preflightBundle.second
         )
     }.stateIn(
         viewModelScope,
@@ -245,6 +261,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         refreshStatsFromServer()
         refreshOrders()
         refreshPaymentIntents()
+        refreshPreflight()
         observePushRefreshEvents()
     }
 
@@ -341,6 +358,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 refreshStatsFromServer()
                 refreshOrders()
                 refreshPaymentIntents()
+                refreshPreflight()
                 onSuccess()
             }.onFailure { err ->
                 _isLoggingIn.value = false
@@ -368,6 +386,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _pendingOrderCount.value = 0
         _paymentIntents.value = emptyList()
         _focusedPaymentIntentId.value = null
+        _preflightState.value = null
+        _isCheckingPreflight.value = false
         _loginError.value = null
         _feedbackMessage.value = "Signed out of ORBIT Hub."
         onComplete()
@@ -388,6 +408,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _pendingOrderCount.value = 0
         _paymentIntents.value = emptyList()
         _focusedPaymentIntentId.value = null
+        _preflightState.value = null
+        _isCheckingPreflight.value = false
         _loginError.value = message?.takeIf { it.isNotBlank() }
             ?: "Session expired or revoked. Please sign in again."
     }
@@ -708,6 +730,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         refreshStatsFromServer()
         refreshOrders()
         refreshPaymentIntents()
+        refreshPreflight()
+    }
+
+    /**
+     * Checks device readiness & number profile match against ORBIT Hub.
+     */
+    fun refreshPreflight() {
+        if (!preferences.isLoggedIn() || _isCheckingPreflight.value) return
+
+        viewModelScope.launch {
+            _isCheckingPreflight.value = true
+            val result = withContext(Dispatchers.IO) {
+                val request = SimSlotReader.buildPreflightCheckRequest(getApplication(), preferences)
+                apiClient.runPreflightCheck(request)
+            }
+            result.onSuccess { data ->
+                _preflightState.value = data
+            }.onFailure { err ->
+                if (err is UnauthorizedException) {
+                    handleUnauthorized(err.message)
+                } else {
+                    Log.w(TAG, "Failed to refresh preflight: ${err.message}")
+                }
+            }
+            _isCheckingPreflight.value = false
+        }
     }
 
     fun testConnection(

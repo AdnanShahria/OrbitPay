@@ -15,6 +15,8 @@ import com.orbitsaas.payment.R
 import com.orbitsaas.payment.data.local.BlockedMessageEntity
 import com.orbitsaas.payment.data.local.OrbitDatabase
 import com.orbitsaas.payment.data.local.PreferencesManager
+import com.orbitsaas.payment.data.remote.DevicePreflightData
+import com.orbitsaas.payment.data.remote.OrbitApiClient
 import com.orbitsaas.payment.interceptors.InboxScanner
 import com.orbitsaas.payment.interceptors.parsers.MfsParser
 import com.orbitsaas.payment.interceptors.parsers.ParseOutcome
@@ -22,6 +24,8 @@ import com.orbitsaas.payment.service.FcmTokenRegistrar
 import com.orbitsaas.payment.service.PushWebSocketClient
 import com.orbitsaas.payment.service.StickyForegroundService
 import com.orbitsaas.payment.service.WsPushState
+import com.orbitsaas.payment.util.SimSlotInfo
+import com.orbitsaas.payment.util.SimSlotReader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -32,6 +36,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 data class DiagnosticsUiState(
+    val phonePermissionGranted: Boolean = false,
+    val detectedSimSlots: List<SimSlotInfo> = emptyList(),
+    val preflight: DevicePreflightData? = null,
+    val isCheckingPreflight: Boolean = false,
+    val preflightError: String? = null,
     val smsPermissionsGranted: Boolean = false,
     val postNotificationsGranted: Boolean = false,
     val notificationListenerEnabled: Boolean = false,
@@ -61,6 +70,7 @@ class DiagnosticsViewModel(application: Application) : AndroidViewModel(applicat
 
     private val database = OrbitDatabase.getDatabase(application)
     private val preferences = PreferencesManager(application)
+    private val apiClient = OrbitApiClient(preferences)
 
     private val _systemChecks = MutableStateFlow(readSystemChecks())
     private val _isRescanning = MutableStateFlow(false)
@@ -69,6 +79,10 @@ class DiagnosticsViewModel(application: Application) : AndroidViewModel(applicat
     private val _testSenderInput = MutableStateFlow("")
     private val _testSmsInput = MutableStateFlow("")
     private val _testParseOutcome = MutableStateFlow<ParseOutcome?>(null)
+
+    private val _preflight = MutableStateFlow<DevicePreflightData?>(null)
+    private val _isCheckingPreflight = MutableStateFlow(false)
+    private val _preflightError = MutableStateFlow<String?>(null)
 
     private val pendingCountFlow = database.smsDao().getPendingUploadCountFlow()
     private val blockedCountFlow = database.blockedMessageDao().countFlow()
@@ -105,15 +119,33 @@ class DiagnosticsViewModel(application: Application) : AndroidViewModel(applicat
         Triple(sender, sms, outcome)
     }
 
-    val uiState: StateFlow<DiagnosticsUiState> = combine(
-        opsBundleFlow,
+    private val preflightBundleFlow = combine(
+        _preflight,
+        _isCheckingPreflight,
+        _preflightError,
+        ::Triple
+    )
+
+    private val logsCountsFlow = combine(
         pendingCountFlow,
         blockedCountFlow,
         blockedMessagesFlow,
-        parserTestFlow
-    ) { ops, pendingCount, blockedCount, blockedList, parserTest ->
+        ::Triple
+    )
+
+    val uiState: StateFlow<DiagnosticsUiState> = combine(
+        opsBundleFlow,
+        logsCountsFlow,
+        parserTestFlow,
+        preflightBundleFlow
+    ) { ops, counts, parserTest, preflightBundle ->
         val checks = ops.checks
         DiagnosticsUiState(
+            phonePermissionGranted = checks.phonePermissionGranted,
+            detectedSimSlots = checks.detectedSimSlots,
+            preflight = preflightBundle.first,
+            isCheckingPreflight = preflightBundle.second,
+            preflightError = preflightBundle.third,
             smsPermissionsGranted = checks.smsPermissionsGranted,
             postNotificationsGranted = checks.postNotificationsGranted,
             notificationListenerEnabled = checks.notificationListenerEnabled,
@@ -128,9 +160,9 @@ class DiagnosticsViewModel(application: Application) : AndroidViewModel(applicat
             lastHeartbeatAt = checks.lastHeartbeatAt,
             lastSyncAt = checks.lastSyncAt,
             lastInboxScanAt = checks.lastInboxScanAt,
-            pendingUploadCount = pendingCount,
-            blockedCount = blockedCount,
-            blockedMessages = blockedList,
+            pendingUploadCount = counts.first,
+            blockedCount = counts.second,
+            blockedMessages = counts.third,
             isRescanning = ops.isRescanning,
             isRefreshingToken = ops.isRefreshingToken,
             feedbackMessage = ops.feedbackMessage,
@@ -144,8 +176,53 @@ class DiagnosticsViewModel(application: Application) : AndroidViewModel(applicat
         initialValue = DiagnosticsUiState()
     )
 
+    init {
+        if (preferences.isLoggedIn()) {
+            runFullSystemCheck()
+        }
+    }
+
     fun refreshStatus() {
         _systemChecks.value = readSystemChecks()
+    }
+
+    fun runFullSystemCheck() {
+        refreshStatus()
+        val ctx = getApplication<Application>()
+        if (!preferences.isLoggedIn()) {
+            _preflightError.value = ctx.getString(R.string.diag_preflight_not_logged_in)
+            return
+        }
+        if (_isCheckingPreflight.value) return
+
+        viewModelScope.launch {
+            _isCheckingPreflight.value = true
+            _preflightError.value = null
+            val result = withContext(Dispatchers.IO) {
+                val request = SimSlotReader.buildPreflightCheckRequest(ctx, preferences)
+                apiClient.runPreflightCheck(request)
+            }
+            result.onSuccess { data ->
+                _preflight.value = data
+                _preflightError.value = null
+            }.onFailure { err ->
+                _preflightError.value = err.message ?: ctx.getString(R.string.diag_preflight_error_generic)
+            }
+            _isCheckingPreflight.value = false
+        }
+    }
+
+    fun confirmSimNumber(slotIndex: Int, phoneNumber: String, carrierName: String) {
+        val ctx = getApplication<Application>()
+        val normalized = SimSlotReader.normalizeBdNumber(phoneNumber)
+        if (normalized == null) {
+            _feedbackMessage.value = ctx.getString(R.string.diag_sim_invalid_number)
+            return
+        }
+        preferences.saveConfirmedSimSlot(slotIndex, normalized, carrierName)
+        refreshStatus()
+        _feedbackMessage.value = ctx.getString(R.string.diag_sim_number_saved, slotIndex, normalized)
+        runFullSystemCheck()
     }
 
     fun startForegroundService() {
@@ -275,8 +352,12 @@ class DiagnosticsViewModel(application: Application) : AndroidViewModel(applicat
         }.getOrDefault(false)
         val fgRunning = isStickyServiceRunning(ctx)
         val firebaseAvailable = runCatching { FcmTokenRegistrar.isFirebaseAvailable(ctx) }.getOrDefault(false)
+        val phonePermissionGranted = SimSlotReader.hasPhonePermission(ctx)
+        val detectedSimSlots = SimSlotReader.readSimSlots(ctx, preferences)
 
         return SystemChecks(
+            phonePermissionGranted = phonePermissionGranted,
+            detectedSimSlots = detectedSimSlots,
             smsPermissionsGranted = smsGranted,
             postNotificationsGranted = notifGranted,
             notificationListenerEnabled = listenerEnabled,
@@ -303,6 +384,8 @@ class DiagnosticsViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     private data class SystemChecks(
+        val phonePermissionGranted: Boolean,
+        val detectedSimSlots: List<SimSlotInfo>,
         val smsPermissionsGranted: Boolean,
         val postNotificationsGranted: Boolean,
         val notificationListenerEnabled: Boolean,

@@ -664,6 +664,55 @@ class OrbitApiClient(
         }
     }
 
+    /**
+     * Fetches the current device readiness & wallet profile preflight summary from ORBIT Hub.
+     */
+    suspend fun fetchPreflight(): Result<DevicePreflightData> {
+        return runCatching {
+            val url = "$baseUrl/api/v1/device/preflight"
+            val response: HttpResponse = client.get(url) {
+                applyAuthHeaders()
+            }
+
+            if (response.status.isSuccess()) {
+                val envelope = response.body<ApiEnvelope<DevicePreflightData>>()
+                if (envelope.success && envelope.data != null) {
+                    envelope.data
+                } else {
+                    throw Exception(envelope.error ?: envelope.message ?: "Failed to fetch device preflight")
+                }
+            } else {
+                throwHttpException(response)
+            }
+        }
+    }
+
+    /**
+     * Runs an active device preflight check comparing detected/confirmed SIM numbers and local
+     * capture permissions against ORBIT Hub merchant wallets and storefront settings.
+     */
+    suspend fun runPreflightCheck(request: PreflightCheckRequest): Result<DevicePreflightData> {
+        return runCatching {
+            val url = "$baseUrl/api/v1/device/preflight/check"
+            val response: HttpResponse = client.post(url) {
+                contentType(ContentType.Application.Json)
+                applyAuthHeaders()
+                setBody(request)
+            }
+
+            if (response.status.isSuccess()) {
+                val envelope = response.body<ApiEnvelope<DevicePreflightData>>()
+                if (envelope.success && envelope.data != null) {
+                    envelope.data
+                } else {
+                    throw Exception(envelope.error ?: envelope.message ?: "Preflight check failed")
+                }
+            } else {
+                throwHttpException(response)
+            }
+        }
+    }
+
     companion object {
         private const val TAG = "OrbitApiClient"
         private val USER_AGENT = "OrbitPay-Android/${BuildConfig.VERSION_NAME}"
