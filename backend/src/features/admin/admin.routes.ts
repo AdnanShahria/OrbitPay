@@ -48,6 +48,11 @@ import {
   revokeAdminSession,
 } from './admin.service';
 import { processWebhookRetries } from '../webhooks/webhook.dispatcher';
+import {
+  getPlatformSettings,
+  updatePlatformSettings,
+  updatePlatformSettingsSchema,
+} from './platform-settings.service';
 import { merchants } from '../../db/schema';
 import { eq } from 'drizzle-orm';
 
@@ -262,6 +267,28 @@ router.post('/system/ensure-schema', requireAdminAuth, async (c) => {
       tables,
     },
   });
+});
+
+/**
+ * GET /api/v1/admin/settings
+ * Returns platform-wide public branding, WhatsApp CTA, and orbitsaas.cloud marketing settings.
+ */
+router.get('/settings', requireAdminAuth, async (c) => {
+  const db = c.get('db');
+  const settings = await getPlatformSettings(db);
+  return c.json({ success: true, data: settings });
+});
+
+/**
+ * PATCH /api/v1/admin/settings
+ * Updates platform-wide WhatsApp CTA number and orbitsaas.cloud marketing settings.
+ */
+router.patch('/settings', requireAdminAuth, async (c) => {
+  const db = c.get('db');
+  const body = await c.req.json().catch(() => ({}));
+  const input = updatePlatformSettingsSchema.parse(body);
+  const updated = await updatePlatformSettings(db, input, extractAdminActor(c));
+  return c.json({ success: true, data: updated });
 });
 
 /**

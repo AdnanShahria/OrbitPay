@@ -198,6 +198,11 @@ export function PollingStatus({
           setPollStatus('VERIFIED');
           if (!hasNotifiedVerifiedRef.current) {
             hasNotifiedVerifiedRef.current = true;
+            toast.success('Payment received & verified!', {
+              id: `buyer-verified-${orderId}`,
+              description: `${formatBDT(finalAmount)} confirmed via ${meta.name}${data.trxId || trxId ? ` · TrxID ${data.trxId || trxId}` : ''}`,
+              duration: 6000,
+            });
             onVerified(data.trxId || trxId, finalAmount, resolvedMatchType);
           }
           return true;

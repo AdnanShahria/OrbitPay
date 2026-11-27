@@ -26,7 +26,7 @@ android {
         applicationId = "com.orbitsaas.payment"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
+        versionCode = 2
         versionName = "localtest"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

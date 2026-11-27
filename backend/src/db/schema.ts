@@ -120,6 +120,7 @@ export type ReceiptPolicy = (typeof RECEIPT_POLICIES)[number];
 export const merchants = sqliteTable('merchants', {
   id: text('id').primaryKey(), // mer_live_xxxx
   storeName: text('store_name').notNull(),
+  slug: text('slug'), // URL-friendly merchant handle (e.g. aurelia-lifestyle-bd)
   webhookUrl: text('webhook_url').notNull(), // Third-party endpoint (e.g. https://aurelia.shop/payment/v1)
   webhookSecret: text('webhook_secret').notNull(), // Used for HMAC-SHA256 signature
   deviceApiKeyHash: text('device_api_key_hash').notNull(), // SHA-256 of the mobile device key
@@ -144,6 +145,7 @@ export const merchants = sqliteTable('merchants', {
   updatedAt: integer('updated_at', { mode: 'timestamp' }).$defaultFn(() => new Date()).notNull(),
 }, (table) => ({
   apiKeyHashIdx: index('idx_merchants_api_key_hash').on(table.apiKeyHash),
+  uniqueSlug: uniqueIndex('uq_merchants_slug').on(table.slug),
 }));
 
 // 2. Merchant Wallets (Multi-SIM Pooling & Limit Rotation)
@@ -535,7 +537,7 @@ export const paymentLinks = sqliteTable('payment_links', {
   createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).$defaultFn(() => new Date()).notNull(),
 }, (table) => ({
-  uniqueSlug: uniqueIndex('uq_payment_links_slug').on(table.slug),
+  uniqueMerchantSlug: uniqueIndex('uq_payment_links_merchant_slug').on(table.merchantId, table.slug),
   merchantIdx: index('idx_payment_links_merchant').on(table.merchantId, table.isActive),
 }));
 
@@ -620,3 +622,12 @@ export type NewAdminSession = typeof adminSessions.$inferInsert;
 
 export type AdminAuditLogRecord = typeof adminAuditLogs.$inferSelect;
 export type NewAdminAuditLog = typeof adminAuditLogs.$inferInsert;
+
+// 20. Platform-Wide Public & Admin-Managed Settings (WhatsApp Support, Marketing CTA)
+export const platformSettings = sqliteTable('platform_settings', {
+  key: text('key').primaryKey(),
+  valueJson: text('value_json').notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).$defaultFn(() => new Date()).notNull(),
+});
+
+export type PlatformSettingRecord = typeof platformSettings.$inferSelect;

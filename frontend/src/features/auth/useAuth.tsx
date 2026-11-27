@@ -28,6 +28,7 @@ export interface AuthUser {
 export interface AuthMerchant {
   id: string;
   storeName: string;
+  slug?: string;
   webhookUrl: string;
   gracePeriodMinutes: number;
   isActive: boolean;

@@ -16,6 +16,7 @@ import ordersRoutes from './features/orders/orders.routes';
 import otpRoutes from './features/otp/otp.routes';
 import { paymentIntentsRoutes, paymentsRoutes } from './features/payments/payments.routes';
 import paymentLinksRoutes from './features/payment-links/payment-links.routes';
+import { getPlatformSettings } from './features/admin/platform-settings.service';
 import { routerRoutes } from './router';
 import { processWebhookRetries } from './features/webhooks/webhook.dispatcher';
 
@@ -87,6 +88,13 @@ app.get('/api/v1/health', (c) => {
     runtime: 'Cloudflare Pages Functions / V8',
     timestamp: Date.now(),
   });
+});
+
+app.get('/api/v1/public/platform-config', async (c) => {
+  const db = c.get('db');
+  const data = await getPlatformSettings(db);
+  c.header('Cache-Control', 'no-store, no-cache, must-revalidate');
+  return c.json({ success: true, data });
 });
 
 // 5. Mount Feature Sub-routers under /api/v1

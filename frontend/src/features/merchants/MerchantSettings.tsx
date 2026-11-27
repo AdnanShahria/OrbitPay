@@ -86,6 +86,7 @@ export function MerchantSettings() {
   } = useMerchantWebhooks(webhookFilter);
 
   const [storeName, setStoreName] = useState('');
+  const [merchantSlug, setMerchantSlug] = useState('');
   const [webhookUrl, setWebhookUrl] = useState('');
   const [gracePeriod, setGracePeriod] = useState(60);
   const [verificationMode, setVerificationMode] = useState<VerificationMode>('AUTO');
@@ -113,6 +114,7 @@ export function MerchantSettings() {
   useEffect(() => {
     if (merchant) {
       setStoreName(merchant.storeName);
+      setMerchantSlug(merchant.slug || '');
       setWebhookUrl(merchant.webhookUrl);
       setGracePeriod(merchant.gracePeriodMinutes);
       setVerificationMode(merchant.verificationMode ?? 'AUTO');
@@ -149,6 +151,7 @@ export function MerchantSettings() {
       const parsedOrigins = parseOriginsList(allowedOriginsText);
       await updateSettingsMutation.mutateAsync({
         storeName,
+        ...(merchantSlug.trim() ? { slug: merchantSlug.trim().toLowerCase() } : {}),
         webhookUrl,
         gracePeriodMinutes: Number(gracePeriod),
         verificationMode,
@@ -305,13 +308,22 @@ export function MerchantSettings() {
           </CardHeader>
 
           <CardContent className="space-y-6">
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
               <Input
                 label="Business / App display name"
                 value={storeName}
                 onChange={setStoreName}
                 placeholder="e.g. Aurelia Lifestyle BD"
                 isRequired
+              />
+
+              <Input
+                label="Payment Link Handle (Slug)"
+                value={merchantSlug}
+                onChange={(val) => setMerchantSlug(val.toLowerCase().replace(/[^a-z0-9-]/g, '-'))}
+                placeholder="e.g. aurelia-bd"
+                hint={`payment.orbitsaas.cloud/${merchantSlug || 'your-brand'}/slug`}
+                inputClassName="font-mono"
               />
 
               <Input

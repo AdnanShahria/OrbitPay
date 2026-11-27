@@ -8,7 +8,13 @@ import {
 } from '../../db/schema';
 import { generateSecureToken } from '../../shared/crypto';
 import { BadRequestError, ConflictError, NotFoundError } from '../../shared/errors';
+import {
+  resolveAndPersistMerchantSlug,
+  slugifySegment,
+  toSafeMerchantSlug,
+} from '../../shared/slug';
 import type { Env } from '../../shared/types';
+import { getPlatformSettings } from '../admin/platform-settings.service';
 import { createPaymentIntent } from '../payments/payments.service';
 import {
   computeDeviceOnlineStatus,
@@ -22,7 +28,12 @@ import type {
   UpdatePaymentLinkInput,
 } from './payment-links.schema';
 
-function formatLinkView(link: PaymentLinkRecord, storeName?: string) {
+function formatLinkView(
+  link: PaymentLinkRecord,
+  storeName: string,
+  merchantSlug: string,
+  origin = 'https://payment.orbitsaas.cloud'
+) {
   let metadata: Record<string, unknown> | null = null;
   try {
     metadata = link.metadataJson ? JSON.parse(link.metadataJson) : null;
@@ -30,10 +41,16 @@ function formatLinkView(link: PaymentLinkRecord, storeName?: string) {
     metadata = null;
   }
 
+  const cleanOrigin = origin.replace(/\/+$/, '');
+  const sharePath = `/${merchantSlug}/${link.slug}`;
+
   return {
     id: link.id,
     merchantId: link.merchantId,
+    merchantSlug,
     slug: link.slug,
+    sharePath,
+    shareUrl: `${cleanOrigin}${sharePath}`,
     title: link.title,
     description: link.description,
     vertical: link.vertical,
@@ -58,55 +75,67 @@ function formatLinkView(link: PaymentLinkRecord, storeName?: string) {
 }
 
 function generateDefaultSlug(title: string): string {
-  const base = title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 32);
+  const base = slugifySegment(title, 'pay').slice(0, 32);
   const suffix = generateSecureToken(3).toLowerCase();
   return `${base || 'pay'}-${suffix}`;
 }
 
-export async function listPaymentLinks(db: AppDb, merchant: MerchantRecord) {
-  const rows = await db
-    .select()
-    .from(paymentLinks)
-    .where(eq(paymentLinks.merchantId, merchant.id))
-    .orderBy(desc(paymentLinks.createdAt))
-    .limit(100);
+export async function listPaymentLinks(
+  db: AppDb,
+  merchant: MerchantRecord,
+  origin?: string
+) {
+  const [merchantSlug, rows] = await Promise.all([
+    resolveAndPersistMerchantSlug(db, merchant),
+    db
+      .select()
+      .from(paymentLinks)
+      .where(eq(paymentLinks.merchantId, merchant.id))
+      .orderBy(desc(paymentLinks.createdAt))
+      .limit(100),
+  ]);
 
-  return rows.map((row) => formatLinkView(row, merchant.storeName));
+  return rows.map((row) => formatLinkView(row, merchant.storeName, merchantSlug, origin));
 }
 
-export async function getPaymentLinkById(db: AppDb, merchant: MerchantRecord, id: string) {
-  const rows = await db
-    .select()
-    .from(paymentLinks)
-    .where(and(eq(paymentLinks.id, id), eq(paymentLinks.merchantId, merchant.id)))
-    .limit(1);
+export async function getPaymentLinkById(
+  db: AppDb,
+  merchant: MerchantRecord,
+  id: string,
+  origin?: string
+) {
+  const [merchantSlug, rows] = await Promise.all([
+    resolveAndPersistMerchantSlug(db, merchant),
+    db
+      .select()
+      .from(paymentLinks)
+      .where(and(eq(paymentLinks.id, id), eq(paymentLinks.merchantId, merchant.id)))
+      .limit(1),
+  ]);
 
   if (!rows[0]) {
     throw new NotFoundError(`Payment link '${id}' not found`);
   }
 
-  return formatLinkView(rows[0], merchant.storeName);
+  return formatLinkView(rows[0], merchant.storeName, merchantSlug, origin);
 }
 
 export async function createPaymentLink(
   db: AppDb,
   merchant: MerchantRecord,
-  input: CreatePaymentLinkInput
+  input: CreatePaymentLinkInput,
+  origin?: string
 ) {
   const slug = input.slug || generateDefaultSlug(input.title);
 
   const existing = await db
     .select({ id: paymentLinks.id })
     .from(paymentLinks)
-    .where(eq(paymentLinks.slug, slug))
+    .where(and(eq(paymentLinks.merchantId, merchant.id), eq(paymentLinks.slug, slug)))
     .limit(1);
 
   if (existing[0]) {
-    throw new ConflictError(`Payment link slug '${slug}' is already in use`);
+    throw new ConflictError(`Payment link slug '${slug}' is already in use for your store`);
   }
 
   const now = new Date();
@@ -145,14 +174,15 @@ export async function createPaymentLink(
     updatedAt: now,
   });
 
-  return getPaymentLinkById(db, merchant, id);
+  return getPaymentLinkById(db, merchant, id, origin);
 }
 
 export async function updatePaymentLink(
   db: AppDb,
   merchant: MerchantRecord,
   id: string,
-  input: UpdatePaymentLinkInput
+  input: UpdatePaymentLinkInput,
+  origin?: string
 ) {
   const existing = await db
     .select()
@@ -164,9 +194,22 @@ export async function updatePaymentLink(
     throw new NotFoundError(`Payment link '${id}' not found`);
   }
 
+  if (input.slug !== undefined && input.slug !== existing[0].slug) {
+    const duplicate = await db
+      .select({ id: paymentLinks.id })
+      .from(paymentLinks)
+      .where(and(eq(paymentLinks.merchantId, merchant.id), eq(paymentLinks.slug, input.slug)))
+      .limit(1);
+
+    if (duplicate[0] && duplicate[0].id !== id) {
+      throw new ConflictError(`Payment link slug '${input.slug}' is already in use for your store`);
+    }
+  }
+
   await db
     .update(paymentLinks)
     .set({
+      ...(input.slug !== undefined && { slug: input.slug }),
       ...(input.title !== undefined && { title: input.title }),
       ...(input.description !== undefined && { description: input.description }),
       ...(input.vertical !== undefined && { vertical: input.vertical }),
@@ -189,7 +232,7 @@ export async function updatePaymentLink(
     })
     .where(and(eq(paymentLinks.id, id), eq(paymentLinks.merchantId, merchant.id)));
 
-  return getPaymentLinkById(db, merchant, id);
+  return getPaymentLinkById(db, merchant, id, origin);
 }
 
 export async function deletePaymentLink(db: AppDb, merchant: MerchantRecord, id: string) {
@@ -205,14 +248,67 @@ export async function deletePaymentLink(db: AppDb, merchant: MerchantRecord, id:
   return { deleted: true, id };
 }
 
-async function loadActivePublicLink(db: AppDb, slug: string) {
-  const rows = await db
+async function resolveActiveMerchantBySlug(db: AppDb, merchantSlug: string): Promise<MerchantRecord> {
+  const normalized = slugifySegment(merchantSlug, '');
+  if (!normalized) {
+    throw new NotFoundError('Merchant payment page not found');
+  }
+
+  const directRows = await db
     .select()
-    .from(paymentLinks)
-    .where(eq(paymentLinks.slug, slug.trim().toLowerCase()))
+    .from(merchants)
+    .where(and(sql`lower(${merchants.slug}) = ${normalized}`, eq(merchants.isActive, true)))
     .limit(1);
 
-  const link = rows[0];
+  if (directRows[0]) {
+    return directRows[0];
+  }
+
+  const activeMerchants = await db
+    .select()
+    .from(merchants)
+    .where(eq(merchants.isActive, true));
+
+  const matched = activeMerchants.find((m) => toSafeMerchantSlug(m.storeName) === normalized);
+  if (!matched) {
+    throw new NotFoundError(`Store '${merchantSlug}' not found or inactive`);
+  }
+
+  const persistedSlug = await resolveAndPersistMerchantSlug(db, matched);
+  return { ...matched, slug: persistedSlug };
+}
+
+async function loadActivePublicLink(db: AppDb, slug: string, merchantSlug?: string) {
+  const normalizedSlug = slug.trim().toLowerCase();
+
+  let link: PaymentLinkRecord | undefined;
+  let merchant: MerchantRecord | undefined;
+
+  if (merchantSlug) {
+    merchant = await resolveActiveMerchantBySlug(db, merchantSlug);
+    const linkRows = await db
+      .select()
+      .from(paymentLinks)
+      .where(and(eq(paymentLinks.merchantId, merchant.id), eq(paymentLinks.slug, normalizedSlug)))
+      .limit(1);
+    link = linkRows[0];
+  } else {
+    const rows = await db
+      .select()
+      .from(paymentLinks)
+      .where(eq(paymentLinks.slug, normalizedSlug))
+      .limit(1);
+    link = rows[0];
+    if (link) {
+      const merchantRows = await db
+        .select()
+        .from(merchants)
+        .where(and(eq(merchants.id, link.merchantId), eq(merchants.isActive, true)))
+        .limit(1);
+      merchant = merchantRows[0];
+    }
+  }
+
   if (!link || !link.isActive) {
     throw new NotFoundError(`Payment link '${slug}' not found or inactive`);
   }
@@ -225,33 +321,40 @@ async function loadActivePublicLink(db: AppDb, slug: string) {
     throw new BadRequestError('This payment link has reached its maximum number of uses');
   }
 
-  const merchantRows = await db
-    .select()
-    .from(merchants)
-    .where(and(eq(merchants.id, link.merchantId), eq(merchants.isActive, true)))
-    .limit(1);
-
-  const merchant = merchantRows[0];
   if (!merchant) {
     throw new NotFoundError('Merchant associated with this payment link is inactive');
   }
 
-  return { link, merchant };
+  const resolvedMerchantSlug = await resolveAndPersistMerchantSlug(db, merchant);
+  return { link, merchant, merchantSlug: resolvedMerchantSlug };
 }
 
-export async function getPublicPaymentLink(db: AppDb, env: Env, slug: string) {
-  const { link, merchant } = await loadActivePublicLink(db, slug);
-  const [wallets, deviceStatus] = await Promise.all([
+export async function getPublicPaymentLink(
+  db: AppDb,
+  env: Env,
+  slug: string,
+  origin?: string,
+  merchantSlug?: string
+) {
+  const { link, merchant, merchantSlug: resolvedMerchantSlug } = await loadActivePublicLink(
+    db,
+    slug,
+    merchantSlug
+  );
+  const [wallets, deviceStatus, platformConfig] = await Promise.all([
     getAllActiveRotatedWallets(db, merchant.id),
     computeDeviceOnlineStatus(db, env, merchant),
+    getPlatformSettings(db),
   ]);
 
   return {
-    ...formatLinkView(link, merchant.storeName),
+    ...formatLinkView(link, merchant.storeName, resolvedMerchantSlug, origin),
     storeName: merchant.storeName,
+    merchantSlug: resolvedMerchantSlug,
     effectiveVerificationMode: link.verificationMode ?? merchant.verificationMode,
     receiptPolicy: merchant.receiptPolicy,
     deviceStatus,
+    platformConfig,
     activeWallets: wallets.map((w) => ({
       provider: w.provider,
       walletNumber: w.walletNumber,
@@ -266,9 +369,14 @@ export async function payPublicPaymentLink(
   env: Env,
   slug: string,
   input: PayPaymentLinkInput,
-  origin: string
+  origin: string,
+  merchantSlug?: string
 ) {
-  const { link, merchant } = await loadActivePublicLink(db, slug);
+  const { link, merchant, merchantSlug: resolvedMerchantSlug } = await loadActivePublicLink(
+    db,
+    slug,
+    merchantSlug
+  );
 
   let amount: number;
   if (link.amountType === 'FIXED') {
@@ -326,6 +434,9 @@ export async function payPublicPaymentLink(
       metadata: {
         paymentLinkId: link.id,
         paymentLinkSlug: link.slug,
+        paymentLinkTitle: link.title,
+        merchantSlug: resolvedMerchantSlug,
+        sharePath: `/${resolvedMerchantSlug}/${link.slug}`,
         ...(input.referenceNote ? { referenceNote: input.referenceNote } : {}),
       },
     },

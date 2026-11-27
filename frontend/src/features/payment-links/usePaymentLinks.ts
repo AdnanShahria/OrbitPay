@@ -10,13 +10,17 @@ import type {
   VerificationMode,
 } from '@/features/checkout/useCheckout';
 import type { VerticalProfile } from '@/features/payments/usePaymentIntents';
+import type { PlatformPublicConfig } from '@/features/platform/usePlatformConfig';
 
 export type PaymentLinkAmountType = 'FIXED' | 'OPEN';
 
 export interface PaymentLinkView {
   id: string;
   merchantId: string;
+  merchantSlug: string;
   slug: string;
+  sharePath: string;
+  shareUrl: string;
   title: string;
   description: string | null;
   vertical: VerticalProfile | string;
@@ -41,9 +45,11 @@ export interface PaymentLinkView {
 
 export interface PublicPaymentLinkView extends PaymentLinkView {
   storeName: string;
+  merchantSlug: string;
   effectiveVerificationMode: VerificationMode;
   receiptPolicy: ReceiptPolicy;
   deviceStatus: DeviceStatusSnapshot;
+  platformConfig?: PlatformPublicConfig;
   activeWallets: ActiveWallet[];
 }
 
@@ -138,11 +144,14 @@ export function useDeletePaymentLink() {
   });
 }
 
-export function usePublicPaymentLink(slug: string) {
+export function usePublicPaymentLink(slug: string, merchantSlug?: string) {
   return useQuery<PublicPaymentLinkView>({
-    queryKey: ['public-payment-link', slug],
+    queryKey: ['public-payment-link', merchantSlug || 'legacy', slug],
     queryFn: async () => {
-      const res = await fetch(`/api/v1/payment-links/public/${encodeURIComponent(slug)}`);
+      const endpoint = merchantSlug
+        ? `/api/v1/payment-links/public/m/${encodeURIComponent(merchantSlug)}/${encodeURIComponent(slug)}`
+        : `/api/v1/payment-links/public/${encodeURIComponent(slug)}`;
+      const res = await fetch(endpoint);
       return unwrapApiResponse<PublicPaymentLinkView>(res, 'Payment link not found');
     },
     enabled: Boolean(slug),
@@ -150,7 +159,7 @@ export function usePublicPaymentLink(slug: string) {
   });
 }
 
-export function usePayPublicLink(slug: string) {
+export function usePayPublicLink(slug: string, merchantSlug?: string) {
   return useMutation({
     mutationFn: async (payload: {
       amount?: number;
@@ -160,7 +169,10 @@ export function usePayPublicLink(slug: string) {
       customerPhone?: string;
       referenceNote?: string;
     }) => {
-      const res = await fetch(`/api/v1/payment-links/public/${encodeURIComponent(slug)}/pay`, {
+      const endpoint = merchantSlug
+        ? `/api/v1/payment-links/public/m/${encodeURIComponent(merchantSlug)}/${encodeURIComponent(slug)}/pay`
+        : `/api/v1/payment-links/public/${encodeURIComponent(slug)}/pay`;
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

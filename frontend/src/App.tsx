@@ -28,6 +28,7 @@ import { StatusDot } from '@/components/base/badges/status-dot';
 import { Spinner } from '@/components/base/spinner/spinner';
 import { ThemeToggle } from '@/components/application/theme/theme-toggle';
 import { toast } from '@/components/base/toast/toast';
+import { OrbitFloatingWhatsapp, OrbitMarketingBar } from '@/features/platform/OrbitMarketingBar';
 import { cx } from '@/utils/cx';
 import { useRealtime } from '@/shared/hooks/useRealtime';
 import { AdminDashboard } from '@/features/admin/AdminDashboard';
@@ -116,9 +117,44 @@ function AppRouter() {
     typeof window !== 'undefined' ? window.location.search : '',
   );
 
-  // Public shareable Payment Link route (/l/:slug)
-  const linkMatch = pathname.match(/^\/l\/([^/]+)\/?$/);
-  const publicLinkSlug = linkMatch ? decodeURIComponent(linkMatch[1]) : null;
+  // Public shareable Payment Link routes:
+  // 1) /:merchantSlug/:slug (preferred: https://payment.orbitsaas.cloud/<merchant>/<slug>)
+  // 2) /l/:slug (legacy backward compatibility)
+  const RESERVED_SEGMENTS = new Set([
+    'admin',
+    'checkout',
+    'l',
+    'api',
+    'assets',
+    'health',
+    'widget',
+    'public',
+    'auth',
+    'static',
+    'app',
+  ]);
+  const legacyLinkMatch = pathname.match(/^\/l\/([^/]+)\/?$/);
+  const merchantLinkMatch = pathname.match(/^\/([^/]+)\/([^/]+)\/?$/);
+  const matchedMerchantSegment = merchantLinkMatch
+    ? decodeURIComponent(merchantLinkMatch[1])
+    : null;
+  const matchedLinkSegment = merchantLinkMatch
+    ? decodeURIComponent(merchantLinkMatch[2])
+    : null;
+  const isMerchantScopedLink =
+    Boolean(matchedMerchantSegment && matchedLinkSegment) &&
+    !RESERVED_SEGMENTS.has(matchedMerchantSegment!.toLowerCase()) &&
+    !matchedMerchantSegment!.includes('.') &&
+    !matchedLinkSegment!.includes('.');
+
+  const publicLinkSlug = legacyLinkMatch
+    ? decodeURIComponent(legacyLinkMatch[1])
+    : isMerchantScopedLink
+      ? matchedLinkSegment
+      : null;
+  const publicLinkMerchantSlug = isMerchantScopedLink
+    ? matchedMerchantSegment || undefined
+    : undefined;
 
   // First-class checkout session route (/checkout/:sessionId or ?sessionId=...)
   const sessionPathMatch = pathname.match(/^\/checkout\/([^/]+)\/?$/);
@@ -194,9 +230,14 @@ function AppRouter() {
     window.history.pushState({}, '', '/admin');
   };
 
-  // 1. Public Payment Link Route (/l/:slug)
+  // 1. Public Payment Link Route (/:merchantSlug/:slug or /l/:slug)
   if (publicLinkSlug) {
-    return <PublicPaymentLinkPage slug={publicLinkSlug} />;
+    return (
+      <PublicPaymentLinkPage
+        slug={publicLinkSlug}
+        merchantSlug={publicLinkMerchantSlug}
+      />
+    );
   }
 
   // 2. Hidden Multi-Tenant Central Hub Admin Panel (/admin)
@@ -866,91 +907,96 @@ function EmbeddedCheckoutView({ config }: { config: CheckoutConfig }) {
   } = useCheckout(config);
 
   return (
-    <div className="min-h-screen bg-background-full flex items-center justify-center p-4">
-      <Card variant="elevated" className="w-full max-w-lg">
-        <CardContent className="p-6 space-y-6">
-          <div className="pb-4 border-b border-separator-border">
-            <CheckoutDisplayHeader
-              storeName={storeName}
-              orderId={orderId || config.orderId || ''}
-              vertical={vertical}
-              display={display}
-              baseAmount={baseAmount}
-              uniqueAmount={uniqueAmount}
-              offsetCents={offsetCents}
-              isSessionLoading={isSessionLoading}
-            />
-          </div>
+    <div className="min-h-screen bg-background-full flex flex-col items-center justify-center p-4 sm:p-6">
+      <div className="w-full max-w-lg space-y-4">
+        <Card variant="elevated" className="w-full">
+          <CardContent className="p-6 space-y-6">
+            <div className="pb-4 border-b border-separator-border">
+              <CheckoutDisplayHeader
+                storeName={storeName}
+                orderId={orderId || config.orderId || ''}
+                vertical={vertical}
+                display={display}
+                baseAmount={baseAmount}
+                uniqueAmount={uniqueAmount}
+                offsetCents={offsetCents}
+                isSessionLoading={isSessionLoading}
+              />
+            </div>
 
-          {currentStep === 'POLLING' || currentStep === 'SUCCESS' ? (
-            <PollingStatus
-              orderId={orderId || config.orderId || ''}
-              expectedAmount={verifiedData?.amount ?? (Number(paidAmount) || uniqueAmount)}
-              provider={selectedProvider}
-              trxId={verifiedData?.trxId || trxId}
-              senderNumber={senderNumber}
-              merchantId={merchantId}
-              initialVerified={currentStep === 'SUCCESS'}
-              initialMatchType={verifiedData?.matchType ?? null}
-              initialStatus={pollingStatus}
-              initialEscalationReason={escalationReason}
-              receiptUrl={receiptUrl}
-              returnUrl={returnUrl}
-              cancelUrl={cancelUrl}
-              graceExpiresAt={graceExpiresAt}
-              submitAttempts={submitAttempts}
-              maxSubmitAttempts={maxSubmitAttempts}
-              onEditSubmission={editSubmission}
-              onStatusChange={handlePollStateChange}
-              onVerified={markVerified}
-              onClose={emitClose}
-            />
-          ) : (
-            <CheckoutStepper
-              initialStep={preferredStepperStep}
-              baseAmount={baseAmount}
-              uniqueAmount={uniqueAmount}
-              offsetCents={offsetCents}
-              orderId={orderId || config.orderId || ''}
-              expiresAt={expiresAt}
-              selectedProvider={selectedProvider}
-              onSelectProvider={setSelectedProvider}
-              activeWallet={activeWallet}
-              activeWallets={activeWallets}
-              senderNumber={senderNumber}
-              onChangeSenderNumber={setSenderNumber}
-              paidAmount={paidAmount}
-              onChangePaidAmount={setPaidAmount}
-              trxId={trxId}
-              onChangeTrxId={setTrxId}
-              verificationMode={verificationMode}
-              receiptPolicy={receiptPolicy}
-              deviceStatus={deviceStatus}
-              sessionToken={sessionToken}
-              receiptUrl={receiptUrl}
-              receiptUploadCount={receiptUploadCount}
-              receiptMaxUploads={receiptMaxUploads}
-              isUploadingReceipt={isUploadingReceipt}
-              receiptError={receiptError}
-              onUploadReceipt={uploadReceipt}
-              submitAttempts={submitAttempts}
-              maxSubmitAttempts={maxSubmitAttempts}
-              onSubmit={submitPayment}
-              isSubmitting={isSubmitting}
-              isSessionLoading={isSessionLoading}
-              errorMessage={errorMessage}
-            />
-          )}
+            {currentStep === 'POLLING' || currentStep === 'SUCCESS' ? (
+              <PollingStatus
+                orderId={orderId || config.orderId || ''}
+                expectedAmount={verifiedData?.amount ?? (Number(paidAmount) || uniqueAmount)}
+                provider={selectedProvider}
+                trxId={verifiedData?.trxId || trxId}
+                senderNumber={senderNumber}
+                merchantId={merchantId}
+                initialVerified={currentStep === 'SUCCESS'}
+                initialMatchType={verifiedData?.matchType ?? null}
+                initialStatus={pollingStatus}
+                initialEscalationReason={escalationReason}
+                receiptUrl={receiptUrl}
+                returnUrl={returnUrl}
+                cancelUrl={cancelUrl}
+                graceExpiresAt={graceExpiresAt}
+                submitAttempts={submitAttempts}
+                maxSubmitAttempts={maxSubmitAttempts}
+                onEditSubmission={editSubmission}
+                onStatusChange={handlePollStateChange}
+                onVerified={markVerified}
+                onClose={emitClose}
+              />
+            ) : (
+              <CheckoutStepper
+                initialStep={preferredStepperStep}
+                baseAmount={baseAmount}
+                uniqueAmount={uniqueAmount}
+                offsetCents={offsetCents}
+                orderId={orderId || config.orderId || ''}
+                expiresAt={expiresAt}
+                selectedProvider={selectedProvider}
+                onSelectProvider={setSelectedProvider}
+                activeWallet={activeWallet}
+                activeWallets={activeWallets}
+                senderNumber={senderNumber}
+                onChangeSenderNumber={setSenderNumber}
+                paidAmount={paidAmount}
+                onChangePaidAmount={setPaidAmount}
+                trxId={trxId}
+                onChangeTrxId={setTrxId}
+                verificationMode={verificationMode}
+                receiptPolicy={receiptPolicy}
+                deviceStatus={deviceStatus}
+                sessionToken={sessionToken}
+                receiptUrl={receiptUrl}
+                receiptUploadCount={receiptUploadCount}
+                receiptMaxUploads={receiptMaxUploads}
+                isUploadingReceipt={isUploadingReceipt}
+                receiptError={receiptError}
+                onUploadReceipt={uploadReceipt}
+                submitAttempts={submitAttempts}
+                maxSubmitAttempts={maxSubmitAttempts}
+                onSubmit={submitPayment}
+                isSubmitting={isSubmitting}
+                isSessionLoading={isSessionLoading}
+                errorMessage={errorMessage}
+              />
+            )}
 
-          <div className="pt-4 border-t border-separator-border flex items-center justify-between text-caption-2-medium text-text-tertiary">
-            <span className="flex items-center gap-1.5">
-              <RiShieldCheckLine className="size-3.5 text-status-lime-text" aria-hidden />
-              <span>256-bit encrypted MFS verification</span>
-            </span>
-            <span className="text-caption-2-semibold text-text-secondary">ORBIT Pay Hub</span>
-          </div>
-        </CardContent>
-      </Card>
+            <div className="pt-4 border-t border-separator-border flex items-center justify-between text-caption-2-medium text-text-tertiary">
+              <span className="flex items-center gap-1.5">
+                <RiShieldCheckLine className="size-3.5 text-status-lime-text" aria-hidden />
+                <span>256-bit encrypted MFS verification</span>
+              </span>
+              <span className="text-caption-2-semibold text-text-secondary">ORBIT Pay Hub</span>
+            </div>
+          </CardContent>
+        </Card>
+
+        <OrbitMarketingBar compact />
+      </div>
+      <OrbitFloatingWhatsapp />
     </div>
   );
 }

@@ -35,6 +35,14 @@ export const createPaymentLinkSchema = z
   });
 
 export const updatePaymentLinkSchema = z.object({
+  slug: z
+    .string()
+    .trim()
+    .min(3)
+    .max(80)
+    .regex(/^[a-z0-9-]+$/i, 'Slug may only contain letters, numbers, and hyphens')
+    .transform((s) => s.toLowerCase())
+    .optional(),
   title: z.string().trim().min(2).max(160).optional(),
   description: z.string().trim().max(1000).optional().nullable(),
   vertical: z.enum(VERTICAL_PROFILES).optional(),

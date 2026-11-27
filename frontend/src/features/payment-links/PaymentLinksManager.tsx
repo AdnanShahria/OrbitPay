@@ -7,6 +7,8 @@ import {
   type PaymentLinkAmountType,
   type PaymentLinkView,
 } from './usePaymentLinks';
+import { useAuth } from '@/features/auth/useAuth';
+import { useMerchant } from '@/features/merchants/useMerchant';
 import type { VerticalProfile } from '@/features/payments/usePaymentIntents';
 import type { VerificationMode } from '@/features/checkout/useCheckout';
 import { Card, CardContent } from '@/components/base/card/card';
@@ -31,6 +33,7 @@ import {
   RiAddLine,
   RiCheckLine,
   RiDeleteBinLine,
+  RiEditLine,
   RiExternalLinkLine,
   RiFileCopyLine,
   RiLinksLine,
@@ -47,13 +50,25 @@ const VERTICAL_OPTIONS: Array<{ label: string; value: VerticalProfile }> = [
   { label: 'E-Commerce', value: 'ecommerce' },
 ];
 
+function toClientMerchantSlug(storeName?: string): string {
+  const cleaned = (storeName || 'merchant')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48);
+  return cleaned || 'merchant';
+}
+
 export function PaymentLinksManager() {
+  const { merchant: authMerchant } = useAuth();
+  const { data: merchantProfile } = useMerchant(authMerchant?.id);
   const { data: links = [], isLoading } = usePaymentLinks();
   const createMutation = useCreatePaymentLink();
   const updateMutation = useUpdatePaymentLink();
   const deleteMutation = useDeletePaymentLink();
 
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingLink, setEditingLink] = useState<PaymentLinkView | null>(null);
   const [deletingLink, setDeletingLink] = useState<PaymentLinkView | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
@@ -69,13 +84,22 @@ export function PaymentLinksManager() {
   const [maxUses, setMaxUses] = useState('');
   const [returnUrl, setReturnUrl] = useState('');
 
+  const merchantSlug =
+    merchantProfile?.slug ||
+    authMerchant?.slug ||
+    toClientMerchantSlug(merchantProfile?.storeName || authMerchant?.storeName);
+
   const origin =
     typeof window !== 'undefined' ? window.location.origin : 'https://payment.orbitsaas.cloud';
 
-  const getShareUrl = (linkSlug: string) => `${origin}/l/${linkSlug}`;
+  const getSharePath = (link: Pick<PaymentLinkView, 'slug' | 'merchantSlug' | 'sharePath'>) =>
+    link.sharePath || `/${link.merchantSlug || merchantSlug}/${link.slug}`;
+
+  const getShareUrl = (link: Pick<PaymentLinkView, 'slug' | 'merchantSlug' | 'sharePath'>) =>
+    `${origin}${getSharePath(link)}`;
 
   const handleCopyLink = (link: PaymentLinkView) => {
-    const url = getShareUrl(link.slug);
+    const url = getShareUrl(link);
     navigator.clipboard.writeText(url);
     setCopiedId(link.id);
     toast.success('Payment link copied', { description: url });
@@ -83,6 +107,7 @@ export function PaymentLinksManager() {
   };
 
   const resetForm = () => {
+    setEditingLink(null);
     setTitle('');
     setSlug('');
     setDescription('');
@@ -96,7 +121,28 @@ export function PaymentLinksManager() {
     setReturnUrl('');
   };
 
-  const handleCreate = async (e: React.FormEvent) => {
+  const openCreateModal = () => {
+    resetForm();
+    setIsModalOpen(true);
+  };
+
+  const openEditModal = (link: PaymentLinkView) => {
+    setEditingLink(link);
+    setTitle(link.title);
+    setSlug(link.slug);
+    setDescription(link.description || '');
+    setVertical((link.vertical as VerticalProfile) || 'custom');
+    setAmountType(link.amountType);
+    setFixedAmount(link.fixedAmount != null ? String(link.fixedAmount) : '500');
+    setMinAmount(link.minAmount != null ? String(link.minAmount) : '50');
+    setMaxAmount(link.maxAmount != null ? String(link.maxAmount) : '');
+    setVerificationMode(link.verificationMode ?? 'DEFAULT');
+    setMaxUses(link.maxUses != null ? String(link.maxUses) : '');
+    setReturnUrl(link.returnUrl || '');
+    setIsModalOpen(true);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) {
       toast.error('Please enter a link title');
@@ -110,27 +156,49 @@ export function PaymentLinksManager() {
     }
 
     try {
-      const created = await createMutation.mutateAsync({
-        title: title.trim(),
-        slug: slug.trim() || undefined,
-        description: description.trim() || undefined,
-        vertical,
-        amountType,
-        fixedAmount: amountType === 'FIXED' ? numericFixed : undefined,
-        minAmount: amountType === 'OPEN' && Number(minAmount) > 0 ? Number(minAmount) : undefined,
-        maxAmount: amountType === 'OPEN' && Number(maxAmount) > 0 ? Number(maxAmount) : undefined,
-        verificationMode: verificationMode === 'DEFAULT' ? undefined : verificationMode,
-        maxUses: Number(maxUses) > 0 ? Number(maxUses) : undefined,
-        returnUrl: returnUrl.trim() || undefined,
-      });
+      if (editingLink) {
+        const updated = await updateMutation.mutateAsync({
+          id: editingLink.id,
+          patch: {
+            title: title.trim(),
+            slug: slug.trim() || undefined,
+            description: description.trim() || undefined,
+            vertical,
+            amountType,
+            fixedAmount: amountType === 'FIXED' ? numericFixed : undefined,
+            minAmount: amountType === 'OPEN' && Number(minAmount) > 0 ? Number(minAmount) : undefined,
+            maxAmount: amountType === 'OPEN' && Number(maxAmount) > 0 ? Number(maxAmount) : undefined,
+            verificationMode: verificationMode === 'DEFAULT' ? undefined : verificationMode,
+            maxUses: Number(maxUses) > 0 ? Number(maxUses) : undefined,
+            returnUrl: returnUrl.trim() || undefined,
+          },
+        });
+        toast.success('Payment link updated', {
+          description: getShareUrl(updated),
+        });
+      } else {
+        const created = await createMutation.mutateAsync({
+          title: title.trim(),
+          slug: slug.trim() || undefined,
+          description: description.trim() || undefined,
+          vertical,
+          amountType,
+          fixedAmount: amountType === 'FIXED' ? numericFixed : undefined,
+          minAmount: amountType === 'OPEN' && Number(minAmount) > 0 ? Number(minAmount) : undefined,
+          maxAmount: amountType === 'OPEN' && Number(maxAmount) > 0 ? Number(maxAmount) : undefined,
+          verificationMode: verificationMode === 'DEFAULT' ? undefined : verificationMode,
+          maxUses: Number(maxUses) > 0 ? Number(maxUses) : undefined,
+          returnUrl: returnUrl.trim() || undefined,
+        });
 
-      toast.success('Payment link created', {
-        description: getShareUrl(created.slug),
-      });
-      setIsCreateOpen(false);
+        toast.success('Payment link created', {
+          description: getShareUrl(created),
+        });
+      }
+      setIsModalOpen(false);
       resetForm();
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Failed to create payment link');
+      toast.error(err instanceof Error ? err.message : 'Failed to save payment link');
     }
   };
 
@@ -146,6 +214,8 @@ export function PaymentLinksManager() {
     }
   };
 
+  const previewSlug = slug || (title ? toClientMerchantSlug(title) : 'your-slug');
+
   return (
     <div className="flex w-full flex-col gap-5">
       <Card>
@@ -156,7 +226,11 @@ export function PaymentLinksManager() {
               <span>Shareable No-Code Payment Links</span>
             </h2>
             <p className="text-body-regular text-text-secondary">
-              Create instant <code className="font-mono text-text-primary">/l/your-slug</code> checkout pages for events, marathons, courses, donations, or freelance invoices — zero code required.
+              Publish branded{' '}
+              <code className="font-mono text-text-primary">
+                /{merchantSlug}/slug-name
+              </code>{' '}
+              checkout pages and receive live payment-received alerts the moment funds settle.
             </p>
           </div>
 
@@ -164,7 +238,7 @@ export function PaymentLinksManager() {
             variant="primary"
             size="medium"
             leadingIcon={RiAddLine}
-            onClick={() => setIsCreateOpen(true)}
+            onClick={openCreateModal}
             className="min-h-11 shrink-0"
           >
             Create Payment Link
@@ -185,14 +259,18 @@ export function PaymentLinksManager() {
             <div className="space-y-1">
               <p className="text-body-medium text-text-primary">No payment links yet</p>
               <p className="text-caption-1-regular text-text-secondary max-w-md mx-auto">
-                Publish a fixed-price or open-amount checkout link that buyers can pay via bKash, Nagad, Rocket, Upay, or Cellfin.
+                Publish a fixed-price or open-amount checkout link at{' '}
+                <code className="font-mono text-text-primary">
+                  /{merchantSlug}/your-slug
+                </code>{' '}
+                for bKash, Nagad, Rocket, Upay, or Cellfin.
               </p>
             </div>
             <Button
               variant="secondary"
               size="small"
               leadingIcon={RiAddLine}
-              onClick={() => setIsCreateOpen(true)}
+              onClick={openCreateModal}
             >
               Create your first link
             </Button>
@@ -210,7 +288,8 @@ export function PaymentLinksManager() {
 
             <TableBody>
               {links.map((link) => {
-                const shareUrl = getShareUrl(link.slug);
+                const shareUrl = getShareUrl(link);
+                const sharePath = getSharePath(link);
                 const isCopied = copiedId === link.id;
                 return (
                   <TableRow key={link.id} id={link.id}>
@@ -220,7 +299,9 @@ export function PaymentLinksManager() {
                           {link.title}
                         </div>
                         <div className="flex items-center gap-2 text-caption-2-medium text-text-tertiary">
-                          <span className="font-mono truncate max-w-xs">/l/{link.slug}</span>
+                          <span className="font-mono text-text-secondary truncate max-w-xs">
+                            {sharePath}
+                          </span>
                           <span aria-hidden>·</span>
                           <span>{formatDate(link.createdAt)}</span>
                         </div>
@@ -286,6 +367,14 @@ export function PaymentLinksManager() {
                           variant="ghost"
                           size="xs"
                           iconOnly
+                          leadingIcon={RiEditLine}
+                          aria-label={`Edit ${link.title}`}
+                          onClick={() => openEditModal(link)}
+                        />
+                        <Button
+                          variant="ghost"
+                          size="xs"
+                          iconOnly
                           leadingIcon={RiExternalLinkLine}
                           aria-label={`Open ${link.title}`}
                           onClick={() => window.open(shareUrl, '_blank', 'noopener,noreferrer')}
@@ -309,14 +398,28 @@ export function PaymentLinksManager() {
         )}
       </Card>
 
-      {/* Create Payment Link Modal */}
-      <Modal isOpen={isCreateOpen} onOpenChange={setIsCreateOpen} size="lg">
+      {/* Create / Edit Payment Link Modal */}
+      <Modal
+        isOpen={isModalOpen}
+        onOpenChange={(open) => {
+          setIsModalOpen(open);
+          if (!open) resetForm();
+        }}
+        size="lg"
+      >
         <ModalHeader
-          title="Create Shareable Payment Link"
-          description="Generate a standalone hosted checkout URL for buyers — no integration code needed."
+          title={editingLink ? 'Edit Payment Link' : 'Create Shareable Payment Link'}
+          description="Generate a clean merchant-branded checkout link — no integration code needed."
         />
-        <form onSubmit={handleCreate}>
+        <form onSubmit={handleSubmit}>
           <ModalBody className="space-y-4">
+            <div className="rounded-2xl border border-separator-border bg-background-secondary-default px-3.5 py-2.5 flex items-center justify-between gap-2 text-caption-1-medium">
+              <span className="text-text-tertiary shrink-0">Live URL</span>
+              <span className="font-mono text-text-primary truncate">
+                {origin}/{merchantSlug}/{previewSlug}
+              </span>
+            </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Input
                 label="Link Title"
@@ -330,7 +433,7 @@ export function PaymentLinksManager() {
                 value={slug}
                 onChange={(val) => setSlug(val.toLowerCase().replace(/[^a-z0-9-]/g, '-'))}
                 placeholder="e.g. ovijatrik-10k"
-                hint={`Public URL: /l/${slug || 'auto-generated'}`}
+                hint={`Path: /${merchantSlug}/${previewSlug}`}
                 inputClassName="font-mono"
               />
             </div>
@@ -441,11 +544,22 @@ export function PaymentLinksManager() {
             />
           </ModalBody>
           <ModalFooter>
-            <Button type="button" variant="secondary" onClick={() => setIsCreateOpen(false)}>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                setIsModalOpen(false);
+                resetForm();
+              }}
+            >
               Cancel
             </Button>
-            <Button type="submit" variant="primary" isLoading={createMutation.isPending}>
-              Publish Payment Link
+            <Button
+              type="submit"
+              variant="primary"
+              isLoading={createMutation.isPending || updateMutation.isPending}
+            >
+              {editingLink ? 'Save Changes' : 'Publish Payment Link'}
             </Button>
           </ModalFooter>
         </form>
@@ -456,7 +570,7 @@ export function PaymentLinksManager() {
         isOpen={Boolean(deletingLink)}
         onOpenChange={(open) => !open && setDeletingLink(null)}
         title="Delete payment link?"
-        description={`"${deletingLink?.title || ''}" (/l/${deletingLink?.slug || ''}) will stop accepting new checkouts immediately.`}
+        description={`"${deletingLink?.title || ''}" (${deletingLink ? getSharePath(deletingLink) : ''}) will stop accepting new checkouts immediately.`}
         confirmLabel="Delete link"
         pendingLabel="Deleting..."
         onConfirm={async () => {

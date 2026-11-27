@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { extractApiErrorMessage, unwrapApiResponse } from '@/shared/utils/api';
+import type { PlatformPublicConfig } from '@/features/platform/usePlatformConfig';
 
 export interface AdminProjectSummary {
   id: string;
   storeName: string;
+  slug?: string;
   webhookUrl: string;
   webhookSecret: string;
   gracePeriodMinutes: number;
@@ -604,6 +606,7 @@ export interface AdminAuthSession {
 export interface CreateProjectResponseData {
   id: string;
   storeName: string;
+  slug?: string;
   webhookUrl: string;
   webhookSecret: string;
   apiKey?: string;
@@ -764,6 +767,7 @@ export function useUpdateProjectMutation() {
       id: string;
       updates: {
         storeName?: string;
+        slug?: string;
         webhookUrl?: string;
         gracePeriodMinutes?: number;
         isActive?: boolean;
@@ -1385,6 +1389,46 @@ export function useDeleteAppRelease() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'releases'] });
+    },
+  });
+}
+
+export function useAdminPlatformSettings(enabled = true) {
+  return useQuery<PlatformPublicConfig>({
+    queryKey: ['admin', 'platform-settings'],
+    queryFn: async () => {
+      const res = await adminFetch('/api/v1/admin/settings');
+      return unwrapApiResponse<PlatformPublicConfig>(
+        res,
+        'Failed to load platform marketing & WhatsApp settings',
+      );
+    },
+    enabled: Boolean(enabled && hasAdminCredentials()),
+    retry: false,
+  });
+}
+
+export function useUpdateAdminPlatformSettings() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (
+      patch: Partial<Omit<PlatformPublicConfig, 'updatedAt'>>,
+    ): Promise<PlatformPublicConfig> => {
+      const res = await adminFetch('/api/v1/admin/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      return unwrapApiResponse<PlatformPublicConfig>(
+        res,
+        'Failed to update platform settings',
+      );
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData(['admin', 'platform-settings'], data);
+      queryClient.setQueryData(['public', 'platform-config'], data);
+      queryClient.invalidateQueries({ queryKey: ['admin', 'auth', 'security'] });
     },
   });
 }

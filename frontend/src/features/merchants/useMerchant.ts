@@ -17,6 +17,7 @@ export interface EnabledModulesConfig {
 export interface MerchantProfile {
   id: string;
   storeName: string;
+  slug: string;
   webhookUrl: string;
   webhookSecret: string;
   gracePeriodMinutes: number;
@@ -40,6 +41,7 @@ export interface MerchantProfile {
 
 export interface UpdateMerchantSettingsDTO {
   storeName?: string;
+  slug?: string;
   webhookUrl?: string;
   gracePeriodMinutes?: number;
   verificationMode?: VerificationMode;

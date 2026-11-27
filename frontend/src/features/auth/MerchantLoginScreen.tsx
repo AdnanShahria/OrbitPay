@@ -18,6 +18,7 @@ import {
 } from '@/components/base/card/card';
 import { Input, InputBase, TextField } from '@/components/base/input/input';
 import { Label } from '@/components/base/input/label';
+import { OrbitMarketingBar, OrbitFloatingWhatsapp } from '@/features/platform/OrbitMarketingBar';
 import { useAuth } from './useAuth';
 
 interface MerchantLoginScreenProps {
@@ -177,6 +178,11 @@ export function MerchantLoginScreen({ onEnterAdmin }: MerchantLoginScreenProps) 
           </div>
         </CardContent>
       </Card>
+
+      <div className="w-full max-w-md mt-4">
+        <OrbitMarketingBar compact />
+      </div>
+      <OrbitFloatingWhatsapp />
     </div>
   );
 }

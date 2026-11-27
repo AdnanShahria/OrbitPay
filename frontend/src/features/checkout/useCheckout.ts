@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { MfsProvider } from '@/shared/utils/format';
+import { MfsProvider, MFS_METADATA, formatBDT } from '@/shared/utils/format';
 import { unwrapApiResponse } from '@/shared/utils/api';
+import { toast } from '@/components/base/toast/toast';
 
 export type VerificationMode = 'AUTO' | 'PURE_MANUAL';
 export type ReceiptPolicy =
@@ -676,6 +677,12 @@ export function useCheckout(config: CheckoutConfig) {
       if (result.status === 'VERIFIED') {
         const finalAmount = Number(result.paidAmount ?? result.amount ?? numericPaid);
         const finalTrx = result.trxId || cleanTrx;
+        const providerName = MFS_METADATA[selectedProvider]?.name || selectedProvider;
+        toast.success('Payment received & verified!', {
+          id: `buyer-verified-${orderId}`,
+          description: `${formatBDT(finalAmount)} confirmed via ${providerName} · TrxID ${finalTrx}`,
+          duration: 6000,
+        });
         setVerifiedData({
           trxId: finalTrx,
           amount: finalAmount,

@@ -70,6 +70,7 @@ export function ProjectManagerTable({
   // Edit modal state
   const [editingProject, setEditingProject] = useState<AdminProjectSummary | null>(null);
   const [editStoreName, setEditStoreName] = useState('');
+  const [editSlug, setEditSlug] = useState('');
   const [editWebhookUrl, setEditWebhookUrl] = useState('');
   const [editGracePeriod, setEditGracePeriod] = useState('60');
   const [editError, setEditError] = useState<string | null>(null);
@@ -108,6 +109,7 @@ export function ProjectManagerTable({
   const openEditModal = (p: AdminProjectSummary) => {
     setEditingProject(p);
     setEditStoreName(p.storeName);
+    setEditSlug(p.slug || '');
     setEditWebhookUrl(p.webhookUrl || '');
     setEditGracePeriod(String(p.gracePeriodMinutes || 60));
     setEditError(null);
@@ -136,6 +138,7 @@ export function ProjectManagerTable({
         id: editingProject.id,
         updates: {
           storeName: trimmedName,
+          ...(editSlug.trim() ? { slug: editSlug.trim().toLowerCase() } : {}),
           webhookUrl: trimmedWebhook,
           gracePeriodMinutes: parsedGrace,
         },
@@ -290,7 +293,7 @@ export function ProjectManagerTable({
                           {p.storeName}
                         </span>
                         <span className="text-caption-2-regular font-mono text-text-tertiary truncate">
-                          {p.id}
+                          {p.slug ? `/${p.slug}/... · ` : ''}{p.id}
                         </span>
                       </div>
                     </div>
@@ -473,6 +476,14 @@ export function ProjectManagerTable({
                 onChange={setEditStoreName}
                 leadingIcon={RiStore2Line}
                 isRequired
+              />
+              <Input
+                label="Payment Link Handle (Slug)"
+                value={editSlug}
+                onChange={(val) => setEditSlug(val.toLowerCase().replace(/[^a-z0-9-]/g, '-'))}
+                placeholder="e.g. aurelia-bd"
+                hint={`payment.orbitsaas.cloud/${editSlug || 'store-handle'}/slug`}
+                inputClassName="font-mono"
               />
               <Input
                 label="Store Webhook Callback URL"

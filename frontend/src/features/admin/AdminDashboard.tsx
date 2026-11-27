@@ -10,6 +10,7 @@ import {
   RiShieldCheckLine,
   RiShieldKeyholeLine,
   RiSmartphoneLine,
+  RiSparklingLine,
   RiStore2Line,
   RiTimeLine,
   RiWebhookLine,
@@ -30,6 +31,7 @@ import { GlobalQueueTable } from './GlobalQueueTable';
 import { GlobalWebhookTable } from './GlobalWebhookTable';
 import { ProjectManagerTable } from './ProjectManagerTable';
 import { SmsPushPanel } from './SmsPushPanel';
+import { AdminPlatformSettingsPanel } from './AdminPlatformSettingsPanel';
 import {
   type AdminAuthSessionInfo,
   type AdminUserProfile,
@@ -50,6 +52,7 @@ export type AdminTab =
   | 'queue'
   | 'messaging'
   | 'releases'
+  | 'growth'
   | 'security';
 
 interface AdminDashboardProps {
@@ -337,6 +340,9 @@ function AdminDashboardContent({
             <Tab id="releases" icon={RiSmartphoneLine} count={releasesData?.releases.length}>
               Releases
             </Tab>
+            <Tab id="growth" icon={RiSparklingLine}>
+              WhatsApp &amp; CTA
+            </Tab>
             <Tab id="security" icon={RiShieldKeyholeLine}>
               Security
             </Tab>
@@ -371,6 +377,10 @@ function AdminDashboardContent({
 
           <TabPanel id="releases">
             <AppReleasesPanel />
+          </TabPanel>
+
+          <TabPanel id="growth">
+            <AdminPlatformSettingsPanel />
           </TabPanel>
 
           <TabPanel id="security">

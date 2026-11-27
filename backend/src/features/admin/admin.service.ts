@@ -28,6 +28,11 @@ import {
   hashSha256,
 } from '../../shared/crypto';
 import { ConflictError, NotFoundError } from '../../shared/errors';
+import {
+  ensureUniqueMerchantSlug,
+  resolveAndPersistMerchantSlug,
+  toSafeMerchantSlug,
+} from '../../shared/slug';
 import { recordAdminAudit, type AdminActor } from './admin-auth.service';
 import type {
   CreateProjectDTO,
@@ -53,6 +58,7 @@ function generateTempPassword(length = 12): string {
 export interface AdminProjectSummary {
   id: string;
   storeName: string;
+  slug: string;
   webhookUrl: string;
   webhookSecret: string;
   gracePeriodMinutes: number;
@@ -183,10 +189,12 @@ export async function getAdminProjects(db: AppDb): Promise<AdminProjectSummary[]
       .where(eq(smsLedger.merchantId, m.id));
 
     const s = stats[0] || { verifiedCount: 0, unclaimedCount: 0, totalVolume: 0 };
+    const slug = await resolveAndPersistMerchantSlug(db, m);
 
     result.push({
       id: m.id,
       storeName: m.storeName,
+      slug,
       webhookUrl: m.webhookUrl,
       webhookSecret: m.webhookSecret,
       gracePeriodMinutes: m.gracePeriodMinutes,
@@ -248,9 +256,12 @@ export async function createAdminProject(
     }
   }
 
+  const merchantSlug = await ensureUniqueMerchantSlug(db, input.slug || input.storeName);
+
   const merchantInsert = db.insert(merchants).values({
     id: merchantId,
     storeName: input.storeName,
+    slug: merchantSlug,
     webhookUrl: input.webhookUrl,
     webhookSecret,
     deviceApiKeyHash: deviceKeyHash,
@@ -341,6 +352,7 @@ export async function createAdminProject(
   return {
     id: merchantId,
     storeName: input.storeName,
+    slug: merchantSlug,
     webhookUrl: input.webhookUrl,
     webhookSecret,
     apiKey: rawApiKey,
@@ -364,6 +376,9 @@ export async function updateAdminProject(
   };
 
   if (input.storeName !== undefined) updateData.storeName = input.storeName;
+  if (input.slug !== undefined) {
+    updateData.slug = await ensureUniqueMerchantSlug(db, toSafeMerchantSlug(input.slug), id);
+  }
   if (input.webhookUrl !== undefined) updateData.webhookUrl = input.webhookUrl;
   if (input.gracePeriodMinutes !== undefined) updateData.gracePeriodMinutes = input.gracePeriodMinutes;
   if (input.isActive !== undefined) updateData.isActive = input.isActive;

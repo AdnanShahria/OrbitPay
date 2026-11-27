@@ -20,6 +20,7 @@
     "checkout": "node scripts/launch.mjs checkout",
     "app": "node scripts/launch.mjs android",
     "app:menu": "node scripts/app-cli.mjs",
+    "app:release": "node scripts/app-cli.mjs release",
     "cli": "node scripts/app-cli.mjs",
     "app:emu": "node scripts/launch.mjs android --emulator",
     "app:studio": "node scripts/launch.mjs studio",

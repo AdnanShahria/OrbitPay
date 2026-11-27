@@ -54,8 +54,9 @@ const ACTION_LABELS = {
   'dev:realtime': 'Local Development + Realtime SMS Simulator',
   'dev:ecomm': 'Local Development (ORBIT + Ecomm-Demo)',
   preview: 'Local Preview (Production Build + Wrangler Preview)',
-  apk: 'Build Production-Ready Android APK',
-  ota: 'OTA Release Upload & Push Update',
+  apk: 'Auto Build & Push Production APK (1-Click)',
+  release: 'Auto Build & Push Production APK (No Prompts)',
+  ota: 'OTA Release & Push Manager (Advanced)',
   android: 'Launch Android App (Phone / Emulator)',
   check: 'System Readiness Check (FCM, Keystore, Tools)',
   deploy: 'Deploy Backend & Web to Cloudflare',
@@ -63,9 +64,10 @@ const ACTION_LABELS = {
 
 const DEFAULT_CONFIG = {
   defaultAction: 'dev',
-  serverTarget: 'local', // 'local' | 'production' | custom URL
+  serverTarget: 'production', // 'local' | 'production' | custom URL
   localUrl: 'http://localhost:8787',
   productionUrl: 'https://payment.orbitsaas.cloud',
+  savedAdminKeys: {}, // keyed by baseUrl, stored locally in gitignored .orbit-app-cli.local
 };
 
 function loadConfig() {
@@ -219,6 +221,10 @@ function formatBytes(bytes) {
   return `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }
 
+function isLocalUrl(rawUrl) {
+  return rawUrl.includes('localhost') || rawUrl.includes('127.0.0.1');
+}
+
 function getPreferredServerUrl(cfg) {
   if (cfg.serverTarget === 'production') return cfg.productionUrl;
   if (cfg.serverTarget === 'local') return cfg.localUrl;
@@ -324,8 +330,8 @@ function printMenu(cfg) {
   ${c.green}[Enter]${c.reset} Run Default: ${c.bold}${defaultLabel}${c.reset}
   ${c.cyan}[1]${c.reset}     Local Development (Backend :8787 + Frontend :3000 + optional Simulator/Ecomm)
   ${c.cyan}[2]${c.reset}     Local Preview (Build production bundle + run local Cloudflare/Vite preview)
-  ${c.cyan}[3]${c.reset}     APK Build (Production-ready release APK, signing check, version bump, SHA-256)
-  ${c.cyan}[4]${c.reset}     OTA Release & Push Update (Upload APK to R2/D1 + broadcast WebSocket/FCM)
+  ${c.cyan}[3]${c.reset}     ${c.bold}Auto Build & Push APK${c.reset} (Auto-version + R8 compress + Release sign + 1-click OTA)
+  ${c.cyan}[4]${c.reset}     OTA Release Manager (Manual / Force-Update / Broadcast / History)
   ${c.cyan}[5]${c.reset}     Android Device / Emulator / Studio Launcher
   ${c.cyan}[6]${c.reset}     Open Web Dashboards (Merchant / Admin / Checkout Demo)
   ${c.cyan}[7]${c.reset}     System Readiness Check (FCM, Keystore, ADB, Java, R2, Backend Health)
@@ -479,11 +485,107 @@ async function setupReleaseKeystoreWizard(rl) {
   return true;
 }
 
-async function handleApkBuild(rl, cfg, nonInteractive = false) {
+async function fetchLiveLatestVersionCode(baseUrl) {
+  try {
+    const res = await fetch(
+      `${baseUrl.replace(/\/+$/, '')}/api/v1/app/latest?currentVersionCode=0&platform=ANDROID`,
+      { signal: AbortSignal.timeout(5000) }
+    );
+    if (!res.ok) return 0;
+    const body = await res.json();
+    return Number(body?.data?.release?.versionCode || 0);
+  } catch {
+    return 0;
+  }
+}
+
+function computeNextVersion(localVersions, liveVersionCode) {
+  const nextCode = Math.max(localVersions.versionCode || 1, liveVersionCode || 0) + 1;
+  const semverMatch = String(localVersions.versionName || '').trim().match(/^(\d+)\.(\d+)\.(\d+)$/);
+  const nextName = semverMatch
+    ? `${semverMatch[1]}.${semverMatch[2]}.${Math.max(Number.parseInt(semverMatch[3], 10) + 1, nextCode)}`
+    : `1.0.${nextCode}`;
+  return { versionCode: nextCode, versionName: nextName };
+}
+
+async function resolveAdminKeyForTarget(rl, cfg, baseUrl) {
   const status = inspectEnvironment();
-  console.log(`\n${c.bold}Production-Ready Android APK Builder${c.reset}`);
-  console.log(`  App Module:   ${appModuleDir}`);
-  console.log(`  FCM Config:   ${status.hasGoogleServices ? `${c.green}google-services.json present (${status.fcmClientProjectId})${c.reset}` : `${c.yellow}missing google-services.json${c.reset}`}`);
+  const normalizedUrl = baseUrl.replace(/\/+$/, '');
+
+  const envKey = process.env.ORBIT_ADMIN_KEY?.trim();
+  if (envKey) return envKey;
+
+  if (isLocalUrl(normalizedUrl) && status.masterAdminKeyLocal) {
+    return status.masterAdminKeyLocal;
+  }
+
+  const savedKey = cfg.savedAdminKeys?.[normalizedUrl]?.trim();
+  if (savedKey) return savedKey;
+
+  if (!rl) return '';
+
+  const entered = await ask(rl, `X-Admin-Key for ${normalizedUrl} (saved once locally)`);
+  if (entered) {
+    cfg.savedAdminKeys = { ...(cfg.savedAdminKeys || {}), [normalizedUrl]: entered };
+    saveConfig(cfg);
+  }
+  return entered;
+}
+
+async function publishApkToOta({
+  baseUrl,
+  adminKey,
+  apkPath,
+  versionCode,
+  versionName,
+  minSupportedVersionCode = 1,
+  mandatory = false,
+  notifyDevices = true,
+  releaseNotes,
+}) {
+  const normalizedUrl = baseUrl.replace(/\/+$/, '');
+  const fileBytes = fs.readFileSync(apkPath);
+  const form = new FormData();
+  form.append(
+    'apk',
+    new Blob([fileBytes], { type: 'application/vnd.android.package-archive' }),
+    path.basename(apkPath)
+  );
+  form.append('versionCode', String(versionCode));
+  form.append('versionName', String(versionName));
+  form.append('minSupportedVersionCode', String(minSupportedVersionCode));
+  form.append('mandatory', String(mandatory));
+  form.append('notifyDevices', String(notifyDevices));
+  form.append(
+    'releaseNotes',
+    releaseNotes || `ORBIT Pay v${versionName} (build ${versionCode}) — Production release`
+  );
+
+  console.log(
+    `${c.cyan}Uploading ${path.basename(apkPath)} (${formatBytes(fileBytes.length)}) -> ${normalizedUrl} (R2 + D1 + Push)...${c.reset}`
+  );
+  const res = await fetch(`${normalizedUrl}/api/v1/admin/releases`, {
+    method: 'POST',
+    headers: { 'X-Admin-Key': adminKey },
+    body: form,
+  });
+  const body = await res.json().catch(() => ({}));
+  return { ok: res.ok && body?.success, status: res.status, body };
+}
+
+async function handleApkBuild(rl, cfg, options = {}) {
+  const nonInteractive = typeof options === 'boolean' ? options : Boolean(options.nonInteractive);
+  const autoPush = typeof options === 'object' && Boolean(options.autoPush);
+  const withTests = typeof options === 'object' && Boolean(options.withTests);
+
+  const status = inspectEnvironment();
+  const targetUrl = getPreferredServerUrl(cfg).replace(/\/+$/, '');
+
+  console.log(`\n${c.bold}Auto Production Android APK Builder${c.reset}`);
+  console.log(`  Target OTA Hub: ${c.cyan}${targetUrl}${c.reset}`);
+  console.log(
+    `  FCM Config:     ${status.hasGoogleServices ? `${c.green}Bundled (${status.fcmClientProjectId})${c.reset}` : `${c.yellow}Missing google-services.json${c.reset}`}`
+  );
 
   if (!status.hasJava) {
     console.log(`${c.red}[ERROR] 'java' (JDK 17) is not on PATH. Install JDK 17 or configure JAVA_HOME.${c.reset}`);
@@ -491,58 +593,33 @@ async function handleApkBuild(rl, cfg, nonInteractive = false) {
   }
 
   if (!status.hasKeystoreProps || !status.keystoreFileExists) {
-    console.log(`${c.yellow}[WARNING] Release keystore is not configured (${keystorePropsPath}).${c.reset}`);
-    console.log(`  Without keystore.properties, Gradle builds an UNSIGNED release APK that Android phones cannot auto-update.`);
+    console.log(`${c.yellow}[ACTION] Release keystore is not configured (${keystorePropsPath}).${c.reset}`);
     if (rl && !nonInteractive) {
-      const wantSetup = await askYesNo(rl, 'Generate a new release keystore & keystore.properties now?', false);
-      if (wantSetup) {
-        await setupReleaseKeystoreWizard(rl);
+      const wantSetup = await askYesNo(rl, 'Create release keystore now so every OTA update signs automatically?', true);
+      if (!wantSetup || !(await setupReleaseKeystoreWizard(rl))) {
+        console.log(`${c.red}Release keystore is required for production OTA updates. Aborted.${c.reset}`);
+        return null;
       }
+    } else {
+      console.log(`${c.red}Missing release keystore (${keystorePropsPath}). Run \`app apk\` interactively once to initialize it.${c.reset}`);
+      return null;
     }
   }
 
   const currentVersions = readGradleVersions();
-  let targetCode = currentVersions.versionCode;
-  let targetName = currentVersions.versionName;
+  const liveVersionCode = await fetchLiveLatestVersionCode(targetUrl);
+  const { versionCode: targetCode, versionName: targetName } = computeNextVersion(
+    currentVersions,
+    liveVersionCode
+  );
 
-  if (rl && !nonInteractive) {
-    const bump = await askYesNo(
-      rl,
-      `Current version is v${currentVersions.versionName} (versionCode ${currentVersions.versionCode}). Bump version before build?`,
-      false
-    );
-    if (bump) {
-      const nextCodeStr = await ask(rl, 'New versionCode', String(currentVersions.versionCode + 1));
-      if (!/^\d+$/.test(nextCodeStr)) {
-        console.log(`${c.red}Invalid versionCode "${nextCodeStr}": must be a whole integer like 2, 3, 4 (use versionName for "${nextCodeStr}").${c.reset}`);
-        return null;
-      }
-      const parsedCode = Number.parseInt(nextCodeStr, 10);
-      if (parsedCode < 1) {
-        console.log(`${c.red}Invalid versionCode: must be >= 1.${c.reset}`);
-        return null;
-      }
-      const parts = currentVersions.versionName.split('.').map((n) => Number.parseInt(n, 10));
-      const suggestedName =
-        parts.length === 3 && parts.every((n) => Number.isInteger(n))
-          ? `${parts[0]}.${parts[1]}.${parts[2] + 1}`
-          : currentVersions.versionName;
-      targetName = await ask(rl, 'New versionName', suggestedName);
-      targetCode = parsedCode;
-      writeGradleVersions(targetCode, targetName);
-      console.log(`${c.green}Updated build.gradle.kts -> v${targetName} (versionCode ${targetCode})${c.reset}`);
-    }
-  }
-
-  const runTests = rl && !nonInteractive
-    ? await askYesNo(rl, 'Run Gradle unit tests (testDebugUnitTest) before assembling APK?', true)
-    : false;
-  const alsoBuildDebug = rl && !nonInteractive
-    ? await askYesNo(rl, 'Also build debug APK (assembleDebug) alongside release APK?', false)
-    : false;
+  writeGradleVersions(targetCode, targetName);
+  console.log(
+    `  Auto Version:   ${c.green}v${targetName} (versionCode ${targetCode})${c.reset} ${c.dim}[local was ${currentVersions.versionCode}, live server was ${liveVersionCode || 'none'}]${c.reset}`
+  );
 
   const gradlew = isWindows ? 'gradlew.bat' : './gradlew';
-  if (runTests) {
+  if (withTests) {
     console.log(`${c.cyan}Running ./gradlew testDebugUnitTest...${c.reset}`);
     if (!runCommandSync(gradlew, ['testDebugUnitTest'], androidDir, {}, isWindows)) {
       console.log(`${c.red}Unit tests failed. Aborting release APK build.${c.reset}`);
@@ -550,15 +627,10 @@ async function handleApkBuild(rl, cfg, nonInteractive = false) {
     }
   }
 
-  console.log(`${c.cyan}Running ./gradlew assembleRelease (R8 minification + resource shrinking)...${c.reset}`);
+  console.log(`${c.cyan}Building signed + R8 compressed APK (./gradlew assembleRelease)...${c.reset}`);
   if (!runCommandSync(gradlew, ['assembleRelease'], androidDir, {}, isWindows)) {
     console.log(`${c.red}assembleRelease failed.${c.reset}`);
     return null;
-  }
-
-  if (alsoBuildDebug) {
-    console.log(`${c.cyan}Running ./gradlew assembleDebug...${c.reset}`);
-    runCommandSync(gradlew, ['assembleDebug'], androidDir, {}, isWindows);
   }
 
   const releaseOutDir = path.join(appModuleDir, 'build', 'outputs', 'apk', 'release');
@@ -606,21 +678,73 @@ async function handleApkBuild(rl, cfg, nonInteractive = false) {
 
   console.log(`
 ${c.green}${c.bold}Production APK Ready!${c.reset}
-  Exported APK:  ${c.bold}${exportedApkPath}${c.reset}
-  Manifest JSON: ${manifestPath}
-  Version:       v${targetName} (versionCode ${targetCode})
-  Size:          ${formatBytes(stat.size)} (${stat.size} bytes)
-  Signed:        ${isSigned ? `${c.green}YES (Release Keystore)${c.reset}` : `${c.yellow}NO (Unsigned — configure keystore.properties for OTA)${c.reset}`}
-  FCM Bundled:   ${manifest.fcmBundled ? `${c.green}YES (${manifest.fcmProjectId})${c.reset}` : `${c.yellow}NO${c.reset}`}
-  SHA-256:       ${c.dim}${sha256}${c.reset}
+  File:        ${c.bold}${path.basename(exportedApkPath)}${c.reset} (${formatBytes(stat.size)} · R8 Shrunk & Compressed)
+  Version:     v${targetName} (versionCode ${targetCode})
+  Signed:      ${isSigned ? `${c.green}YES (Release Keystore)${c.reset}` : `${c.red}NO (Unsigned)${c.reset}`}
+  SHA-256:     ${c.dim}${sha256}${c.reset}
 `);
 
-  if (rl && !nonInteractive) {
-    const pushOtaNow = await askYesNo(rl, 'Publish this APK as an OTA release now?', false);
-    if (pushOtaNow) {
-      await handleOtaMenu(rl, cfg, exportedApkPath, targetCode, targetName);
+  if (!isSigned) {
+    console.log(`${c.red}Unsigned APK cannot be pushed as OTA.${c.reset}`);
+    return manifest;
+  }
+
+  const shouldPush = autoPush
+    ? true
+    : rl && !nonInteractive
+      ? await askYesNo(rl, `Push OTA update v${targetName} (build ${targetCode}) to ${targetUrl} now?`, true)
+      : false;
+
+  if (!shouldPush) {
+    return manifest;
+  }
+
+  let adminKey = await resolveAdminKeyForTarget(rl, cfg, targetUrl);
+  if (!adminKey) {
+    console.log(`${c.red}Missing X-Admin-Key for ${targetUrl}. Set ORBIT_ADMIN_KEY or enter it interactively.${c.reset}`);
+    return manifest;
+  }
+
+  let result = await publishApkToOta({
+    baseUrl: targetUrl,
+    adminKey,
+    apkPath: exportedApkPath,
+    versionCode: targetCode,
+    versionName: targetName,
+  });
+
+  // If cached key was rejected, clear it and let interactive user re-enter once
+  if (!result.ok && (result.status === 401 || result.status === 403) && rl && !nonInteractive) {
+    console.log(`${c.yellow}Saved X-Admin-Key was rejected (HTTP ${result.status}). Please re-enter.${c.reset}`);
+    if (cfg.savedAdminKeys?.[targetUrl]) {
+      delete cfg.savedAdminKeys[targetUrl];
+      saveConfig(cfg);
+    }
+    adminKey = await resolveAdminKeyForTarget(rl, cfg, targetUrl);
+    if (adminKey) {
+      result = await publishApkToOta({
+        baseUrl: targetUrl,
+        adminKey,
+        apkPath: exportedApkPath,
+        versionCode: targetCode,
+        versionName: targetName,
+      });
     }
   }
+
+  if (!result.ok) {
+    console.log(`${c.red}OTA push failed (HTTP ${result.status}):${c.reset}`);
+    console.log(JSON.stringify(result.body, null, 2));
+    return manifest;
+  }
+
+  const broadcast = result.body?.data?.broadcast;
+  console.log(
+    `${c.green}${c.bold}OTA Live on Cloudflare!${c.reset} v${targetName} (build ${targetCode}) uploaded to R2 + D1.` +
+      (broadcast
+        ? ` Broadcasted to ${broadcast.merchantsTargeted} merchant(s) (WS: ${broadcast.wsDelivered}, FCM: ${broadcast.fcmDelivered}).`
+        : '')
+  );
 
   return manifest;
 }
@@ -639,11 +763,15 @@ async function resolveAdminCredentials(rl, cfg) {
   else if (targetChoice === '3') baseUrl = await ask(rl, 'Enter base URL', preferredUrl);
   baseUrl = baseUrl.replace(/\/+$/, '');
 
-  const defaultAdminKey =
-    baseUrl.includes('localhost') || baseUrl.includes('127.0.0.1')
-      ? status.masterAdminKeyLocal
-      : process.env.ORBIT_ADMIN_KEY || '';
+  const cached = cfg.savedAdminKeys?.[baseUrl]?.trim();
+  const defaultAdminKey = isLocalUrl(baseUrl)
+    ? status.masterAdminKeyLocal
+    : process.env.ORBIT_ADMIN_KEY || cached || '';
   const adminKey = await ask(rl, 'X-Admin-Key (MASTER_ADMIN_KEY)', defaultAdminKey);
+  if (adminKey && !isLocalUrl(baseUrl)) {
+    cfg.savedAdminKeys = { ...(cfg.savedAdminKeys || {}), [baseUrl]: adminKey };
+    saveConfig(cfg);
+  }
   return { baseUrl, adminKey };
 }
 
@@ -767,35 +895,25 @@ async function handleOtaMenu(rl, cfg, preselectedApk = null, preCode = null, pre
   const notifyDevices = await askYesNo(rl, 'Broadcast instant push (WebSocket + FCM) right after upload?', true);
   const releaseNotes = await ask(rl, 'Release notes', `ORBIT Pay v${versionName}`);
 
-  const fileBytes = fs.readFileSync(apkPath);
-  const form = new FormData();
-  form.append(
-    'apk',
-    new Blob([fileBytes], { type: 'application/vnd.android.package-archive' }),
-    path.basename(apkPath)
-  );
-  form.append('versionCode', String(versionCode));
-  form.append('versionName', String(versionName));
-  form.append('minSupportedVersionCode', String(minSupported));
-  form.append('mandatory', String(mandatory));
-  form.append('notifyDevices', String(notifyDevices));
-  form.append('releaseNotes', releaseNotes);
-
-  console.log(`${c.cyan}Uploading ${path.basename(apkPath)} (${formatBytes(fileBytes.length)}) to ${baseUrl}...${c.reset}`);
   try {
-    const res = await fetch(`${baseUrl}/api/v1/admin/releases`, {
-      method: 'POST',
-      headers: { 'X-Admin-Key': adminKey },
-      body: form,
+    const result = await publishApkToOta({
+      baseUrl,
+      adminKey,
+      apkPath,
+      versionCode,
+      versionName,
+      minSupportedVersionCode: minSupported,
+      mandatory,
+      notifyDevices,
+      releaseNotes,
     });
-    const body = await res.json();
-    if (!res.ok || !body.success) {
-      console.log(`${c.red}OTA publish failed (HTTP ${res.status}):${c.reset}`);
-      console.log(JSON.stringify(body, null, 2));
+    if (!result.ok) {
+      console.log(`${c.red}OTA publish failed (HTTP ${result.status}):${c.reset}`);
+      console.log(JSON.stringify(result.body, null, 2));
       return;
     }
     console.log(`${c.green}${c.bold}OTA Release Published!${c.reset}`);
-    console.log(JSON.stringify(body.data, null, 2));
+    console.log(JSON.stringify(result.body.data, null, 2));
   } catch (err) {
     console.log(`${c.red}Upload error: ${err.message}${c.reset}`);
   }
@@ -981,7 +1099,10 @@ async function dispatchAction(actionKey, rl, cfg) {
       await handleLocalPreview(rl);
       break;
     case 'apk':
-      await handleApkBuild(rl, cfg, rl === null);
+      await handleApkBuild(rl, cfg, { nonInteractive: rl === null, autoPush: process.argv.includes('--push') });
+      break;
+    case 'release':
+      await handleApkBuild(rl, cfg, { nonInteractive: rl === null, autoPush: true });
       break;
     case 'ota':
       await handleOtaMenu(rl, cfg);
@@ -1008,8 +1129,9 @@ Usage:
   app --default       Run your saved default action immediately
   app dev             Start local development servers
   app preview         Build & run local production preview
-  app apk             Build production-ready Android APK
-  app ota             Open OTA release & push menu
+  app apk             Auto-version + build signed APK (1-click OTA prompt)
+  app release         Zero-prompt: auto-version + build signed APK + push OTA to Cloudflare
+  app ota             Open OTA release & push menu (advanced)
   app android         Launch Android app on phone / emulator
   app check           Run FCM / keystore / tooling readiness check
   app deploy          Deploy Web + Cloudflare Worker

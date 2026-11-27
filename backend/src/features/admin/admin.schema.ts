@@ -74,6 +74,15 @@ export const createProjectSchema = z.object({
     z.string().trim().min(3, 'Project ID must be at least 3 characters').regex(/^[a-z0-9_-]+$/i, 'Alphanumeric project ID required')
   ),
   storeName: z.string().trim().min(2, 'Store name must be at least 2 characters'),
+  slug: optionalBlankToUndefined(
+    z
+      .string()
+      .trim()
+      .min(2, 'Slug must be at least 2 characters')
+      .max(48)
+      .regex(/^[a-z0-9-]+$/i, 'Slug may only contain letters, numbers, and hyphens')
+      .transform((v) => v.toLowerCase())
+  ),
   webhookUrl: optionalWebhookUrl,
   gracePeriodMinutes: z.number().int().min(5).max(1440).default(60),
   ownerEmail: optionalBlankToUndefined(
@@ -89,6 +98,15 @@ export const createProjectSchema = z.object({
 
 export const updateProjectSchema = z.object({
   storeName: z.string().trim().min(2).optional(),
+  slug: optionalBlankToUndefined(
+    z
+      .string()
+      .trim()
+      .min(2)
+      .max(48)
+      .regex(/^[a-z0-9-]+$/i, 'Slug may only contain letters, numbers, and hyphens')
+      .transform((v) => v.toLowerCase())
+  ),
   webhookUrl: z.union([z.string().trim().url('Must be a valid HTTP/HTTPS URL'), z.literal('')]).optional(),
   gracePeriodMinutes: z.number().int().min(5).max(1440).optional(),
   isActive: z.boolean().optional(),

@@ -10,8 +10,14 @@ import {
   hashDeviceApiKey,
   hashSha256,
 } from '../../shared/crypto';
-import { BadRequestError, NotFoundError } from '../../shared/errors';
+import { BadRequestError, ConflictError, NotFoundError } from '../../shared/errors';
 import { parseAllowedOrigins, validateSafeWebhookUrl } from '../../shared/ssrf';
+import {
+  ensureUniqueMerchantSlug,
+  RESERVED_ROUTE_SEGMENTS,
+  resolveAndPersistMerchantSlug,
+  toSafeMerchantSlug,
+} from '../../shared/slug';
 import type { Env } from '../../shared/types';
 import { dispatchWebhook } from '../webhooks/webhook.dispatcher';
 import type {
@@ -23,6 +29,7 @@ import type {
 export interface SafeMerchantProfile {
   id: string;
   storeName: string;
+  slug: string;
   webhookUrl: string;
   webhookSecret: string;
   gracePeriodMinutes: number;
@@ -87,6 +94,7 @@ function toSafeMerchantProfile(m: MerchantRecord): SafeMerchantProfile {
   return {
     id: m.id,
     storeName: m.storeName,
+    slug: m.slug || toSafeMerchantSlug(m.storeName),
     webhookUrl: m.webhookUrl,
     webhookSecret: maskWebhookSecret(m.webhookSecret),
     gracePeriodMinutes: m.gracePeriodMinutes,
@@ -122,7 +130,8 @@ export async function getMerchantProfile(
     throw new NotFoundError(`Merchant '${merchantId}' not found`);
   }
 
-  return toSafeMerchantProfile(m);
+  const persistedSlug = await resolveAndPersistMerchantSlug(db, m);
+  return toSafeMerchantProfile({ ...m, slug: persistedSlug });
 }
 
 /**
@@ -154,11 +163,29 @@ export async function updateMerchantSettings(
     ? { ...currentModules, ...settings.enabledModules }
     : undefined;
 
+  let nextSlug: string | undefined;
+  if (settings.slug !== undefined) {
+    const normalized = settings.slug.trim().toLowerCase();
+    if (RESERVED_ROUTE_SEGMENTS.has(normalized)) {
+      throw new BadRequestError(`Merchant handle '${normalized}' is reserved`);
+    }
+    const existingWithSlug = await db
+      .select({ id: merchants.id })
+      .from(merchants)
+      .where(sql`lower(${merchants.slug}) = ${normalized}`)
+      .limit(1);
+    if (existingWithSlug[0] && existingWithSlug[0].id !== merchantId) {
+      throw new ConflictError(`Merchant handle '${normalized}' is already taken`);
+    }
+    nextSlug = normalized;
+  }
+
   const now = new Date();
   await db
     .update(merchants)
     .set({
       ...(settings.storeName !== undefined && { storeName: settings.storeName }),
+      ...(nextSlug !== undefined && { slug: nextSlug }),
       ...(settings.webhookUrl !== undefined && { webhookUrl: settings.webhookUrl }),
       ...(settings.gracePeriodMinutes !== undefined && {
         gracePeriodMinutes: settings.gracePeriodMinutes,
@@ -263,11 +290,13 @@ export async function registerMerchant(
   const apiKeyHash = await hashSha256(rawApiKey);
   const apiKeyPrefix = rawApiKey.slice(0, 12);
   const publishableKey = generatePublishableKey();
+  const slug = await ensureUniqueMerchantSlug(db, input.slug || input.storeName);
   const now = new Date();
 
   await db.insert(merchants).values({
     id: merchantId,
     storeName: input.storeName,
+    slug,
     webhookUrl: input.webhookUrl,
     webhookSecret,
     deviceApiKeyHash,

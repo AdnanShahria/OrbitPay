@@ -3,29 +3,61 @@ node_modules/
 .pnp
 .pnp.js
 
-# Build Outputs
+# Build Outputs & Caches
 dist/
 dist-ssr/
 build/
 *.local
+*.tsbuildinfo
+.eslintcache
+.vite/
+.cache/
+coverage/
 
 # Cloudflare Pages / Wrangler
 .wrangler/
 .mf/
 
-# Android Gradle
+# Android Gradle & Studio
 .gradle/
+.kotlin/
+.cxx/
+captures/
 build/
 app/build/
 app/app/build/
+app/app/release/
 local.properties
 *.apk
 *.aab
+*.ap_
+*.dex
+*.hprof
 .idea/
 *.iml
-.DS_Store
 
-# Environment Secrets
+# Databases, Logs, Temp & OS Junk
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.sqlite
+*.log
+*.log.*
+npm-debug.log*
+yarn-debug.log*
+bun-debug.log*
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+
+# Environment Secrets & Signing Keys
 .env
 .env.*
 !.env.example
@@ -37,7 +69,12 @@ google-services.json
 keystore.properties
 *.jks
 *.keystore
+*.pem
+*.key
+*.p12
+*.pfx
 
 # Codebase Memory
 .codebase-memory/artifact.json
 .codebase-memory/graph.db.zst
+.codebase-memory/*.db*

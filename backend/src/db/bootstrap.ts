@@ -233,7 +233,7 @@ const CORE_TABLE_STATEMENTS: readonly string[] = [
     \`updated_at\` integer NOT NULL,
     FOREIGN KEY (\`merchant_id\`) REFERENCES \`merchants\`(\`id\`) ON UPDATE no action ON DELETE no action
   )`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS \`uq_payment_links_slug\` ON \`payment_links\` (\`slug\`)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS \`uq_payment_links_merchant_slug\` ON \`payment_links\` (\`merchant_id\`,\`slug\`)`,
   `CREATE INDEX IF NOT EXISTS \`idx_payment_links_merchant\` ON \`payment_links\` (\`merchant_id\`,\`is_active\`)`,
 
   `CREATE TABLE IF NOT EXISTS \`consumed_trx_ids\` (
@@ -290,9 +290,18 @@ const CORE_TABLE_STATEMENTS: readonly string[] = [
   )`,
   `CREATE INDEX IF NOT EXISTS \`idx_admin_audit_created\` ON \`admin_audit_logs\` (\`created_at\`)`,
   `CREATE INDEX IF NOT EXISTS \`idx_admin_audit_action\` ON \`admin_audit_logs\` (\`action\`)`,
+
+  // 0007_platform_settings
+  `CREATE TABLE IF NOT EXISTS \`platform_settings\` (
+    \`key\` text PRIMARY KEY NOT NULL,
+    \`value_json\` text NOT NULL,
+    \`updated_at\` integer NOT NULL
+  )`,
 ];
 
 const ALTER_COLUMN_STATEMENTS: readonly string[] = [
+  // Merchant slug for /:merchantSlug/:linkSlug public URLs
+  `ALTER TABLE \`merchants\` ADD COLUMN \`slug\` text`,
   // 0002 + 0003 columns
   `ALTER TABLE \`sms_ledger\` ADD COLUMN \`match_type\` text`,
   `ALTER TABLE \`sms_ledger\` ADD COLUMN \`sms_sender\` text`,
@@ -330,6 +339,9 @@ const ALTER_COLUMN_STATEMENTS: readonly string[] = [
 
 const POST_ALTER_INDEX_STATEMENTS: readonly string[] = [
   `CREATE INDEX IF NOT EXISTS \`idx_merchants_api_key_hash\` ON \`merchants\` (\`api_key_hash\`)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS \`uq_merchants_slug\` ON \`merchants\` (\`slug\`)`,
+  `DROP INDEX IF EXISTS \`uq_payment_links_slug\``,
+  `CREATE UNIQUE INDEX IF NOT EXISTS \`uq_payment_links_merchant_slug\` ON \`payment_links\` (\`merchant_id\`,\`slug\`)`,
   `CREATE INDEX IF NOT EXISTS \`idx_queue_intent\` ON \`verification_queue\` (\`payment_intent_id\`)`,
 ];
 
@@ -343,6 +355,7 @@ const CORE_HEALTH_TABLES = [
   'admin_users',
   'admin_sessions',
   'admin_audit_logs',
+  'platform_settings',
 ] as const;
 
 let schemaReadyPromise: Promise<void> | null = null;

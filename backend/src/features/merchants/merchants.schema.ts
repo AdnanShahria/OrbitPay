@@ -7,6 +7,14 @@ const optionalWebhookUrl = z
 
 export const updateMerchantSettingsSchema = z.object({
   storeName: z.string().trim().min(2, 'Store name must be at least 2 characters').optional(),
+  slug: z
+    .string()
+    .trim()
+    .min(2, 'Handle must be at least 2 characters')
+    .max(48)
+    .regex(/^[a-z0-9-]+$/i, 'Handle may only contain letters, numbers, and hyphens')
+    .transform((v) => v.toLowerCase())
+    .optional(),
   webhookUrl: optionalWebhookUrl,
   gracePeriodMinutes: z.number().int().min(5).max(1440).optional(),
   verificationMode: z.enum(VERIFICATION_MODES).optional(),
@@ -31,6 +39,14 @@ export const rotateKeysSchema = z.object({
 
 export const registerMerchantSchema = z.object({
   storeName: z.string().trim().min(2, 'Store name is required'),
+  slug: z
+    .string()
+    .trim()
+    .min(2)
+    .max(48)
+    .regex(/^[a-z0-9-]+$/i)
+    .transform((v) => v.toLowerCase())
+    .optional(),
   webhookUrl: optionalWebhookUrl.default(''),
   gracePeriodMinutes: z.number().int().min(5).max(1440).optional().default(60),
 });

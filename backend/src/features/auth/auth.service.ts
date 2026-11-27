@@ -15,6 +15,7 @@ import {
 } from '../../shared/crypto';
 import { UnauthorizedError, NotFoundError } from '../../shared/errors';
 import { resolveJwtSecret, type OrbitJwtClaims } from '../../shared/middleware';
+import { toSafeMerchantSlug } from '../../shared/slug';
 import type { Env } from '../../shared/types';
 import type { LoginInput } from './auth.schema';
 
@@ -34,6 +35,7 @@ export interface SafeUserView {
 export interface SafeMerchantView {
   id: string;
   storeName: string;
+  slug: string;
   webhookUrl: string;
   webhookSecret: string;
   gracePeriodMinutes: number;
@@ -60,6 +62,7 @@ function toSafeMerchant(m: typeof merchants.$inferSelect): SafeMerchantView {
   return {
     id: m.id,
     storeName: m.storeName,
+    slug: m.slug || toSafeMerchantSlug(m.storeName),
     webhookUrl: m.webhookUrl,
     webhookSecret: m.webhookSecret,
     gracePeriodMinutes: m.gracePeriodMinutes,
