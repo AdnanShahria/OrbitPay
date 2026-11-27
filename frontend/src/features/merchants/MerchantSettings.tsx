@@ -103,6 +103,8 @@ export function MerchantSettings() {
 
   const [showSecret, setShowSecret] = useState(false);
   const [copiedSecret, setCopiedSecret] = useState(false);
+  const [revealedApiKey, setRevealedApiKey] = useState<string | null>(null);
+  const [copiedApiKey, setCopiedApiKey] = useState(false);
   const [pingResult, setPingResult] = useState<{ success: boolean; message: string; latency?: number } | null>(null);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [isRotateModalOpen, setIsRotateModalOpen] = useState(false);
@@ -223,6 +225,29 @@ export function MerchantSettings() {
       console.error('Rotate failed:', err);
       toast.error('Failed to rotate webhook secret');
     }
+  };
+
+  const handleGenerateApiKey = async () => {
+    try {
+      const res = await rotateSecretMutation.mutateAsync('API_KEY');
+      if (res.apiKey) {
+        setRevealedApiKey(res.apiKey);
+      }
+      toast.success('Merchant API key generated', {
+        description: 'Copy your sk_live_ key now — it will only be shown once.',
+      });
+    } catch (err) {
+      console.error('API key rotation failed:', err);
+      toast.error('Failed to generate Merchant API key');
+    }
+  };
+
+  const handleCopyApiKey = () => {
+    if (!revealedApiKey) return;
+    navigator.clipboard.writeText(revealedApiKey);
+    setCopiedApiKey(true);
+    toast.success('Merchant API key copied');
+    setTimeout(() => setCopiedApiKey(false), 2000);
   };
 
   const handleReplay = async (deliveryId: string) => {
@@ -653,6 +678,63 @@ export function MerchantSettings() {
                 )}
               </div>
             )}
+
+            {/* Server-to-Server Merchant API Key (sk_live_...) */}
+            <div className="space-y-2.5 border-t border-separator-border pt-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <span className="flex items-center gap-2 text-body-medium text-text-primary">
+                    <RiKey2Line className="size-4 shrink-0 text-foreground-icon-secondary" aria-hidden />
+                    <span>Merchant API Key (Storefront Backend)</span>
+                    {merchant?.apiKeyPrefix && (
+                      <Chip variant="caption" color="lime" className="font-mono">
+                        {merchant.apiKeyPrefix}••••
+                      </Chip>
+                    )}
+                  </span>
+                  <span className="text-caption-2-regular text-text-tertiary block mt-0.5">
+                    Used by your e-commerce backend (<code className="font-mono">X-Merchant-Api-Key</code>). Distinct from the Android companion <code className="font-mono">dev_key_...</code>.
+                  </span>
+                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="small"
+                  onClick={handleGenerateApiKey}
+                  isLoading={rotateSecretMutation.isPending}
+                  leadingIcon={RiRefreshLine}
+                >
+                  {merchant?.apiKeyPrefix ? 'Rotate API Key' : 'Generate API Key'}
+                </Button>
+              </div>
+
+              {revealedApiKey && (
+                <div className="rounded-2xl border border-separator-border bg-notification-success-background p-3.5 text-notification-success-foreground space-y-2">
+                  <span className="text-caption-1-semibold block">
+                    New Merchant API Key — Copy &amp; Save Now (Shown Once)
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      isReadOnly
+                      aria-label="New Merchant API Key"
+                      value={revealedApiKey}
+                      className="flex-1"
+                      inputClassName="font-mono text-caption-1-medium select-all"
+                    />
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="medium"
+                      onClick={handleCopyApiKey}
+                      leadingIcon={copiedApiKey ? RiCheckLine : RiFileCopyLine}
+                      className="shrink-0"
+                    >
+                      {copiedApiKey ? 'Copied' : 'Copy'}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
 
             {/* Webhook Secret Key */}
             <div className="space-y-2.5 border-t border-separator-border pt-4">

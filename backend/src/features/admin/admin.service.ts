@@ -19,7 +19,14 @@ import {
   mediaAssets,
   type MerchantRecord,
 } from '../../db/schema';
-import { generateSecureToken, hashDeviceApiKey, hashPassword } from '../../shared/crypto';
+import {
+  generateMerchantApiKey,
+  generatePublishableKey,
+  generateSecureToken,
+  hashDeviceApiKey,
+  hashPassword,
+  hashSha256,
+} from '../../shared/crypto';
 import { ConflictError, NotFoundError } from '../../shared/errors';
 import { recordAdminAudit, type AdminActor } from './admin-auth.service';
 import type {
@@ -205,10 +212,16 @@ export async function createAdminProject(
   input: CreateProjectDTO,
   pepper: string
 ) {
+  await ensureRuntimeSchema(db);
+
   const merchantId = input.id || `mer_live_${generateSecureToken(8).toLowerCase()}`;
   const rawDeviceKey = `dev_key_${generateSecureToken(24)}`;
   const deviceKeyHash = await hashDeviceApiKey(rawDeviceKey, pepper);
   const webhookSecret = `whsec_${generateSecureToken(24)}`;
+  const rawApiKey = generateMerchantApiKey();
+  const apiKeyHash = await hashSha256(rawApiKey);
+  const apiKeyPrefix = rawApiKey.slice(0, 12);
+  const publishableKey = generatePublishableKey();
 
   const now = new Date();
 
@@ -241,6 +254,9 @@ export async function createAdminProject(
     webhookUrl: input.webhookUrl,
     webhookSecret,
     deviceApiKeyHash: deviceKeyHash,
+    apiKeyHash,
+    apiKeyPrefix,
+    publishableKey,
     gracePeriodMinutes: input.gracePeriodMinutes,
     isActive: true,
     createdAt: now,
@@ -327,6 +343,8 @@ export async function createAdminProject(
     storeName: input.storeName,
     webhookUrl: input.webhookUrl,
     webhookSecret,
+    apiKey: rawApiKey,
+    publishableKey,
     deviceKey: rawDeviceKey,
     gracePeriodMinutes: input.gracePeriodMinutes,
     ...(ownerAccount ? { ownerAccount } : {}),

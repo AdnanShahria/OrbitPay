@@ -239,6 +239,39 @@ export function AddProjectModal({ isOpen, onClose }: AddProjectModalProps) {
                 </Button>
               </div>
 
+              {createdResult.apiKey && (
+                <div className="space-y-1">
+                  <div className="flex items-end gap-2">
+                    <Input
+                      label="Merchant API Key (Storefront Backend)"
+                      isReadOnly
+                      value={createdResult.apiKey}
+                      className="flex-1"
+                      inputClassName="font-mono text-caption-1-regular"
+                    />
+                    <Button
+                      variant="secondary"
+                      size="medium"
+                      onClick={() =>
+                        handleCopy(
+                          createdResult.apiKey!,
+                          'apikey',
+                          'Merchant API key',
+                        )
+                      }
+                      leadingIcon={
+                        copiedKey === 'apikey' ? RiCheckLine : RiFileCopyLine
+                      }
+                    >
+                      {copiedKey === 'apikey' ? 'Copied' : 'Copy'}
+                    </Button>
+                  </div>
+                  <p className="text-caption-1-medium text-text-secondary">
+                    Paste this sk_live_ key into your e-commerce storefront ORBIT Pay settings (X-Merchant-Api-Key). Shown once.
+                  </p>
+                </div>
+              )}
+
               <div className="space-y-1">
                 <div className="flex items-end gap-2">
                   <Input

@@ -606,6 +606,8 @@ export interface CreateProjectResponseData {
   storeName: string;
   webhookUrl: string;
   webhookSecret: string;
+  apiKey?: string;
+  publishableKey?: string;
   deviceKey: string;
   gracePeriodMinutes: number;
   ownerAccount?: {
