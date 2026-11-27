@@ -836,8 +836,11 @@ export async function verifyCheckoutPayment(
   const env = typeof fcmServerKeyOrEnv === 'string' ? undefined : fcmServerKeyOrEnv;
   const submittedTrxId = payload.trxId.trim().toUpperCase();
   const submittedSender = sanitizePhoneNumber(payload.senderNumber, payload.provider);
-  const submittedAmount = payload.paidAmount ?? payload.amount!;
   const now = new Date();
+
+  if (!/^01[3-9]\d{8}$/.test(submittedSender)) {
+    throw new BadRequestError('Please enter a valid 11-digit mobile number (e.g. 017XXXXXXXX)');
+  }
 
   if (!isValidProviderTrxId(payload.provider, submittedTrxId)) {
     throw new BadRequestError(
@@ -921,9 +924,13 @@ export async function verifyCheckoutPayment(
   let intent: PaymentIntentRecord | undefined = intentRes[0];
 
   const effectiveBaseAmount =
-    intent?.baseAmount ?? activeSession?.baseAmount ?? payload.baseAmount ?? submittedAmount;
+    intent?.baseAmount ?? activeSession?.baseAmount ?? payload.baseAmount ?? payload.paidAmount ?? payload.amount ?? 0;
   const effectiveUniqueAmount =
-    intent?.uniqueAmount ?? activeSession?.uniqueAmount ?? submittedAmount;
+    intent?.uniqueAmount ?? activeSession?.uniqueAmount ?? effectiveBaseAmount;
+  const submittedAmount = payload.paidAmount ?? payload.amount ?? effectiveBaseAmount;
+  if (submittedAmount <= 0 || effectiveBaseAmount <= 0) {
+    throw new BadRequestError('Could not determine payment amount for this order');
+  }
   const intentCustomer = extractCustomerFromJson(intent?.customerJson);
   const payloadRealEmail = extractRealCustomerEmail(payload.customerEmail);
   const realCustomerEmail = extractRealCustomerEmail(

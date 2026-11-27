@@ -212,9 +212,10 @@ function formatVerificationModeLabel(
   matchType?: string | null,
   resolutionSource?: string | null
 ): string {
-  if (matchType === 'EXACT_UNIQUE') return 'Automated 6-Factor Match (Exact Poisha)';
-  if (matchType === 'BASE_AMOUNT_FALLBACK') return 'Automated 6-Factor Match (Base Amount)';
-  if (matchType === 'OVERPAID') return 'Automated Match (Overpaid)';
+  if (matchType === 'EXACT_UNIQUE' || matchType === 'BASE_AMOUNT_FALLBACK') {
+    return 'Instant SMS Verification';
+  }
+  if (matchType === 'OVERPAID') return 'SMS Verification';
   if (resolutionSource === 'LATE_SMS_AUTO') return 'Late SMS Auto-Reconciliation';
   if (resolutionSource === 'ORBIT_ANDROID') return 'Merchant Companion Approval';
   if (resolutionSource === 'CLIENT_ADMIN') return 'Store Admin Approval';

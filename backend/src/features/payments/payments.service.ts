@@ -49,7 +49,6 @@ import {
 } from './verification.engine';
 
 const OPEN_INTENT_DEFAULT_TTL_MINUTES = 15;
-const MAX_OFFSET_RETRIES = 6;
 
 export function resolvePublicOrigin(requestUrl: string, productionDomain?: string): string {
   const parsed = new URL(requestUrl);
@@ -64,8 +63,8 @@ export function resolvePublicOrigin(requestUrl: string, productionDomain?: strin
 }
 
 /**
- * Reserves a unique 2-decimal poisha offset in [1..99] for (merchantId, uniqueAmount),
- * automatically expiring stale OPEN sessions first and retrying on partial unique index collisions.
+ * Creates a checkout session using the exact order baseAmount (no extra poisha offset),
+ * automatically expiring stale OPEN sessions first.
  */
 export async function reserveUniqueCheckoutSession(
   db: AppDb,
@@ -89,7 +88,7 @@ export async function reserveUniqueCheckoutSession(
 }> {
   const now = new Date();
 
-  // Clear expired unsubmitted OPEN sessions so their poisha offsets are immediately reusable
+  // Clear expired unsubmitted OPEN sessions
   await db
     .update(checkoutSessions)
     .set({ status: 'EXPIRED' })
@@ -101,81 +100,36 @@ export async function reserveUniqueCheckoutSession(
       )
     );
 
-  const triedOffsets = new Set<number>();
+  // Drop legacy unique amount index if an older DB instance still has it
+  await db.run(sql.raw('DROP INDEX IF EXISTS `uq_active_unique_amount`')).catch(() => {});
 
-  for (let attempt = 0; attempt < MAX_OFFSET_RETRIES; attempt++) {
-    const activeReservations = await db
-      .select({
-        offsetCents: checkoutSessions.offsetCents,
-        uniqueAmount: checkoutSessions.uniqueAmount,
-      })
-      .from(checkoutSessions)
-      .where(
-        and(
-          eq(checkoutSessions.merchantId, params.merchantId),
-          inArray(checkoutSessions.status, ['OPEN', 'SUBMITTED'])
-        )
-      );
+  const uniqueAmount = Math.round(params.baseAmount * 100) / 100;
+  const sessionId = `chk_${generateSecureToken(16)}`;
 
-    const usedUniqueAmounts = new Set(
-      activeReservations.map((r) => Math.round(r.uniqueAmount * 100))
-    );
+  await db.insert(checkoutSessions).values({
+    id: sessionId,
+    merchantId: params.merchantId,
+    paymentIntentId: params.paymentIntentId ?? null,
+    vertical: params.vertical ?? 'ecommerce',
+    externalOrderId: params.externalOrderId,
+    customerEmail: params.customerEmail,
+    baseAmount: uniqueAmount,
+    uniqueAmount,
+    offsetCents: 0,
+    provider: params.provider ?? null,
+    status: 'OPEN',
+    displayJson: params.displayJson ?? null,
+    actionsJson: params.actionsJson ?? null,
+    expiresAt: params.expiresAt,
+    createdAt: now,
+  });
 
-    let chosenOffset: number | null = null;
-    for (let candidate = 1; candidate <= 99; candidate++) {
-      if (triedOffsets.has(candidate)) continue;
-      const candidateCents = Math.round(params.baseAmount * 100) + candidate;
-      if (!usedUniqueAmounts.has(candidateCents)) {
-        chosenOffset = candidate;
-        break;
-      }
-    }
-
-    if (chosenOffset === null) {
-      throw new ConflictError(
-        'All 99 unique poisha offsets for this exact amount are currently reserved. Please try again in a few minutes.'
-      );
-    }
-
-    triedOffsets.add(chosenOffset);
-    const uniqueAmount = Math.round(params.baseAmount * 100 + chosenOffset) / 100;
-    const sessionId = `chk_${generateSecureToken(16)}`;
-
-    try {
-      await db.insert(checkoutSessions).values({
-        id: sessionId,
-        merchantId: params.merchantId,
-        paymentIntentId: params.paymentIntentId ?? null,
-        vertical: params.vertical ?? 'ecommerce',
-        externalOrderId: params.externalOrderId,
-        customerEmail: params.customerEmail,
-        baseAmount: params.baseAmount,
-        uniqueAmount,
-        offsetCents: chosenOffset,
-        provider: params.provider ?? null,
-        status: 'OPEN',
-        displayJson: params.displayJson ?? null,
-        actionsJson: params.actionsJson ?? null,
-        expiresAt: params.expiresAt,
-        createdAt: now,
-      });
-
-      return {
-        sessionId,
-        uniqueAmount,
-        offsetCents: chosenOffset,
-        expiresAt: params.expiresAt,
-      };
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes('UNIQUE constraint failed')) {
-        continue;
-      }
-      throw err;
-    }
-  }
-
-  throw new ConflictError('Concurrent unique amount allocation conflict. Please retry.');
+  return {
+    sessionId,
+    uniqueAmount,
+    offsetCents: 0,
+    expiresAt: params.expiresAt,
+  };
 }
 
 /**

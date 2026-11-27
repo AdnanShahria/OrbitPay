@@ -357,6 +357,7 @@ const POST_ALTER_INDEX_STATEMENTS: readonly string[] = [
   `CREATE INDEX IF NOT EXISTS \`idx_merchants_api_key_hash\` ON \`merchants\` (\`api_key_hash\`)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS \`uq_merchants_slug\` ON \`merchants\` (\`slug\`)`,
   `DROP INDEX IF EXISTS \`uq_payment_links_slug\``,
+  `DROP INDEX IF EXISTS \`uq_active_unique_amount\``,
   `CREATE UNIQUE INDEX IF NOT EXISTS \`uq_payment_links_merchant_slug\` ON \`payment_links\` (\`merchant_id\`,\`slug\`)`,
   `CREATE INDEX IF NOT EXISTS \`idx_queue_intent\` ON \`verification_queue\` (\`payment_intent_id\`)`,
 ];

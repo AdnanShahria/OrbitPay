@@ -324,9 +324,6 @@ export const checkoutSessions = sqliteTable('checkout_sessions', {
 }, (table) => ({
   checkoutActiveIdx: index('idx_checkout_active').on(table.merchantId, table.baseAmount, table.status, table.expiresAt),
   checkoutOrderIdx: index('idx_checkout_order').on(table.merchantId, table.externalOrderId),
-  uqActiveUniqueAmount: uniqueIndex('uq_active_unique_amount')
-    .on(table.merchantId, table.uniqueAmount)
-    .where(sql`${table.status} IN ('OPEN', 'SUBMITTED')`),
 }));
 
 // 10. Merchant Users (Admin-Provisioned Client Accounts)
