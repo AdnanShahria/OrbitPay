@@ -24,6 +24,7 @@
     "app:emu": "node scripts/launch.mjs android --emulator",
     "app:studio": "node scripts/launch.mjs studio",
     "simulate": "node scripts/simulate-realtime.mjs",
+    "verify:orbitmail": "node scripts/verify-orbitmail.mjs",
     "build:frontend": "npm --workspace=frontend run build",
     "build:backend": "npm --workspace=backend run build",
     "build": "npm --workspace=frontend run build && npm --workspace=backend run build",
