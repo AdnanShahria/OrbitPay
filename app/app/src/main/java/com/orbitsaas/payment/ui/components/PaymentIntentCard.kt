@@ -165,8 +165,6 @@ fun PaymentIntentCard(
 
     val displayAppName = intent.display.appName?.takeIf { it.isNotBlank() }
         ?: fallbackAppName.ifBlank { stringResource(R.string.app_name) }
-    val displayCategory = intent.display.category?.takeIf { it.isNotBlank() }
-        ?: intent.vertical.takeIf { it.isNotBlank() }
     val displayRefLabel = intent.display.referenceLabel?.takeIf { it.isNotBlank() } ?: "Ref"
     val displayTitle = intent.display.title?.takeIf { it.isNotBlank() }
         ?: "$displayRefLabel #${intent.externalRefId}"
@@ -176,6 +174,48 @@ fun PaymentIntentCard(
     val isActionable = normalizedStatus in setOf("OPEN", "WAITING_FOR_SMS", "MANUAL_REVIEW_REQUIRED")
     val safeAdminUrl = resolveSafeHttpUrl(intent.display.adminDeepLink, serverBaseUrl)
     val safeReceiptUrl = resolveSafeHttpUrl(intent.receiptUrl, serverBaseUrl)
+    val primaryAmount = intent.paidAmount ?: intent.uniqueAmount
+    val formattedPrimaryAmount = formatBdtAmount(primaryAmount)
+
+    val subtitleText = intent.display.subtitle?.trim().orEmpty()
+    val filteredHighlights = remember(intent.display.highlights, subtitleText, primaryAmount, formattedPrimaryAmount) {
+        val normalizedSubtitle = subtitleText.lowercase(Locale.US)
+        val compactSubtitle = normalizedSubtitle.replace(",", "").replace(" ", "")
+        val compactAmount = formattedPrimaryAmount.lowercase(Locale.US).replace(",", "").replace(" ", "")
+        val amountRegex = Regex("[^0-9.]")
+
+        intent.display.highlights.filter { hl ->
+            val labelLower = hl.label.trim().lowercase(Locale.US)
+            val valueTrimmed = hl.value.trim()
+            if (valueTrimmed.isBlank()) return@filter false
+
+            val valueLower = valueTrimmed.lowercase(Locale.US)
+            val compactValue = valueLower.replace(",", "").replace(" ", "")
+
+            val isCustomerLabel = labelLower == "customer" || labelLower.contains("customer")
+            val isAmountLabel = labelLower == "payable" ||
+                labelLower == "amount" ||
+                labelLower.contains("payable") ||
+                labelLower.contains("amount")
+
+            val duplicatesCustomer = isCustomerLabel && normalizedSubtitle.isNotEmpty() && (
+                normalizedSubtitle.contains(valueLower) ||
+                    compactSubtitle.contains(compactValue) ||
+                    normalizedSubtitle.startsWith(valueLower.substringBefore("·").trim())
+                )
+
+            val parsedAmount = valueLower.replace(",", "").replace(amountRegex, "").toDoubleOrNull()
+            val matchesPrimaryAmount = parsedAmount != null &&
+                kotlin.math.abs(parsedAmount - primaryAmount) < 0.01
+            val duplicatesAmount = isAmountLabel && (
+                compactValue == compactAmount ||
+                    matchesPrimaryAmount ||
+                    (compactSubtitle.isNotEmpty() && compactSubtitle.contains(compactValue))
+                )
+
+            !duplicatesCustomer && !duplicatesAmount
+        }
+    }
 
     Card(
         modifier = Modifier
@@ -189,48 +229,26 @@ fun PaymentIntentCard(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // App Name + Category + Status Pill
+            // App Badge + Status Pill
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier.weight(1f),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
                 ) {
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
-                    ) {
-                        Text(
-                            text = displayAppName,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-
-                    if (!displayCategory.isNullOrBlank()) {
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = StatusGrayBg
-                        ) {
-                            Text(
-                                text = displayCategory,
-                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
+                    Text(
+                        text = displayAppName,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
 
                 Spacer(modifier = Modifier.size(8.dp))
@@ -242,7 +260,7 @@ fun PaymentIntentCard(
                 )
             }
 
-            // Title, Reference, Subtitle + Amount
+            // Title, Subtitle + Amount
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -260,17 +278,9 @@ fun PaymentIntentCard(
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Text(
-                        text = "$displayRefLabel: ${intent.externalRefId}",
-                        style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
-                        fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    intent.display.subtitle?.takeIf { it.isNotBlank() }?.let { sub ->
+                    if (subtitleText.isNotEmpty()) {
                         Text(
-                            text = sub,
+                            text = subtitleText,
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 2,
@@ -281,22 +291,12 @@ fun PaymentIntentCard(
 
                 Spacer(modifier = Modifier.size(10.dp))
 
-                Column(horizontalAlignment = Alignment.End) {
-                    val primaryAmount = intent.paidAmount ?: intent.uniqueAmount
-                    Text(
-                        text = formatBdtAmount(primaryAmount),
-                        style = MaterialTheme.typography.titleMedium.copy(fontFeatureSettings = "tnum"),
-                        fontWeight = FontWeight.Bold,
-                        color = if (normalizedStatus == "VERIFIED") StatusGreen else MaterialTheme.colorScheme.onSurface
-                    )
-                    if (intent.baseAmount > 0.0 && kotlin.math.abs(intent.baseAmount - primaryAmount) >= 0.01) {
-                        Text(
-                            text = "Base ${formatBdtAmount(intent.baseAmount)}",
-                            style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
+                Text(
+                    text = formattedPrimaryAmount,
+                    style = MaterialTheme.typography.titleMedium.copy(fontFeatureSettings = "tnum"),
+                    fontWeight = FontWeight.Bold,
+                    color = if (normalizedStatus == "VERIFIED") StatusGreen else MaterialTheme.colorScheme.onSurface
+                )
             }
 
             // MFS Provider + TrxID + Sender
@@ -419,8 +419,8 @@ fun PaymentIntentCard(
                 }
             }
 
-            // Dynamic Highlights from Server
-            if (intent.display.highlights.isNotEmpty()) {
+            // Dynamic Highlights from Server (deduplicated against subtitle and amount)
+            if (filteredHighlights.isNotEmpty()) {
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -432,7 +432,7 @@ fun PaymentIntentCard(
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        intent.display.highlights.forEach { hl ->
+                        filteredHighlights.forEach { hl ->
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,

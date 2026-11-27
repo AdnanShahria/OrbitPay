@@ -111,8 +111,9 @@ export function useWalletsOverview(merchantId?: string) {
       );
     },
     enabled: Boolean(getAuthToken()),
-    staleTime: 10_000,
-    refetchInterval: 15_000,
+    staleTime: 20_000,
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
   });
 }
 

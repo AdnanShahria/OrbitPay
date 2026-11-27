@@ -123,6 +123,7 @@ export function OrdersManager() {
   const pendingCount = data?.pendingConfirmationCount ?? 0;
 
   const handleAction = async (order: MerchantOrder, action: OrderAction, label: string) => {
+    if (actionMutation.isPending) return;
     const key = `${order.externalOrderId}:${action}`;
     setActiveActionKey(key);
     try {
@@ -333,24 +334,10 @@ export function OrdersManager() {
 
                     {/* Amounts */}
                     <TableCell>
-                      <div className="space-y-0.5 font-mono tabular-nums tnum whitespace-nowrap">
+                      <div className="font-mono tabular-nums tnum whitespace-nowrap">
                         <div className="text-body-medium text-text-primary">
                           {formatBDT(order.paidAmount ?? order.uniqueAmount ?? order.baseAmount)}
                         </div>
-                        {order.uniqueAmount != null && order.uniqueAmount !== order.baseAmount && (
-                          <div className="text-caption-2-regular text-text-tertiary">
-                            Base {formatBDT(order.baseAmount)} · Unique {formatBDT(order.uniqueAmount)}
-                          </div>
-                        )}
-                        {order.matchType && (
-                          <div className="text-caption-2-medium text-status-lime-text font-sans">
-                            {order.matchType === 'EXACT_UNIQUE'
-                              ? 'Exact Poisha'
-                              : order.matchType === 'BASE_AMOUNT_FALLBACK'
-                                ? 'Base Fallback'
-                                : order.matchType}
-                          </div>
-                        )}
                       </div>
                     </TableCell>
 

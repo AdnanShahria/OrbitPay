@@ -136,6 +136,20 @@
             </intent-filter>
         </receiver>
 
+        <!-- Home Screen Pending Payments Widget -->
+        <receiver
+            android:name=".widget.PendingPaymentsWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_pending_title">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.orbitsaas.payment.action.REFRESH_PENDING_WIDGET" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/pending_payments_widget_info" />
+        </receiver>
+
     </application>
 
 </manifest>

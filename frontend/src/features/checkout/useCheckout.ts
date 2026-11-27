@@ -79,6 +79,7 @@ export interface CheckoutConfig {
   customerEmail?: string;
   storeName?: string;
   parentOrigin?: string;
+  initialStep?: 1 | 2 | 3;
   onSuccess?: (data: CheckoutVerifiedEvent) => void;
   onPending?: (data: CheckoutPendingEvent) => void;
   onError?: (err: unknown) => void;
@@ -191,7 +192,9 @@ export function useCheckout(config: CheckoutConfig) {
   const targetOrigin = resolveTargetOrigin(config.parentOrigin);
 
   const [currentStep, setCurrentStep] = useState<CheckoutStep>('SELECT_PROVIDER');
-  const [preferredStepperStep, setPreferredStepperStep] = useState<1 | 2 | 3>(1);
+  const [preferredStepperStep, setPreferredStepperStep] = useState<1 | 2 | 3>(
+    config.initialStep ?? 1,
+  );
   const [selectedProvider, setSelectedProvider] = useState<MfsProvider>('BKASH');
   const [senderNumber, setSenderNumber] = useState('');
   const [paidAmount, setPaidAmount] = useState(() =>

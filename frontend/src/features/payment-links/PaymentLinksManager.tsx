@@ -28,9 +28,11 @@ import {
   TableCell,
 } from '@/components/base/table/table';
 import { toast } from '@/components/base/toast/toast';
+import { cx } from '@/utils/cx';
 import { formatBDT, formatDate } from '@/shared/utils/format';
 import {
   RiAddLine,
+  RiArrowDownSLine,
   RiCheckLine,
   RiDeleteBinLine,
   RiEditLine,
@@ -83,6 +85,7 @@ export function PaymentLinksManager() {
   const [verificationMode, setVerificationMode] = useState<'DEFAULT' | VerificationMode>('DEFAULT');
   const [maxUses, setMaxUses] = useState('');
   const [returnUrl, setReturnUrl] = useState('');
+  const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
 
   const merchantSlug =
     merchantProfile?.slug ||
@@ -119,6 +122,7 @@ export function PaymentLinksManager() {
     setVerificationMode('DEFAULT');
     setMaxUses('');
     setReturnUrl('');
+    setShowAdvancedOptions(false);
   };
 
   const openCreateModal = () => {
@@ -144,6 +148,7 @@ export function PaymentLinksManager() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (createMutation.isPending || updateMutation.isPending) return;
     if (!title.trim()) {
       toast.error('Please enter a link title');
       return;
@@ -203,6 +208,7 @@ export function PaymentLinksManager() {
   };
 
   const handleToggleActive = async (link: PaymentLinkView, isSelected: boolean) => {
+    if (updateMutation.isPending) return;
     try {
       await updateMutation.mutateAsync({
         id: link.id,
@@ -426,54 +432,23 @@ export function PaymentLinksManager() {
         <form onSubmit={handleSubmit}>
           <ModalBody className="space-y-4">
             <div className="rounded-2xl border border-separator-border bg-background-secondary-default px-3.5 py-2.5 flex items-center justify-between gap-2 text-caption-1-medium">
-              <span className="text-text-tertiary shrink-0">Live URL</span>
+              <span className="text-text-tertiary shrink-0">Link URL</span>
               <span className="font-mono text-text-primary truncate">
                 {origin}/{merchantSlug}/{previewSlug}
               </span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <Input
-                label="Link Title"
-                value={title}
-                onChange={setTitle}
-                placeholder="e.g. Ovijatrik 10K Half Marathon"
-                isRequired
-              />
-              <Input
-                label="Custom Slug (Optional)"
-                value={slug}
-                onChange={(val) => setSlug(val.toLowerCase().replace(/[^a-z0-9-]/g, '-'))}
-                placeholder="e.g. ovijatrik-10k"
-                hint={`Path: /${merchantSlug}/${previewSlug}`}
-                inputClassName="font-mono"
-              />
-            </div>
-
             <Input
-              label="Description / Buyer Note (Optional)"
-              value={description}
-              onChange={setDescription}
-              placeholder="Includes race kit, medal, and timing bib"
+              label="Title"
+              value={title}
+              onChange={setTitle}
+              placeholder="e.g. Course Fee / Order Payment"
+              isRequired
             />
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Select
-                label="Vertical Profile"
-                selectedKey={vertical}
-                onSelectionChange={(key) => {
-                  if (key != null) setVertical(String(key) as VerticalProfile);
-                }}
-              >
-                {VERTICAL_OPTIONS.map((v) => (
-                  <SelectItem key={v.value} id={v.value} textValue={v.label}>
-                    {v.label}
-                  </SelectItem>
-                ))}
-              </Select>
-
-              <Select
-                label="Pricing Type"
+                label="Amount Type"
                 selectedKey={amountType}
                 onSelectionChange={(key) => {
                   if (key != null) setAmountType(String(key) as PaymentLinkAmountType);
@@ -482,23 +457,21 @@ export function PaymentLinksManager() {
                 <SelectItem id="FIXED" textValue="Fixed Amount">
                   Fixed Amount
                 </SelectItem>
-                <SelectItem id="OPEN" textValue="Open / Buyer-Entered Amount">
-                  Open / Buyer-Entered Amount
+                <SelectItem id="OPEN" textValue="Buyer Enters Amount">
+                  Buyer Enters Amount
                 </SelectItem>
               </Select>
-            </div>
 
-            {amountType === 'FIXED' ? (
-              <Input
-                label="Fixed Amount (BDT)"
-                type="number"
-                value={fixedAmount}
-                onChange={setFixedAmount}
-                inputClassName="font-mono tabular-nums"
-                isRequired
-              />
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {amountType === 'FIXED' ? (
+                <Input
+                  label="Amount (BDT)"
+                  type="number"
+                  value={fixedAmount}
+                  onChange={setFixedAmount}
+                  inputClassName="font-mono tabular-nums"
+                  isRequired
+                />
+              ) : (
                 <Input
                   label="Minimum Amount (BDT)"
                   type="number"
@@ -506,54 +479,111 @@ export function PaymentLinksManager() {
                   onChange={setMinAmount}
                   inputClassName="font-mono tabular-nums"
                 />
-                <Input
-                  label="Maximum Amount (BDT, Optional)"
-                  type="number"
-                  value={maxAmount}
-                  onChange={setMaxAmount}
-                  inputClassName="font-mono tabular-nums"
-                />
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <Select
-                label="Verification Mode"
-                selectedKey={verificationMode}
-                onSelectionChange={(key) => {
-                  if (key != null) {
-                    setVerificationMode(String(key) as 'DEFAULT' | VerificationMode);
-                  }
-                }}
-              >
-                <SelectItem id="DEFAULT" textValue="Use Merchant Default">
-                  Use Merchant Default
-                </SelectItem>
-                <SelectItem id="AUTO" textValue="AUTO (SMS + Fallback)">
-                  AUTO (SMS + Fallback)
-                </SelectItem>
-                <SelectItem id="PURE_MANUAL" textValue="PURE_MANUAL (Admin Review)">
-                  PURE_MANUAL (Admin Review)
-                </SelectItem>
-              </Select>
-
-              <Input
-                label="Max Uses (Optional)"
-                type="number"
-                value={maxUses}
-                onChange={setMaxUses}
-                placeholder="Unlimited"
-                inputClassName="font-mono tabular-nums"
-              />
+              )}
             </div>
 
             <Input
-              label="Success Return URL (Optional)"
-              type="url"
-              value={returnUrl}
-              onChange={setReturnUrl}
-              placeholder="https://yoursite.com/thank-you"
+              label="Note (Optional)"
+              value={description}
+              onChange={setDescription}
+              placeholder="Short note shown to buyer"
             />
+
+            {/* Collapsible Advanced Options */}
+            <div className="rounded-2xl border border-separator-border bg-background-secondary-default/40 overflow-hidden">
+              <button
+                type="button"
+                aria-expanded={showAdvancedOptions}
+                onClick={() => setShowAdvancedOptions((prev) => !prev)}
+                className="w-full min-h-11 px-4 py-2.5 flex items-center justify-between gap-2 text-caption-1-semibold text-text-secondary hover:text-text-primary transition-colors cursor-pointer"
+              >
+                <span>More options</span>
+                <RiArrowDownSLine
+                  className={cx(
+                    'size-4 transition-transform duration-200',
+                    showAdvancedOptions && 'rotate-180',
+                  )}
+                  aria-hidden
+                />
+              </button>
+
+              {showAdvancedOptions && (
+                <div className="px-4 pb-4 pt-2 space-y-4 border-t border-separator-border">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <Input
+                      label="Custom Slug (Optional)"
+                      value={slug}
+                      onChange={(val) => setSlug(val.toLowerCase().replace(/[^a-z0-9-]/g, '-'))}
+                      placeholder="e.g. course-fee"
+                      hint={`/${merchantSlug}/${previewSlug}`}
+                      inputClassName="font-mono"
+                    />
+                    <Select
+                      label="Category"
+                      selectedKey={vertical}
+                      onSelectionChange={(key) => {
+                        if (key != null) setVertical(String(key) as VerticalProfile);
+                      }}
+                    >
+                      {VERTICAL_OPTIONS.map((v) => (
+                        <SelectItem key={v.value} id={v.value} textValue={v.label}>
+                          {v.label}
+                        </SelectItem>
+                      ))}
+                    </Select>
+                  </div>
+
+                  {amountType === 'OPEN' && (
+                    <Input
+                      label="Maximum Amount (BDT, Optional)"
+                      type="number"
+                      value={maxAmount}
+                      onChange={setMaxAmount}
+                      inputClassName="font-mono tabular-nums"
+                    />
+                  )}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <Select
+                      label="Verification Mode"
+                      selectedKey={verificationMode}
+                      onSelectionChange={(key) => {
+                        if (key != null) {
+                          setVerificationMode(String(key) as 'DEFAULT' | VerificationMode);
+                        }
+                      }}
+                    >
+                      <SelectItem id="DEFAULT" textValue="Use Merchant Default">
+                        Use Merchant Default
+                      </SelectItem>
+                      <SelectItem id="AUTO" textValue="AUTO (SMS + Fallback)">
+                        AUTO (SMS + Fallback)
+                      </SelectItem>
+                      <SelectItem id="PURE_MANUAL" textValue="PURE_MANUAL (Admin Review)">
+                        PURE_MANUAL (Admin Review)
+                      </SelectItem>
+                    </Select>
+
+                    <Input
+                      label="Max Uses (Optional)"
+                      type="number"
+                      value={maxUses}
+                      onChange={setMaxUses}
+                      placeholder="Unlimited"
+                      inputClassName="font-mono tabular-nums"
+                    />
+                  </div>
+
+                  <Input
+                    label="Return URL (Optional)"
+                    type="url"
+                    value={returnUrl}
+                    onChange={setReturnUrl}
+                    placeholder="https://yoursite.com/thank-you"
+                  />
+                </div>
+              )}
+            </div>
           </ModalBody>
           <ModalFooter>
             <Button

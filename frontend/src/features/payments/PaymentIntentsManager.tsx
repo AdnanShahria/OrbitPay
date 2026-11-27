@@ -138,6 +138,7 @@ export function PaymentIntentsManager() {
   const manualReviewCount = items.filter((i) => i.status === 'MANUAL_REVIEW_REQUIRED').length;
 
   const handleApprove = async (intent: PaymentIntentView) => {
+    if (resolveMutation.isPending) return;
     setActiveActionId(`approve:${intent.id}`);
     try {
       await resolveMutation.mutateAsync({
@@ -160,7 +161,7 @@ export function PaymentIntentsManager() {
   };
 
   const handleConfirmReject = async () => {
-    if (!rejectingIntent) return;
+    if (!rejectingIntent || resolveMutation.isPending) return;
     setActiveActionId(`reject:${rejectingIntent.id}`);
     try {
       await resolveMutation.mutateAsync({
@@ -534,7 +535,7 @@ export function PaymentIntentsManager() {
           <>
             <ModalHeader
               title={inspectingIntent.display?.title || inspectingIntent.externalRefId}
-              description={`${inspectingIntent.display?.appName || 'Merchant'} · ${inspectingIntent.vertical} · v${inspectingIntent.stateVersion}`}
+              description={inspectingIntent.display?.appName || 'Merchant'}
             />
             <ModalBody className="space-y-4">
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-3.5 rounded-2xl bg-background-secondary-default border border-separator-border">
@@ -545,7 +546,7 @@ export function PaymentIntentsManager() {
                   </Chip>
                 </div>
                 <div>
-                  <span className="text-caption-2-medium text-text-tertiary block">Paid / Unique</span>
+                  <span className="text-caption-2-medium text-text-tertiary block">Amount</span>
                   <span className="font-mono text-body-medium text-text-primary tabular-nums">
                     {formatBDT(inspectingIntent.paidAmount ?? inspectingIntent.uniqueAmount)}
                   </span>
@@ -564,24 +565,41 @@ export function PaymentIntentsManager() {
                 </div>
               </div>
 
-              {(inspectingIntent.display?.highlights?.length ?? 0) > 0 && (
-                <div className="space-y-2">
-                  <h4 className="text-caption-1-semibold text-text-primary">
-                    Context highlights
-                  </h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {inspectingIntent.display.highlights!.map((h, idx) => (
-                      <div
-                        key={`${h.label}-${idx}`}
-                        className="px-3 py-2 rounded-xl bg-background-secondary-default border border-separator-border flex items-center justify-between gap-2 text-caption-1-regular"
-                      >
-                        <span className="text-text-tertiary">{h.label}</span>
-                        <span className="text-text-primary font-medium">{h.value}</span>
-                      </div>
-                    ))}
+              {(() => {
+                const seenLabels = new Set<string>();
+                const filteredHighlights = (inspectingIntent.display?.highlights ?? []).filter((h) => {
+                  const normalizedLabel = h.label.trim().toLowerCase();
+                  if (!h.value || normalizedLabel === 'customer' || normalizedLabel === 'payable') {
+                    return false;
+                  }
+                  if (seenLabels.has(normalizedLabel)) {
+                    return false;
+                  }
+                  seenLabels.add(normalizedLabel);
+                  return true;
+                });
+
+                if (filteredHighlights.length === 0) return null;
+
+                return (
+                  <div className="space-y-2">
+                    <h4 className="text-caption-1-semibold text-text-primary">
+                      Context highlights
+                    </h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {filteredHighlights.map((h, idx) => (
+                        <div
+                          key={`${h.label}-${idx}`}
+                          className="px-3 py-2 rounded-xl bg-background-secondary-default border border-separator-border flex items-center justify-between gap-2 text-caption-1-regular"
+                        >
+                          <span className="text-text-tertiary">{h.label}</span>
+                          <span className="text-text-primary font-medium">{h.value}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               {inspectingIntent.escalationReason && (
                 <div className="p-3 rounded-xl bg-background-secondary-default border border-separator-border text-caption-1-regular">
@@ -699,7 +717,7 @@ export function PaymentIntentsManager() {
       >
         <ModalHeader
           title="Create Universal Payment Intent"
-          description="Generate a hosted checkout session & unique poisha amount for any vertical."
+          description="Generate a hosted checkout session for any vertical."
         />
         <form onSubmit={handleCreateIntent}>
           <ModalBody className="space-y-4">

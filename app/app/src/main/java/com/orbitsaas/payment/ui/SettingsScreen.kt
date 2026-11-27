@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.LightMode
@@ -70,6 +71,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -100,18 +102,22 @@ fun SettingsScreen(
     onSaveSettings: (serverUrl: String, merchantId: String, deviceKey: String, enableForeground: Boolean) -> Unit,
     onTestConnection: (serverUrl: String, merchantId: String, deviceKey: String, (Boolean, String) -> Unit) -> Unit,
     onLogoutClick: () -> Unit = {},
-    onOpenDiagnostics: () -> Unit = {}
+    onOpenDiagnostics: () -> Unit = {},
+    onOpenSetupGuide: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val preferencesManager = remember(context) { PreferencesManager(context) }
     val coroutineScope = rememberCoroutineScope()
     val updateState by AppUpdateManager.state.collectAsState()
 
-    var serverUrl by remember(state.serverUrl) {
-        mutableStateOf(if (state.serverUrl.isBlank()) "https://payment.orbitsaas.cloud" else state.serverUrl)
+    val resolvedServerUrl = state.serverUrl.ifBlank { "https://payment.orbitsaas.cloud" }
+    val resolvedMerchantId = state.merchantId
+    val resolvedDeviceKey = state.deviceKey
+    val maskedDeviceKey = when {
+        resolvedDeviceKey.isBlank() -> "—"
+        resolvedDeviceKey.length <= 4 -> "••••"
+        else -> "••••${resolvedDeviceKey.takeLast(4)}"
     }
-    var merchantId by remember(state.merchantId) { mutableStateOf(state.merchantId) }
-    var deviceKey by remember(state.deviceKey) { mutableStateOf(state.deviceKey) }
     var enableForeground by remember(state.isForegroundEnabled) { mutableStateOf(state.isForegroundEnabled) }
     var selectedLanguage by remember { mutableStateOf(LocaleHelper.currentLanguage(context)) }
     var extraTrustedSenders by remember { mutableStateOf(preferencesManager.extraTrustedSenders) }
@@ -740,7 +746,7 @@ fun SettingsScreen(
                 }
             }
 
-            // Connection Configuration Card
+            // Connection Configuration Card (strictly view-only)
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -751,79 +757,86 @@ fun SettingsScreen(
             ) {
                 Column(
                     modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    Text(
-                        text = stringResource(R.string.settings_cloud_connection),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-
-                    // 1. Server URL
-                    OutlinedTextField(
-                        value = serverUrl,
-                        onValueChange = { serverUrl = it },
-                        label = { Text(stringResource(R.string.settings_server_url_label)) },
-                        leadingIcon = {
-                            Icon(
-                                imageVector = Icons.Default.Language,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        },
+                    Row(
                         modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        shape = fieldShape,
-                        colors = textFieldColors
-                    )
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = stringResource(R.string.settings_cloud_connection),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
 
-                    // 2. Merchant ID
-                    OutlinedTextField(
-                        value = merchantId,
-                        onValueChange = { merchantId = it },
-                        label = { Text(stringResource(R.string.settings_merchant_id_label)) },
-                        leadingIcon = {
-                            Icon(
-                                imageVector = Icons.Default.Store,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (state.isOnline) StatusGreen else MaterialTheme.colorScheme.outlineVariant
+                                    )
                             )
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        shape = fieldShape,
-                        colors = textFieldColors
-                    )
-
-                    // 3. Device API Key
-                    OutlinedTextField(
-                        value = deviceKey,
-                        onValueChange = { deviceKey = it },
-                        label = { Text(stringResource(R.string.settings_device_key_label)) },
-                        leadingIcon = {
-                            Icon(
-                                imageVector = Icons.Default.Key,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            Text(
+                                text = stringResource(
+                                    if (state.isOnline) {
+                                        R.string.dashboard_status_online_simple
+                                    } else {
+                                        R.string.dashboard_status_offline_simple
+                                    }
+                                ),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Medium,
+                                color = if (state.isOnline) greenFg else MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        textStyle = MaterialTheme.typography.bodyMedium.copy(
-                            fontFamily = FontFamily.Monospace,
-                            fontFeatureSettings = "tnum"
-                        ),
-                        shape = fieldShape,
-                        colors = textFieldColors
-                    )
+                        }
+                    }
 
-                    // Test Connection Button
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(1.dp, MaterialTheme.colorScheme.outline, fieldShape),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = fieldShape
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            ConnectionReadOnlyRow(
+                                icon = Icons.Default.Language,
+                                label = stringResource(R.string.settings_server_url_label),
+                                value = resolvedServerUrl
+                            )
+                            HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outline)
+                            ConnectionReadOnlyRow(
+                                icon = Icons.Default.Store,
+                                label = stringResource(R.string.settings_merchant_id_label),
+                                value = resolvedMerchantId.ifBlank { "—" },
+                                monospace = true
+                            )
+                            HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outline)
+                            ConnectionReadOnlyRow(
+                                icon = Icons.Default.Key,
+                                label = stringResource(R.string.settings_device_key_label),
+                                value = maskedDeviceKey,
+                                monospace = true
+                            )
+                        }
+                    }
+
+                    // Test Connection Button (read-only reachability check)
                     OutlinedButton(
                         onClick = {
                             isTestingConnection = true
                             testResult = null
-                            onTestConnection(serverUrl, merchantId, deviceKey) { success, message ->
+                            onTestConnection(resolvedServerUrl, resolvedMerchantId, resolvedDeviceKey) { success, message ->
                                 isTestingConnection = false
                                 testResult = Pair(success, message)
                             }
@@ -831,7 +844,7 @@ fun SettingsScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .heightIn(min = 48.dp),
-                        enabled = !isTestingConnection && merchantId.isNotBlank() && deviceKey.isNotBlank(),
+                        enabled = !isTestingConnection && resolvedMerchantId.isNotBlank() && resolvedDeviceKey.isNotBlank(),
                         shape = fieldShape,
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
                         colors = ButtonDefaults.outlinedButtonColors(
@@ -972,6 +985,53 @@ fun SettingsScreen(
                             colors = switchColors
                         )
                     }
+
+                    HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outline)
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .clip(fieldShape)
+                            .clickable(onClick = onOpenSetupGuide)
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(end = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.HelpOutline,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(
+                                    text = stringResource(R.string.settings_setup_guide_title),
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = stringResource(R.string.settings_setup_guide_desc),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        Icon(
+                            imageVector = Icons.Default.ChevronRight,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
             }
 
@@ -1098,7 +1158,7 @@ fun SettingsScreen(
             Button(
                 onClick = {
                     preferencesManager.extraTrustedSenders = extraTrustedSenders.trim()
-                    onSaveSettings(serverUrl, merchantId, deviceKey, enableForeground)
+                    onSaveSettings(state.serverUrl, state.merchantId, state.deviceKey, enableForeground)
                 },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1139,6 +1199,50 @@ fun SettingsScreen(
                     color = MaterialTheme.colorScheme.outlineVariant
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun ConnectionReadOnlyRow(
+    icon: ImageVector,
+    label: String,
+    value: String,
+    monospace: Boolean = false
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(18.dp)
+        )
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = value,
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontFeatureSettings = "tnum"
+                ),
+                fontFamily = if (monospace) FontFamily.Monospace else FontFamily.Default,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }

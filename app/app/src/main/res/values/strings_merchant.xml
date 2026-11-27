@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 5 Core Merchant Bottom Tabs -->
+    <string name="nav_overview">Overview</string>
+    <string name="nav_payments">Payments</string>
+    <string name="nav_links">Links</string>
+    <string name="nav_orders">Orders</string>
+    <string name="nav_sim_pool">SIM Pool</string>
+
+    <!-- Merchant Onboarding: Step 1 (How ORBIT Pay Works) -->
+    <string name="onboarding_how_title">Welcome to ORBIT Pay</string>
+    <string name="onboarding_how_subtitle">Automatic payment verification for your business</string>
+    <string name="onboarding_how_desc">You do not need any technical knowledge. Our team sets up your website connection for you — just keep this phone connected to your store SIM.</string>
+    <string name="onboarding_how_point1_title">1. Customer pays you</string>
+    <string name="onboarding_how_point1_desc">Customers send money to your bKash, Nagad, Rocket, Upay, or CellFin number from your website or a Payment Link.</string>
+    <string name="onboarding_how_point2_title">2. Phone confirms automatically</string>
+    <string name="onboarding_how_point2_desc">As soon as the payment SMS reaches your phone, ORBIT Pay checks the TrxID and exact amount in 1–2 seconds.</string>
+    <string name="onboarding_how_point3_title">3. Orders update in real time</string>
+    <string name="onboarding_how_point3_desc">Your order status is marked Paid automatically — no manual screenshot checking needed unless you choose to review.</string>
+
+    <!-- Merchant Onboarding: Step 2 (Install & Google Play Protect Hurdles) -->
+    <string name="onboarding_hurdles_title">Overcoming Android Setup Hurdles</string>
+    <string name="onboarding_hurdles_subtitle">Quick fixes if your phone blocks permissions or warnings appear</string>
+    <string name="onboarding_hurdles_desc">Because this app connects directly to your business SIM SMS, Android and Google Play Protect show extra safety prompts. Follow these 3 quick steps:</string>
+    <string name="onboarding_hurdle_play_title">Google Play Protect warning</string>
+    <string name="onboarding_hurdle_play_desc">If you see "Blocked by Play Protect" or "Unsafe app" while installing or updating, tap "More details" and then tap "Install anyway". This is normal for private business companion apps.</string>
+    <string name="onboarding_hurdle_restricted_title">"Restricted setting" on Android 13 / 14 / 15</string>
+    <string name="onboarding_hurdle_restricted_desc">If Notification Access looks greyed out, tap "Open App Info" below -> tap the 3 dots in the top-right corner -> tap "Allow restricted settings" -> verify with your phone PIN or fingerprint.</string>
+    <string name="onboarding_hurdle_battery_title">Phone sleeping in the background</string>
+    <string name="onboarding_hurdle_battery_desc">Xiaomi, Oppo, Vivo, Realme, and Samsung phones pause background apps to save battery. Tap "Battery Unrestricted" below so customer payments are never delayed.</string>
+    <string name="onboarding_btn_app_info">Open App Info</string>
+    <string name="onboarding_btn_battery">Battery Unrestricted</string>
+    <string name="onboarding_btn_notif_access">Notification Access</string>
+
+    <!-- Merchant Onboarding: Step 3 (Permissions & Why) -->
+    <string name="onboarding_perms_title">Permissions &amp; Why We Need Them</string>
+    <string name="onboarding_perms_subtitle">Only what is needed to verify customer payments</string>
+    <string name="onboarding_perms_desc">ORBIT Pay respects your privacy. Personal chats, photos, contacts, and OTP codes are never uploaded.</string>
+    <string name="onboarding_perm_sms_title">Read &amp; Receive SMS</string>
+    <string name="onboarding_perm_sms_reason">Reads only official bKash, Nagad, Rocket, Upay, and CellFin payment confirmation SMS so customer orders confirm automatically.</string>
+    <string name="onboarding_perm_listener_title">Notification Access</string>
+    <string name="onboarding_perm_listener_reason">Instant backup check from bKash or Nagad app notifications if your mobile operator delays an SMS.</string>
+    <string name="onboarding_perm_sim_title">SIM Info &amp; Alerts</string>
+    <string name="onboarding_perm_sim_reason">Identifies which SIM received the payment (for monthly SIM limits) and sends you instant phone alerts when a payment needs review.</string>
+    <string name="onboarding_perm_battery_title">Unrestricted Background Battery</string>
+    <string name="onboarding_perm_battery_reason">Keeps payment checking running smoothly 24/7, even when your phone screen is locked.</string>
+    <string name="onboarding_perm_allowed">Allowed</string>
+    <string name="onboarding_perm_needed">Tap below</string>
+
+    <!-- Onboarding Step 4 Widget -->
+    <string name="onboarding_widget_title">Home Screen Waiting Payments Widget</string>
+    <string name="onboarding_widget_desc">Add the ORBIT Pay widget to your phone home screen to see payments waiting for verification at a glance without opening the app.</string>
+    <string name="widget_pin_button">Add Widget to Home Screen</string>
+    <string name="widget_pin_added">Widget request sent to home screen</string>
+
+    <!-- Home Screen AppWidget & Overview Live Widget Card -->
+    <string name="widget_pending_title">Waiting for Verification</string>
+    <string name="widget_pending_description">Live count and quick review of customer payments awaiting verification</string>
+    <string name="widget_pending_count_badge">%1$d pending</string>
+    <string name="widget_pending_empty_title">All payments verified</string>
+    <string name="widget_pending_empty_desc">No customer payments are waiting right now</string>
+    <string name="widget_pending_tap_hint">Tap any payment to review &amp; confirm</string>
+    <string name="dashboard_waiting_widget_title">Waiting for Verification</string>
+    <string name="dashboard_waiting_widget_subtitle">Payments needing your quick check</string>
+    <string name="dashboard_waiting_widget_empty">All caught up — no payments are waiting for verification right now.</string>
+    <string name="dashboard_waiting_widget_approve">Approve</string>
+    <string name="dashboard_waiting_widget_pin">Pin Widget to Home Screen</string>
+
+    <!-- Payment Links Screen -->
+    <string name="links_title">Payment Links</string>
+    <string name="links_subtitle">Create &amp; share payment links with customers</string>
+    <string name="links_create_button">New Payment Link</string>
+    <string name="links_copied_message">Payment link copied</string>
+    <string name="links_share_chooser">Share payment link</string>
+    <string name="links_delete_title">Delete payment link?</string>
+    <string name="links_delete_body">Remove "%1$s"? Customers will no longer be able to pay through this link.</string>
+    <string name="links_delete_confirm">Delete</string>
+    <string name="links_fixed_amount">Fixed amount</string>
+    <string name="links_open_amount_min">From %1$s</string>
+    <string name="links_open_amount">Customer enters amount</string>
+    <string name="links_status_active">Active</string>
+    <string name="links_status_paused">Paused</string>
+    <string name="links_used_count">%1$d paid</string>
+    <string name="links_copy">Copy Link</string>
+    <string name="links_share">Share</string>
+    <string name="links_empty_title">No payment links yet</string>
+    <string name="links_empty_desc">Create a payment link to collect bKash or Nagad payments on Facebook, WhatsApp, or SMS without a website.</string>
+    <string name="links_create_title">Create Payment Link</string>
+    <string name="links_field_title">What is this payment for?</string>
+    <string name="links_field_title_hint">e.g. Advance Booking or Product Order</string>
+    <string name="links_field_desc">Short note for customer (optional)</string>
+    <string name="links_field_desc_hint">e.g. Delivery within 24 hours</string>
+    <string name="links_type_fixed">Fixed Price</string>
+    <string name="links_type_open">Customer Chooses</string>
+    <string name="links_field_amount">Amount (BDT)</string>
+    <string name="links_field_min">Min (BDT)</string>
+    <string name="links_field_max">Max (optional)</string>
+    <string name="links_error_title_required">Please enter a title (at least 2 characters).</string>
+    <string name="links_error_amount_required">Please enter a valid amount greater than 0.</string>
+    <string name="links_create_submit">Create Link</string>
+
+    <!-- Orders & COD Sync Screen -->
+    <string name="orders_screen_title">Orders &amp; COD Sync</string>
+    <string name="orders_screen_subtitle">Confirm, pack, ship &amp; mark Cash-on-Delivery paid</string>
+    <string name="orders_filter_all">All (%1$d)</string>
+    <string name="orders_filter_active">Needs Action</string>
+    <string name="orders_filter_cod">COD Only</string>
+
+    <!-- SIM Pool & Limits Screen -->
+    <string name="sim_pool_title">SIM Pool &amp; Limits</string>
+    <string name="sim_pool_subtitle">Manage your payment SIMs &amp; monthly safety limits</string>
+    <string name="sim_pool_add_button">Add SIM Number</string>
+    <string name="sim_pool_delete_title">Remove SIM number?</string>
+    <string name="sim_pool_delete_body">Remove %1$s from your active payment pool?</string>
+    <string name="sim_pool_delete_confirm">Remove</string>
+    <string name="sim_pool_summary_heading">Automatic SIM Limit Protection</string>
+    <string name="sim_pool_active_count">%1$d active</string>
+    <string name="sim_pool_summary_desc">ORBIT balances incoming payments across your active SIMs so no personal number crosses the ৳2.5L safe / ৳3.0L monthly limit.</string>
+    <string name="sim_pool_primary_badge">Primary</string>
+    <string name="sim_pool_used_this_month">Used: %1$s</string>
+    <string name="sim_pool_limit_pair">%1$s safe / %2$s max</string>
+    <string name="sim_pool_is_primary">Primary SIM</string>
+    <string name="sim_pool_make_primary">Set as Primary</string>
+    <string name="sim_pool_empty_title">No SIM numbers added</string>
+    <string name="sim_pool_empty_desc">Add your bKash, Nagad, Rocket, Upay, or CellFin SIM numbers so customers know where to pay.</string>
+    <string name="sim_pool_add_title">Add Payment SIM</string>
+    <string name="sim_pool_field_provider">Select Wallet / MFS</string>
+    <string name="sim_pool_field_label">Label (optional, e.g. Shop Counter)</string>
+    <string name="sim_pool_add_submit">Add SIM</string>
+</resources>

@@ -124,6 +124,7 @@ export function WalletManager() {
   };
 
   const handleToggleActive = (id: string, currentStatus: boolean) => {
+    if (toggleMutation.isPending) return;
     toggleMutation.mutate(
       { id, isActive: !currentStatus },
       {
@@ -138,6 +139,7 @@ export function WalletManager() {
   };
 
   const handleSetPrimary = (wallet: Wallet) => {
+    if (setPrimaryMutation.isPending) return;
     const metaName = MFS_METADATA[wallet.provider]?.name ?? wallet.provider;
     setPrimaryMutation.mutate(wallet.id, {
       onSuccess: () => {
@@ -153,6 +155,7 @@ export function WalletManager() {
   };
 
   const handleConfirmDelete = (wallet: Wallet) => {
+    if (deleteMutation.isPending) return;
     const metaName = MFS_METADATA[wallet.provider]?.name ?? wallet.provider;
     deleteMutation.mutate(wallet.id, {
       onSuccess: () => {

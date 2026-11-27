@@ -1,7 +1,9 @@
 package com.orbitsaas.payment.ui
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
@@ -28,13 +30,17 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.BatteryAlert
+import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Message
-import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.VerifiedUser
+import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -46,8 +52,10 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -59,23 +67,63 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.orbitsaas.payment.R
+import com.orbitsaas.payment.ui.components.StatusPill
 import com.orbitsaas.payment.ui.theme.OrbitSemanticColors
+import com.orbitsaas.payment.ui.theme.StatusAmberBg
+import com.orbitsaas.payment.ui.theme.StatusGreenBg
+import com.orbitsaas.payment.widget.PendingPaymentsWidgetProvider
 
-private const val TOTAL_ONBOARDING_STEPS = 5
+private const val TOTAL_ONBOARDING_STEPS = 4
 
 @Composable
 fun OnboardingScreen(
     onComplete: () -> Unit
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     var currentStep by remember { mutableIntStateOf(1) }
+    var refreshTick by remember { mutableIntStateOf(0) }
+    var widgetPinRequested by remember { mutableStateOf(false) }
 
-    // Multi-permission launcher for SMS & Notifications
     val permissionsLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) {
-        if (currentStep == 1) currentStep = 2
+        refreshTick++
+    }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                refreshTick++
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    val smsGranted = remember(refreshTick) {
+        ContextCompat.checkSelfPermission(context, Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED
+    }
+    val phoneGranted = remember(refreshTick) {
+        ContextCompat.checkSelfPermission(context, Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED
+    }
+    val notifGranted = remember(refreshTick) {
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+    }
+    val listenerGranted = remember(refreshTick) {
+        NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
+    }
+    val batteryExempt = remember(refreshTick) {
+        val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+        pm?.isIgnoringBatteryOptimizations(context.packageName) == true
     }
 
     Scaffold(
@@ -89,7 +137,6 @@ fun OnboardingScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // Header: Step Progress Bars
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -100,7 +147,8 @@ fun OnboardingScreen(
                         text = stringResource(R.string.onboarding_title),
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onBackground
+                        color = MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.weight(1f)
                     )
                     Text(
                         text = stringResource(
@@ -138,56 +186,76 @@ fun OnboardingScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
-            // Step Content
             AnimatedContent(targetState = currentStep, label = "OnboardingStep") { step ->
                 when (step) {
-                    1 -> StepSmsPermissions(
-                        onRequestPermissions = {
-                            val perms = mutableListOf(
-                                android.Manifest.permission.RECEIVE_SMS,
-                                android.Manifest.permission.READ_SMS
-                            )
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                perms.add(android.Manifest.permission.POST_NOTIFICATIONS)
-                            }
-                            permissionsLauncher.launch(perms.toTypedArray())
-                        }
-                    )
-                    2 -> StepNotificationAccess(
-                        onOpenSettings = {
-                            context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-                        }
-                    )
-                    3 -> StepBatteryExemption(
-                        onOpenBattery = {
-                            val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
-                                !powerManager.isIgnoringBatteryOptimizations(context.packageName)
-                            ) {
-                                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                                    data = Uri.parse("package:${context.packageName}")
-                                }
-                                context.startActivity(intent)
-                            }
-                        }
-                    )
-                    4 -> StepRestrictedSettings(
+                    1 -> StepHowOrbitWorks()
+                    2 -> StepInstallHurdlesGuide(
                         onOpenAppInfo = {
                             val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                                 data = Uri.parse("package:${context.packageName}")
                             }
-                            context.startActivity(intent)
+                            runCatching { context.startActivity(intent) }
+                        },
+                        onOpenBattery = {
+                            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                                data = Uri.parse("package:${context.packageName}")
+                            }
+                            runCatching { context.startActivity(intent) }
+                                .onFailure {
+                                    runCatching {
+                                        context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                                    }
+                                }
                         }
                     )
-                    5 -> StepSpoofProtectionAndReadSms()
+                    3 -> StepPermissionsWhyWeNeed(
+                        smsGranted = smsGranted,
+                        phoneGranted = phoneGranted,
+                        notifGranted = notifGranted,
+                        listenerGranted = listenerGranted,
+                        batteryExempt = batteryExempt,
+                        onGrantRuntimePermissions = {
+                            val perms = mutableListOf(
+                                Manifest.permission.RECEIVE_SMS,
+                                Manifest.permission.READ_SMS,
+                                Manifest.permission.READ_PHONE_STATE
+                            )
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                perms.add(Manifest.permission.READ_PHONE_NUMBERS)
+                            }
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                perms.add(Manifest.permission.POST_NOTIFICATIONS)
+                            }
+                            permissionsLauncher.launch(perms.toTypedArray())
+                        },
+                        onOpenListenerSettings = {
+                            runCatching {
+                                context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                            }
+                        },
+                        onOpenBatterySettings = {
+                            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                                data = Uri.parse("package:${context.packageName}")
+                            }
+                            runCatching { context.startActivity(intent) }
+                        }
+                    )
+                    else -> StepSafetyAndWidgetReady(
+                        canPinWidget = PendingPaymentsWidgetProvider.canRequestPin(context),
+                        widgetPinRequested = widgetPinRequested,
+                        onPinWidget = {
+                            if (PendingPaymentsWidgetProvider.requestPinWidget(context)) {
+                                widgetPinRequested = true
+                            }
+                        }
+                    )
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
-            // Footer Navigation Buttons
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -256,159 +324,203 @@ fun OnboardingScreen(
 }
 
 @Composable
-fun StepSmsPermissions(onRequestPermissions: () -> Unit) {
+private fun StepHowOrbitWorks() {
     StepCard(
-        icon = Icons.Default.Message,
-        title = stringResource(R.string.onboarding_step1_title),
-        subtitle = stringResource(R.string.onboarding_step1_subtitle),
-        description = stringResource(R.string.onboarding_step1_desc)
+        icon = Icons.Default.Storefront,
+        title = stringResource(R.string.onboarding_how_title),
+        subtitle = stringResource(R.string.onboarding_how_subtitle),
+        description = stringResource(R.string.onboarding_how_desc)
     ) {
-        Button(
-            onClick = onRequestPermissions,
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 48.dp),
-            shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            InfoBulletCard(
+                number = "1",
+                title = stringResource(R.string.onboarding_how_point1_title),
+                body = stringResource(R.string.onboarding_how_point1_desc)
             )
-        ) {
-            Text(
-                text = stringResource(R.string.onboarding_step1_action),
-                style = MaterialTheme.typography.labelLarge
+            InfoBulletCard(
+                number = "2",
+                title = stringResource(R.string.onboarding_how_point2_title),
+                body = stringResource(R.string.onboarding_how_point2_desc)
+            )
+            InfoBulletCard(
+                number = "3",
+                title = stringResource(R.string.onboarding_how_point3_title),
+                body = stringResource(R.string.onboarding_how_point3_desc)
             )
         }
     }
 }
 
 @Composable
-fun StepNotificationAccess(onOpenSettings: () -> Unit) {
-    StepCard(
-        icon = Icons.Default.Notifications,
-        title = stringResource(R.string.onboarding_step2_title),
-        subtitle = stringResource(R.string.onboarding_step2_subtitle),
-        description = stringResource(R.string.onboarding_step2_desc)
-    ) {
-        Button(
-            onClick = onOpenSettings,
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 48.dp),
-            shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary
-            )
-        ) {
-            Text(
-                text = stringResource(R.string.onboarding_step2_action),
-                style = MaterialTheme.typography.labelLarge
-            )
-        }
-    }
-}
-
-@Composable
-fun StepBatteryExemption(onOpenBattery: () -> Unit) {
-    StepCard(
-        icon = Icons.Default.BatteryAlert,
-        title = stringResource(R.string.onboarding_step3_title),
-        subtitle = stringResource(R.string.onboarding_step3_subtitle),
-        description = stringResource(R.string.onboarding_step3_desc)
-    ) {
-        Button(
-            onClick = onOpenBattery,
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 48.dp),
-            shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary
-            )
-        ) {
-            Text(
-                text = stringResource(R.string.onboarding_step3_action),
-                style = MaterialTheme.typography.labelLarge
-            )
-        }
-    }
-}
-
-@Composable
-fun StepRestrictedSettings(onOpenAppInfo: () -> Unit) {
+private fun StepInstallHurdlesGuide(
+    onOpenAppInfo: () -> Unit,
+    onOpenBattery: () -> Unit
+) {
     StepCard(
         icon = Icons.Default.Security,
-        title = stringResource(R.string.onboarding_step4_title),
-        subtitle = stringResource(R.string.onboarding_step4_subtitle),
-        description = stringResource(R.string.onboarding_step4_desc)
+        title = stringResource(R.string.onboarding_hurdles_title),
+        subtitle = stringResource(R.string.onboarding_hurdles_subtitle),
+        description = stringResource(R.string.onboarding_hurdles_desc)
     ) {
-        Button(
-            onClick = onOpenAppInfo,
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 48.dp),
-            shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            InfoBulletCard(
+                number = "1",
+                title = stringResource(R.string.onboarding_hurdle_play_title),
+                body = stringResource(R.string.onboarding_hurdle_play_desc)
             )
-        ) {
-            Text(
-                text = stringResource(R.string.onboarding_step4_action),
-                style = MaterialTheme.typography.labelLarge
+            InfoBulletCard(
+                number = "2",
+                title = stringResource(R.string.onboarding_hurdle_restricted_title),
+                body = stringResource(R.string.onboarding_hurdle_restricted_desc)
             )
+            InfoBulletCard(
+                number = "3",
+                title = stringResource(R.string.onboarding_hurdle_battery_title),
+                body = stringResource(R.string.onboarding_hurdle_battery_desc)
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onOpenAppInfo,
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                ) {
+                    Text(
+                        text = stringResource(R.string.onboarding_btn_app_info),
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                }
+                Button(
+                    onClick = onOpenBattery,
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 48.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(
+                        text = stringResource(R.string.onboarding_btn_battery),
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                }
+            }
         }
     }
 }
 
 @Composable
-fun StepSpoofProtectionAndReadSms() {
-    val greenFg = OrbitSemanticColors.statusGreen
+private fun StepPermissionsWhyWeNeed(
+    smsGranted: Boolean,
+    phoneGranted: Boolean,
+    notifGranted: Boolean,
+    listenerGranted: Boolean,
+    batteryExempt: Boolean,
+    onGrantRuntimePermissions: () -> Unit,
+    onOpenListenerSettings: () -> Unit,
+    onOpenBatterySettings: () -> Unit
+) {
     StepCard(
         icon = Icons.Default.VerifiedUser,
+        title = stringResource(R.string.onboarding_perms_title),
+        subtitle = stringResource(R.string.onboarding_perms_subtitle),
+        description = stringResource(R.string.onboarding_perms_desc)
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            PermissionReasonRow(
+                icon = Icons.Default.Message,
+                title = stringResource(R.string.onboarding_perm_sms_title),
+                reason = stringResource(R.string.onboarding_perm_sms_reason),
+                granted = smsGranted
+            )
+            PermissionReasonRow(
+                icon = Icons.Default.NotificationsActive,
+                title = stringResource(R.string.onboarding_perm_listener_title),
+                reason = stringResource(R.string.onboarding_perm_listener_reason),
+                granted = listenerGranted
+            )
+            PermissionReasonRow(
+                icon = Icons.Default.PhoneAndroid,
+                title = stringResource(R.string.onboarding_perm_sim_title),
+                reason = stringResource(R.string.onboarding_perm_sim_reason),
+                granted = phoneGranted && notifGranted
+            )
+            PermissionReasonRow(
+                icon = Icons.Default.BatteryChargingFull,
+                title = stringResource(R.string.onboarding_perm_battery_title),
+                reason = stringResource(R.string.onboarding_perm_battery_reason),
+                granted = batteryExempt
+            )
+
+            Spacer(modifier = Modifier.height(2.dp))
+
+            Button(
+                onClick = onGrantRuntimePermissions,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text(stringResource(R.string.onboarding_step1_action))
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onOpenListenerSettings,
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                ) {
+                    Text(stringResource(R.string.onboarding_btn_notif_access))
+                }
+                OutlinedButton(
+                    onClick = onOpenBatterySettings,
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                ) {
+                    Text(stringResource(R.string.onboarding_btn_battery))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StepSafetyAndWidgetReady(
+    canPinWidget: Boolean,
+    widgetPinRequested: Boolean,
+    onPinWidget: () -> Unit
+) {
+    val greenFg = OrbitSemanticColors.statusGreen
+    StepCard(
+        icon = Icons.Default.CheckCircle,
         title = stringResource(R.string.onboarding_step5_title),
         subtitle = stringResource(R.string.onboarding_step5_subtitle),
         description = stringResource(R.string.onboarding_step5_desc)
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp)),
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.Top
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.VerifiedUser,
-                        contentDescription = null,
-                        tint = greenFg,
-                        modifier = Modifier
-                            .padding(top = 2.dp)
-                            .size(20.dp)
-                    )
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(
-                            text = stringResource(R.string.onboarding_step5_spoof_title),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = stringResource(R.string.onboarding_step5_spoof_desc),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            lineHeight = 20.sp
-                        )
-                    }
-                }
-            }
+            InfoBulletCard(
+                number = "✓",
+                title = stringResource(R.string.onboarding_step5_spoof_title),
+                body = stringResource(R.string.onboarding_step5_spoof_desc)
+            )
+            InfoBulletCard(
+                number = "✓",
+                title = stringResource(R.string.onboarding_step5_readsms_title),
+                body = stringResource(R.string.onboarding_step5_readsms_desc)
+            )
 
             Surface(
                 modifier = Modifier
@@ -417,34 +529,166 @@ fun StepSpoofProtectionAndReadSms() {
                 color = MaterialTheme.colorScheme.surfaceVariant,
                 shape = RoundedCornerShape(12.dp)
             ) {
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.Top
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Message,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier
-                            .padding(top = 2.dp)
-                            .size(20.dp)
-                    )
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(
-                            text = stringResource(R.string.onboarding_step5_readsms_title),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Widgets,
+                            contentDescription = null,
+                            tint = greenFg,
+                            modifier = Modifier.size(20.dp)
                         )
                         Text(
-                            text = stringResource(R.string.onboarding_step5_readsms_desc),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            lineHeight = 20.sp
+                            text = stringResource(R.string.onboarding_widget_title),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold
                         )
                     }
+                    Text(
+                        text = stringResource(R.string.onboarding_widget_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (canPinWidget) {
+                        OutlinedButton(
+                            onClick = onPinWidget,
+                            enabled = !widgetPinRequested,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 48.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                        ) {
+                            Text(
+                                text = if (widgetPinRequested) {
+                                    stringResource(R.string.widget_pin_added)
+                                } else {
+                                    stringResource(R.string.widget_pin_button)
+                                }
+                            )
+                        }
+                    }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun InfoBulletCard(
+    number: String,
+    title: String,
+    body: String
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp)),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(26.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surface)
+                    .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = number,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = body,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 18.sp
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PermissionReasonRow(
+    icon: ImageVector,
+    title: String,
+    reason: String,
+    granted: Boolean
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp)),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .padding(top = 2.dp)
+                    .size(20.dp)
+            )
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f)
+                    )
+                    StatusPill(
+                        label = if (granted) {
+                            stringResource(R.string.onboarding_perm_allowed)
+                        } else {
+                            stringResource(R.string.onboarding_perm_needed)
+                        },
+                        foreground = if (granted) OrbitSemanticColors.statusGreen else OrbitSemanticColors.statusAmber,
+                        background = if (granted) StatusGreenBg else StatusAmberBg
+                    )
+                }
+                Text(
+                    text = reason,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 18.sp
+                )
             }
         }
     }
@@ -469,12 +713,12 @@ fun StepCard(
         shape = cardShape
     ) {
         Column(
-            modifier = Modifier.padding(24.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Box(
                 modifier = Modifier
-                    .size(48.dp)
+                    .size(44.dp)
                     .clip(CircleShape)
                     .background(MaterialTheme.colorScheme.surfaceVariant)
                     .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape),
@@ -484,7 +728,7 @@ fun StepCard(
                     imageVector = icon,
                     contentDescription = stringResource(R.string.cd_onboarding_step_icon),
                     tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size(22.dp)
                 )
             }
 

@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 5 Core Merchant Bottom Tabs -->
+    <string name="nav_overview">ওভারভিউ</string>
+    <string name="nav_payments">পেমেন্ট</string>
+    <string name="nav_links">লিংক</string>
+    <string name="nav_orders">অর্ডার</string>
+    <string name="nav_sim_pool">সিম পুল</string>
+
+    <!-- Merchant Onboarding: Step 1 (How ORBIT Pay Works) -->
+    <string name="onboarding_how_title">ORBIT Pay-তে স্বাগতম</string>
+    <string name="onboarding_how_subtitle">আপনার ব্যবসার জন্য স্বয়ংক্রিয় পেমেন্ট যাচাই ব্যবস্থা</string>
+    <string name="onboarding_how_desc">এটি ব্যবহার করতে কোনো টেকনিক্যাল বা ডেভেলপার জ্ঞানের দরকার নেই। আপনার ওয়েবসাইট ও পেমেন্ট সংযোগ আমাদের টিমই সেটআপ করে দেবে — আপনি শুধু ফোনে লগইন করে সিম চালু রাখবেন।</string>
+    <string name="onboarding_how_point1_title">১. গ্রাহক টাকা পাঠাবেন</string>
+    <string name="onboarding_how_point1_desc">গ্রাহক আপনার ওয়েবসাইট বা পেমেন্ট লিংকের মাধ্যমে আপনার বিকাশ, নগদ, রকেট, উপায় বা সেলফিন নম্বরে পেমেন্ট করবেন।</string>
+    <string name="onboarding_how_point2_title">২. ফোন সাথে সাথে যাচাই করবে</string>
+    <string name="onboarding_how_point2_desc">আপনার ফোনে পেমেন্ট SMS আসার ১–২ সেকেন্ডের মধ্যেই ORBIT Pay স্বয়ংক্রিয়ভাবে TrxID ও টাকার পরিমাণ মিলিয়ে নেবে।</string>
+    <string name="onboarding_how_point3_title">৩. অর্ডার সাথে সাথে কনফার্ম হবে</string>
+    <string name="onboarding_how_point3_desc">পেমেন্ট মিললে অর্ডার নিজে থেকেই পরিশোধিত (Paid) হয়ে যাবে — বারবার স্ক্রিনশট বা ফোন চেক করার ঝামেলা নেই।</string>
+
+    <!-- Merchant Onboarding: Step 2 (Install & Google Play Protect Hurdles) -->
+    <string name="onboarding_hurdles_title">ইনস্টল ও ফোনের বাধা সমাধান</string>
+    <string name="onboarding_hurdles_subtitle">Google Play Protect বা ফোনের সেটিংস বাধা দিলে যা করবেন</string>
+    <string name="onboarding_hurdles_desc">এই অ্যাপটি সরাসরি আপনার ব্যবসার সিমের পেমেন্ট মেসেজ যাচাই করে, তাই অ্যান্ড্রয়েড ও Google Play Protect কিছু নিরাপত্তা সতর্কতা দেখাতে পারে। নিচের সহজ ৩টি ধাপ অনুসরণ করুন:</string>
+    <string name="onboarding_hurdle_play_title">Google Play Protect সতর্কতা এলে</string>
+    <string name="onboarding_hurdle_play_desc">ইনস্টল বা আপডেটের সময় "Blocked by Play Protect" বা "Unsafe app" দেখালে প্রথমে "More details"-এ চাপ দিন, তারপর "Install anyway" বাটনে চাপ দিন। ব্যবসার নিজস্ব অ্যাপের ক্ষেত্রে এটি স্বাভাবিক।</string>
+    <string name="onboarding_hurdle_restricted_title">অ্যান্ড্রয়েড ১৩/১৪/১৫-এ "Restricted setting" সমাধান</string>
+    <string name="onboarding_hurdle_restricted_desc">Notification Access অপশনটি বন্ধ বা ধূসর দেখালে নিচের "অ্যাপ তথ্য খুলুন" বোতামে চাপ দিন -> উপরের ডানদিকের ৩-ডট (⋮) মেনুতে চাপ দিন -> "Allow restricted settings" নির্বাচন করে ফোনের পিন বা ফিঙ্গারপ্রিন্ট দিন।</string>
+    <string name="onboarding_hurdle_battery_title">ফোন লক থাকলে অ্যাপ বন্ধ হয়ে যাওয়া</string>
+    <string name="onboarding_hurdle_battery_desc">Xiaomi, Oppo, Vivo, Realme বা Samsung ফোন ব্যাটারি বাঁচাতে ব্যাকগ্রাউন্ড অ্যাপ বন্ধ করে দেয়। নিচের "ব্যাটারি অপটিমাইজেশন" বাটনে চাপ দিয়ে Unrestricted করে দিন যেন পেমেন্ট যাচাই কখনো না থামে।</string>
+    <string name="onboarding_btn_app_info">অ্যাপ তথ্য খুলুন</string>
+    <string name="onboarding_btn_battery">ব্যাটারি সেভার ছাড় দিন</string>
+    <string name="onboarding_btn_notif_access">নোটিফিকেশন অ্যাক্সেস</string>
+
+    <!-- Merchant Onboarding: Step 3 (Permissions & Why) -->
+    <string name="onboarding_perms_title">কোন অনুমতি কেন নেওয়া হচ্ছে</string>
+    <string name="onboarding_perms_subtitle">শুধু ব্যবসার পেমেন্ট যাচাই করার জন্য প্রয়োজনীয় অনুমতি</string>
+    <string name="onboarding_perms_desc">ORBIT Pay আপনার গোপনীয়তাকে সর্বোচ্চ গুরুত্ব দেয়। আপনার ব্যক্তিগত চ্যাট, ছবি, কন্টাক্ট বা ব্যাংক OTP কখনোই সার্ভারে পাঠানো হয় না।</string>
+    <string name="onboarding_perm_sms_title">SMS পড়া ও গ্রহণের অনুমতি</string>
+    <string name="onboarding_perm_sms_reason">শুধুমাত্র বিকাশ, নগদ, রকেট, উপায় ও সেলফিনের অফিশিয়াল টাকা আসার SMS পড়ে গ্রাহকের অর্ডার সাথে সাথে কনফার্ম করার জন্য।</string>
+    <string name="onboarding_perm_listener_title">নোটিফিকেশন অ্যাক্সেস</string>
+    <string name="onboarding_perm_listener_reason">মোবাইল নেটওয়ার্কের কারণে SMS আসতে দেরি হলে বিকাশ/নগদ অ্যাপের নোটিফিকেশন থেকেই তাৎক্ষণিক পেমেন্ট যাচাই করার বিকল্প ব্যবস্থা।</string>
+    <string name="onboarding_perm_sim_title">সিম তথ্য ও পেমেন্ট অ্যালার্ট</string>
+    <string name="onboarding_perm_sim_reason">কোন সিমে টাকা এসেছে তা চিনে মাসিক লিমিট ঠিক রাখতে এবং কোনো পেমেন্ট অনুমোদনের বাকি থাকলে সাথে সাথে আপনাকে অ্যালার্ট পাঠাতে।</string>
+    <string name="onboarding_perm_battery_title">ব্যাটারি ছাড় (২৪/৭ চালু থাকা)</string>
+    <string name="onboarding_perm_battery_reason">ফোনের স্ক্রিন বন্ধ বা লক থাকলেও যেন গ্রাহকের পেমেন্ট ২৪ ঘণ্টা নির্বিঘ্নে যাচাই হতে থাকে।</string>
+    <string name="onboarding_perm_allowed">অনুমোদিত</string>
+    <string name="onboarding_perm_needed">অনুমতি দিন</string>
+
+    <!-- Onboarding Step 4 Widget -->
+    <string name="onboarding_widget_title">হোম স্ক্রিন পেন্ডিং পেমেন্ট উইজেট</string>
+    <string name="onboarding_widget_desc">অ্যাপ না খুলেই ফোনের হোম স্ক্রিনে সরাসরি দেখতে পারবেন কয়টি পেমেন্ট আপনার কনফার্মেশনের অপেক্ষায় আছে।</string>
+    <string name="widget_pin_button">হোম স্ক্রিনে উইজেট যোগ করুন</string>
+    <string name="widget_pin_added">হোম স্ক্রিনে উইজেট পাঠানোর অনুরোধ করা হয়েছে</string>
+
+    <!-- Home Screen AppWidget & Overview Live Widget Card -->
+    <string name="widget_pending_title">যাচাইয়ের অপেক্ষায়</string>
+    <string name="widget_pending_description">যাচাই বা অনুমোদনের অপেক্ষায় থাকা পেমেন্টগুলো ফোনের হোম স্ক্রিন থেকে এক নজরে দেখুন</string>
+    <string name="widget_pending_count_badge">%1$dটি বাকি</string>
+    <string name="widget_pending_empty_title">সব পেমেন্ট যাচাই সম্পন্ন</string>
+    <string name="widget_pending_empty_desc">এই মুহূর্তে কোনো পেমেন্ট অপেক্ষায় নেই</string>
+    <string name="widget_pending_tap_hint">যাচাই করতে যেকোনো পেমেন্টে ট্যাপ করুন</string>
+    <string name="dashboard_waiting_widget_title">যাচাইয়ের অপেক্ষায় থাকা পেমেন্ট</string>
+    <string name="dashboard_waiting_widget_subtitle">যে পেমেন্টগুলোতে আপনার দ্রুত অনুমোদন প্রয়োজন</string>
+    <string name="dashboard_waiting_widget_empty">দারুণ! এই মুহূর্তে কোনো পেমেন্ট যাচাইয়ের অপেক্ষায় নেই।</string>
+    <string name="dashboard_waiting_widget_approve">অনুমোদন</string>
+    <string name="dashboard_waiting_widget_pin">হোম স্ক্রিনে উইজেট রাখুন</string>
+
+    <!-- Payment Links Screen -->
+    <string name="links_title">পেমেন্ট লিংক</string>
+    <string name="links_subtitle">গ্রাহকের কাছ থেকে সহজে টাকা নিতে লিংক তৈরি ও শেয়ার করুন</string>
+    <string name="links_create_button">নতুন পেমেন্ট লিংক</string>
+    <string name="links_copied_message">পেমেন্ট লিংক কপি হয়েছে</string>
+    <string name="links_share_chooser">পেমেন্ট লিংক শেয়ার করুন</string>
+    <string name="links_delete_title">পেমেন্ট লিংক মুছে ফেলবেন?</string>
+    <string name="links_delete_body">"%1$s" লিংকটি মুছে ফেলবেন? এরপর গ্রাহকরা এই লিংক দিয়ে আর পেমেন্ট করতে পারবেন না।</string>
+    <string name="links_delete_confirm">মুছে ফেলুন</string>
+    <string name="links_fixed_amount">নির্দিষ্ট টাকা</string>
+    <string name="links_open_amount_min">সর্বনিম্ন %1$s</string>
+    <string name="links_open_amount">গ্রাহক পরিমাণ লিখবেন</string>
+    <string name="links_status_active">চালু</string>
+    <string name="links_status_paused">বিরতি</string>
+    <string name="links_used_count">%1$d বার পরিশোধিত</string>
+    <string name="links_copy">লিংক কপি</string>
+    <string name="links_share">শেয়ার</string>
+    <string name="links_empty_title">এখনো কোনো পেমেন্ট লিংক নেই</string>
+    <string name="links_empty_desc">ওয়েবসাইট ছাড়াই Facebook, WhatsApp বা মেসেজে বিকাশ/নগদ পেমেন্ট নিতে একটি পেমেন্ট লিংক তৈরি করুন।</string>
+    <string name="links_create_title">নতুন পেমেন্ট লিংক তৈরি করুন</string>
+    <string name="links_field_title">কিসের জন্য পেমেন্ট?</string>
+    <string name="links_field_title_hint">যেমন: অ্যাডভান্স বুকিং বা পণ্যের মূল্য</string>
+    <string name="links_field_desc">গ্রাহকের জন্য সংক্ষিপ্ত নোট (ঐচ্ছিক)</string>
+    <string name="links_field_desc_hint">যেমন: ২৪ ঘণ্টার মধ্যে ডেলিভারি</string>
+    <string name="links_type_fixed">নির্দিষ্ট টাকা</string>
+    <string name="links_type_open">গ্রাহক লিখবেন</string>
+    <string name="links_field_amount">টাকার পরিমাণ (BDT)</string>
+    <string name="links_field_min">সর্বনিম্ন (BDT)</string>
+    <string name="links_field_max">সর্বোচ্চ (ঐচ্ছিক)</string>
+    <string name="links_error_title_required">অনুগ্রহ করে অন্তত ২ অক্ষরের একটি নাম লিখুন।</string>
+    <string name="links_error_amount_required">০-এর বেশি সঠিক টাকার পরিমাণ লিখুন।</string>
+    <string name="links_create_submit">লিংক তৈরি করুন</string>
+
+    <!-- Orders & COD Sync Screen -->
+    <string name="orders_screen_title">অর্ডার ও COD</string>
+    <string name="orders_screen_subtitle">অর্ডার কনফার্ম, শিপমেন্ট এবং ক্যাশ-অন-ডেলিভারি পরিচালনা করুন</string>
+    <string name="orders_filter_all">সব (%1$d)</string>
+    <string name="orders_filter_active">করণীয় আছে</string>
+    <string name="orders_filter_cod">শুধু COD</string>
+
+    <!-- SIM Pool & Limits Screen -->
+    <string name="sim_pool_title">সিম পুল ও লিমিট</string>
+    <string name="sim_pool_subtitle">আপনার পেমেন্ট সিম ও মাসিক নিরাপত্তা সীমা দেখুন ও নিয়ন্ত্রণ করুন</string>
+    <string name="sim_pool_add_button">নতুন সিম যোগ করুন</string>
+    <string name="sim_pool_delete_title">সিম নম্বরটি সরিয়ে ফেলবেন?</string>
+    <string name="sim_pool_delete_body">%1$s নম্বরটি আপনার সক্রিয় পেমেন্ট তালিকা থেকে সরাতে চান?</string>
+    <string name="sim_pool_delete_confirm">সরিয়ে ফেলুন</string>
+    <string name="sim_pool_summary_heading">স্বয়ংক্রিয় সিম লিমিট সুরক্ষা</string>
+    <string name="sim_pool_active_count">%1$dটি সক্রিয়</string>
+    <string name="sim_pool_summary_desc">কোনো একটি সিম যেন মাসে ৳২.৫ লাখ সেফ ও ৳৩.০ লাখ সর্বোচ্চ সীমা পার না করে, সেজন্য ORBIT স্বয়ংক্রিয়ভাবে সিম পরিবর্তন করে পেমেন্ট নেয়।</string>
+    <string name="sim_pool_primary_badge">প্রধান সিম</string>
+    <string name="sim_pool_used_this_month">এই মাসে এসেছে: %1$s</string>
+    <string name="sim_pool_limit_pair">%1$s সেফ / %2$s সর্বোচ্চ</string>
+    <string name="sim_pool_is_primary">প্রধান সিম</string>
+    <string name="sim_pool_make_primary">প্রধান করুন</string>
+    <string name="sim_pool_empty_title">কোনো সিম নম্বর যোগ করা হয়নি</string>
+    <string name="sim_pool_empty_desc">গ্রাহকরা যেন আপনার বিকাশ, নগদ, রকেট, উপায় বা সেলফিন নম্বরে টাকা পাঠাতে পারেন, সেজন্য সিম নম্বর যোগ করুন।</string>
+    <string name="sim_pool_add_title">পেমেন্ট সিম যোগ করুন</string>
+    <string name="sim_pool_field_provider">ওয়ালেট / মাধ্যম নির্বাচন করুন</string>
+    <string name="sim_pool_field_label">পরিচিতি নাম (ঐচ্ছিক, যেমন: দোকানের মূল সিম)</string>
+    <string name="sim_pool_add_submit">সিম যোগ করুন</string>
+</resources>

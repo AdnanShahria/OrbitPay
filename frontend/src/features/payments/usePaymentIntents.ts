@@ -110,8 +110,9 @@ export function usePaymentIntents(filters?: PaymentIntentFilters) {
       };
     },
     enabled: Boolean(getAuthToken()),
-    refetchInterval: 15_000,
-    staleTime: 5_000,
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
+    staleTime: 15_000,
   });
 }
 

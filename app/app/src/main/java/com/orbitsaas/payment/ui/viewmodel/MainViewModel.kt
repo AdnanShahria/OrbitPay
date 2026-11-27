@@ -16,18 +16,25 @@ import com.orbitsaas.payment.data.local.OrbitDatabase
 import com.orbitsaas.payment.data.local.PreferencesManager
 import com.orbitsaas.payment.data.local.SmsEntity
 import com.orbitsaas.payment.data.remote.ConnectedDeviceDto
+import com.orbitsaas.payment.data.remote.CreatePaymentLinkRequest
+import com.orbitsaas.payment.data.remote.CreateWalletRequest
 import com.orbitsaas.payment.data.remote.DevicePreflightData
 import com.orbitsaas.payment.data.remote.IngestSmsItem
 import com.orbitsaas.payment.data.remote.MerchantOrderDto
 import com.orbitsaas.payment.data.remote.OrbitApiClient
 import com.orbitsaas.payment.data.remote.PaymentIntentDto
+import com.orbitsaas.payment.data.remote.PaymentLinkDto
 import com.orbitsaas.payment.data.remote.UnauthorizedException
+import com.orbitsaas.payment.data.remote.UpdatePaymentLinkRequest
+import com.orbitsaas.payment.data.remote.UpdateWalletRequest
 import com.orbitsaas.payment.data.remote.WalletRotationDto
+import com.orbitsaas.payment.data.remote.WalletsOverviewSummaryDto
 import com.orbitsaas.payment.interceptors.InboxScanner
 import com.orbitsaas.payment.service.DynamicPushDispatcher
 import com.orbitsaas.payment.service.FcmTokenRegistrar
 import com.orbitsaas.payment.service.StickyForegroundService
 import com.orbitsaas.payment.util.SimSlotReader
+import com.orbitsaas.payment.widget.PendingPaymentsWidgetProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -70,7 +77,13 @@ data class DashboardUiState(
     val onlineDeviceCount: Int = 0,
     val totalDeviceCount: Int = 0,
     val connectedDevices: List<ConnectedDeviceDto> = emptyList(),
-    val wallets: List<WalletRotationDto> = emptyList()
+    val wallets: List<WalletRotationDto> = emptyList(),
+    val walletSummary: WalletsOverviewSummaryDto = WalletsOverviewSummaryDto(),
+    val isWalletsLoading: Boolean = false,
+    val isWalletMutating: Boolean = false,
+    val paymentLinks: List<PaymentLinkDto> = emptyList(),
+    val isLinksLoading: Boolean = false,
+    val isLinkMutating: Boolean = false
 )
 
 private data class DeviceTelemetryBundle(
@@ -78,6 +91,15 @@ private data class DeviceTelemetryBundle(
     val totalDeviceCount: Int,
     val connectedDevices: List<ConnectedDeviceDto>,
     val wallets: List<WalletRotationDto>
+)
+
+private data class MerchantModulesBundle(
+    val walletSummary: WalletsOverviewSummaryDto,
+    val isWalletsLoading: Boolean,
+    val isWalletMutating: Boolean,
+    val paymentLinks: List<PaymentLinkDto>,
+    val isLinksLoading: Boolean,
+    val isLinkMutating: Boolean
 )
 
 private data class CoreStatusBundle(
@@ -146,6 +168,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _totalDeviceCount = MutableStateFlow(0)
     private val _connectedDevices = MutableStateFlow<List<ConnectedDeviceDto>>(emptyList())
     private val _wallets = MutableStateFlow<List<WalletRotationDto>>(emptyList())
+    private val _walletSummary = MutableStateFlow(WalletsOverviewSummaryDto())
+    private val _isWalletsLoading = MutableStateFlow(false)
+    private val _isWalletMutating = MutableStateFlow(false)
+    private val _paymentLinks = MutableStateFlow<List<PaymentLinkDto>>(emptyList())
+    private val _isLinksLoading = MutableStateFlow(false)
+    private val _isLinkMutating = MutableStateFlow(false)
+
+    private var lastStatsFetchMs = 0L
+    private var lastOrdersFetchMs = 0L
+    private var lastIntentsFetchMs = 0L
+    private var lastLinksFetchMs = 0L
+    private var lastWalletsFetchMs = 0L
+    private var lastPreflightFetchMs = 0L
+    private var isStatsRefreshing = false
 
     // Flow of recent 50 transactions
     val recentTransactions: StateFlow<List<SmsEntity>> = database.smsDao()
@@ -222,6 +258,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         DeviceTelemetryBundle(onlineCount, totalCount, devices, wallets)
     }
 
+    private val merchantModulesBundleFlow = combine(
+        combine(_walletSummary, _isWalletsLoading, _isWalletMutating, ::Triple),
+        combine(_paymentLinks, _isLinksLoading, _isLinkMutating, ::Triple)
+    ) { (summary, wLoading, wMutating), (links, lLoading, lMutating) ->
+        MerchantModulesBundle(
+            walletSummary = summary,
+            isWalletsLoading = wLoading,
+            isWalletMutating = wMutating,
+            paymentLinks = links,
+            isLinksLoading = lLoading,
+            isLinkMutating = lMutating
+        )
+    }
+
     // Combined UI State
     val uiState: StateFlow<DashboardUiState> = combine(
         combine(coreBundleFlow, ordersBundleFlow, intentsBundleFlow) { core, orders, intents ->
@@ -232,8 +282,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         },
         recentTransactions,
         statsFlow,
-        combine(preflightBundleFlow, deviceTelemetryBundleFlow, ::Pair)
-    ) { (core, ordersBundle, intentsBundle), (auth, loginProg), transactions, stats, (preflightBundle, telemetry) ->
+        combine(preflightBundleFlow, deviceTelemetryBundleFlow, merchantModulesBundleFlow, ::Triple)
+    ) { (core, ordersBundle, intentsBundle), (auth, loginProg), transactions, stats, (preflightBundle, telemetry, modules) ->
         val loggedIn = auth.authToken.isNotBlank() || (auth.merchantId.isNotBlank() && auth.deviceKey.isNotBlank())
 
         DashboardUiState(
@@ -269,7 +319,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             onlineDeviceCount = telemetry.onlineDeviceCount,
             totalDeviceCount = telemetry.totalDeviceCount,
             connectedDevices = telemetry.connectedDevices,
-            wallets = telemetry.wallets
+            wallets = telemetry.wallets,
+            walletSummary = modules.walletSummary,
+            isWalletsLoading = modules.isWalletsLoading,
+            isWalletMutating = modules.isWalletMutating,
+            paymentLinks = modules.paymentLinks,
+            isLinksLoading = modules.isLinksLoading,
+            isLinkMutating = modules.isLinkMutating
         )
     }.stateIn(
         viewModelScope,
@@ -292,6 +348,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         refreshStatsFromServer()
         refreshOrders()
         refreshPaymentIntents()
+        refreshPaymentLinks()
+        refreshWalletsOverview()
         refreshPreflight()
         observePushRefreshEvents()
     }
@@ -389,6 +447,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 refreshStatsFromServer()
                 refreshOrders()
                 refreshPaymentIntents()
+                refreshPaymentLinks()
+                refreshWalletsOverview()
                 refreshPreflight()
                 onSuccess()
             }.onFailure { err ->
@@ -423,8 +483,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _totalDeviceCount.value = 0
         _connectedDevices.value = emptyList()
         _wallets.value = emptyList()
+        _walletSummary.value = WalletsOverviewSummaryDto()
+        _paymentLinks.value = emptyList()
         _loginError.value = null
         _feedbackMessage.value = "Signed out of ORBIT Hub."
+        PendingPaymentsWidgetProvider.saveAndRefresh(getApplication(), emptyList(), "")
         onComplete()
 
         if (tokenToRevoke.isNotBlank()) {
@@ -449,15 +512,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _totalDeviceCount.value = 0
         _connectedDevices.value = emptyList()
         _wallets.value = emptyList()
+        _walletSummary.value = WalletsOverviewSummaryDto()
+        _paymentLinks.value = emptyList()
+        PendingPaymentsWidgetProvider.saveAndRefresh(getApplication(), emptyList(), "")
         _loginError.value = message?.takeIf { it.isNotBlank() }
             ?: "Session expired or revoked. Please sign in again."
+    }
+
+    fun refreshAllIfStale(force: Boolean = false) {
+        refreshStatsFromServer(force)
+        refreshOrders(force = force)
+        refreshPaymentIntents(force = force)
+        refreshPaymentLinks(force)
+        refreshWalletsOverview(force)
+        refreshPreflight(force)
     }
 
     /**
      * Fetches universal multi-vertical payment intents from ORBIT Hub.
      */
-    fun refreshPaymentIntents(statusFilter: String? = null) {
-        if (!preferences.isLoggedIn()) return
+    fun refreshPaymentIntents(statusFilter: String? = null, force: Boolean = true) {
+        if (!preferences.isLoggedIn() || _isIntentsLoading.value) return
+        val now = System.currentTimeMillis()
+        if (!force && statusFilter == null && now - lastIntentsFetchMs < REFRESH_COOLDOWN_MS) return
+        lastIntentsFetchMs = now
 
         viewModelScope.launch {
             _isIntentsLoading.value = true
@@ -466,6 +544,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             result.onSuccess { data ->
                 _paymentIntents.value = data.items
+                PendingPaymentsWidgetProvider.saveAndRefresh(
+                    getApplication(),
+                    data.items,
+                    preferences.storeName
+                )
             }.onFailure { err ->
                 if (err is UnauthorizedException) {
                     handleUnauthorized(err.message)
@@ -570,8 +653,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * Fetches merchant orders and pending confirmation count from ORBIT Hub.
      */
-    fun refreshOrders(statusFilter: String? = null) {
-        if (!preferences.isLoggedIn()) return
+    fun refreshOrders(statusFilter: String? = null, force: Boolean = true) {
+        if (!preferences.isLoggedIn() || _isOrdersLoading.value) return
+        val now = System.currentTimeMillis()
+        if (!force && statusFilter == null && now - lastOrdersFetchMs < REFRESH_COOLDOWN_MS) return
+        lastOrdersFetchMs = now
 
         viewModelScope.launch {
             _isOrdersLoading.value = true
@@ -712,6 +798,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                         apiClient.listPaymentIntents(limit = 50).onSuccess { intentsData ->
                             _paymentIntents.value = intentsData.items
+                            PendingPaymentsWidgetProvider.saveAndRefresh(
+                                getApplication(),
+                                intentsData.items,
+                                preferences.storeName
+                            )
                         }.onFailure { err ->
                             if (err is UnauthorizedException) {
                                 withContext(Dispatchers.Main) { handleUnauthorized(err.message) }
@@ -728,8 +819,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun refreshStatsFromServer() {
-        if (!preferences.isLoggedIn()) return
+    fun refreshStatsFromServer(force: Boolean = true) {
+        if (!preferences.isLoggedIn() || isStatsRefreshing) return
+        val now = System.currentTimeMillis()
+        if (!force && now - lastStatsFetchMs < REFRESH_COOLDOWN_MS) return
+        lastStatsFetchMs = now
+        isStatsRefreshing = true
 
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {
@@ -750,6 +845,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     Log.w(TAG, "Failed to refresh stats: ${err.message}")
                 }
             }
+            isStatsRefreshing = false
         }
     }
 
@@ -785,8 +881,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * Checks device readiness & number profile match against ORBIT Hub.
      */
-    fun refreshPreflight() {
+    fun refreshPreflight(force: Boolean = true) {
         if (!preferences.isLoggedIn() || _isCheckingPreflight.value) return
+        val now = System.currentTimeMillis()
+        if (!force && now - lastPreflightFetchMs < REFRESH_COOLDOWN_MS) return
+        lastPreflightFetchMs = now
 
         viewModelScope.launch {
             _isCheckingPreflight.value = true
@@ -845,11 +944,247 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         preferences.isDarkTheme = enabled
     }
 
+    fun refreshPaymentLinks(force: Boolean = true) {
+        if (!preferences.isLoggedIn() || _isLinksLoading.value) return
+        val now = System.currentTimeMillis()
+        if (!force && now - lastLinksFetchMs < REFRESH_COOLDOWN_MS) return
+        lastLinksFetchMs = now
+
+        viewModelScope.launch {
+            _isLinksLoading.value = true
+            val result = withContext(Dispatchers.IO) {
+                apiClient.listPaymentLinks()
+            }
+            result.onSuccess { items ->
+                _paymentLinks.value = items
+            }.onFailure { err ->
+                if (err is UnauthorizedException) {
+                    handleUnauthorized(err.message)
+                } else {
+                    Log.w(TAG, "Failed to load payment links: ${err.message}")
+                }
+            }
+            _isLinksLoading.value = false
+        }
+    }
+
+    fun createPaymentLink(
+        title: String,
+        description: String?,
+        amountType: String,
+        fixedAmount: Double?,
+        minAmount: Double?,
+        maxAmount: Double?,
+        onDone: (Boolean) -> Unit = {}
+    ) {
+        if (_isLinkMutating.value) return
+        viewModelScope.launch {
+            _isLinkMutating.value = true
+            val result = withContext(Dispatchers.IO) {
+                apiClient.createPaymentLink(
+                    CreatePaymentLinkRequest(
+                        title = title.trim(),
+                        description = description?.trim()?.ifBlank { null },
+                        amountType = amountType,
+                        fixedAmount = if (amountType == "FIXED") fixedAmount else null,
+                        minAmount = if (amountType == "OPEN") minAmount else null,
+                        maxAmount = if (amountType == "OPEN") maxAmount else null
+                    )
+                )
+            }
+            result.onSuccess { created ->
+                _paymentLinks.value = listOf(created) + _paymentLinks.value
+                _feedbackMessage.value = "Payment link created"
+                onDone(true)
+            }.onFailure { err ->
+                if (err is UnauthorizedException) {
+                    handleUnauthorized(err.message)
+                } else {
+                    _feedbackMessage.value = err.message ?: "Failed to create payment link"
+                }
+                onDone(false)
+            }
+            _isLinkMutating.value = false
+        }
+    }
+
+    fun togglePaymentLinkActive(linkId: String, isActive: Boolean) {
+        if (_isLinkMutating.value) return
+        viewModelScope.launch {
+            _isLinkMutating.value = true
+            val result = withContext(Dispatchers.IO) {
+                apiClient.updatePaymentLink(linkId, UpdatePaymentLinkRequest(isActive = isActive))
+            }
+            result.onSuccess { updated ->
+                _paymentLinks.value = _paymentLinks.value.map { if (it.id == updated.id) updated else it }
+            }.onFailure { err ->
+                if (err is UnauthorizedException) {
+                    handleUnauthorized(err.message)
+                } else {
+                    _feedbackMessage.value = err.message ?: "Failed to update payment link"
+                }
+            }
+            _isLinkMutating.value = false
+        }
+    }
+
+    fun deletePaymentLink(linkId: String) {
+        if (_isLinkMutating.value) return
+        viewModelScope.launch {
+            _isLinkMutating.value = true
+            val result = withContext(Dispatchers.IO) {
+                apiClient.deletePaymentLink(linkId)
+            }
+            result.onSuccess {
+                _paymentLinks.value = _paymentLinks.value.filterNot { it.id == linkId }
+                _feedbackMessage.value = "Payment link deleted"
+            }.onFailure { err ->
+                if (err is UnauthorizedException) {
+                    handleUnauthorized(err.message)
+                } else {
+                    _feedbackMessage.value = err.message ?: "Failed to delete payment link"
+                }
+            }
+            _isLinkMutating.value = false
+        }
+    }
+
+    fun refreshWalletsOverview(force: Boolean = true) {
+        if (!preferences.isLoggedIn() || _isWalletsLoading.value) return
+        val now = System.currentTimeMillis()
+        if (!force && now - lastWalletsFetchMs < REFRESH_COOLDOWN_MS) return
+        lastWalletsFetchMs = now
+
+        viewModelScope.launch {
+            _isWalletsLoading.value = true
+            val result = withContext(Dispatchers.IO) {
+                apiClient.fetchWalletsOverview()
+            }
+            result.onSuccess { overview ->
+                _wallets.value = overview.wallets
+                _connectedDevices.value = overview.devices
+                _walletSummary.value = overview.summary
+                _onlineDeviceCount.value = overview.summary.onlineDeviceCount
+                _totalDeviceCount.value = overview.summary.totalDeviceCount
+            }.onFailure { err ->
+                if (err is UnauthorizedException) {
+                    handleUnauthorized(err.message)
+                } else {
+                    Log.w(TAG, "Failed to load SIM pool overview: ${err.message}")
+                }
+            }
+            _isWalletsLoading.value = false
+        }
+    }
+
+    fun createWallet(
+        provider: String,
+        walletNumber: String,
+        accountType: String,
+        label: String?,
+        simSlotIndex: Int?,
+        isPrimary: Boolean,
+        onDone: (Boolean) -> Unit = {}
+    ) {
+        if (_isWalletMutating.value) return
+        viewModelScope.launch {
+            _isWalletMutating.value = true
+            val result = withContext(Dispatchers.IO) {
+                apiClient.createWallet(
+                    CreateWalletRequest(
+                        provider = provider,
+                        walletNumber = walletNumber.trim(),
+                        accountType = accountType,
+                        label = label?.trim()?.ifBlank { null },
+                        simSlotIndex = simSlotIndex,
+                        isPrimary = isPrimary
+                    )
+                )
+            }
+            result.onSuccess {
+                _feedbackMessage.value = "SIM number added"
+                refreshWalletsOverview()
+                onDone(true)
+            }.onFailure { err ->
+                if (err is UnauthorizedException) {
+                    handleUnauthorized(err.message)
+                } else {
+                    _feedbackMessage.value = err.message ?: "Failed to add SIM number"
+                }
+                onDone(false)
+            }
+            _isWalletMutating.value = false
+        }
+    }
+
+    fun toggleWalletActive(walletId: String, isActive: Boolean) {
+        if (_isWalletMutating.value) return
+        viewModelScope.launch {
+            _isWalletMutating.value = true
+            val result = withContext(Dispatchers.IO) {
+                apiClient.updateWallet(walletId, UpdateWalletRequest(isActive = isActive))
+            }
+            result.onSuccess {
+                refreshWalletsOverview()
+            }.onFailure { err ->
+                if (err is UnauthorizedException) {
+                    handleUnauthorized(err.message)
+                } else {
+                    _feedbackMessage.value = err.message ?: "Failed to update SIM status"
+                }
+            }
+            _isWalletMutating.value = false
+        }
+    }
+
+    fun setPrimaryWallet(walletId: String) {
+        if (_isWalletMutating.value) return
+        viewModelScope.launch {
+            _isWalletMutating.value = true
+            val result = withContext(Dispatchers.IO) {
+                apiClient.updateWallet(walletId, UpdateWalletRequest(isPrimary = true))
+            }
+            result.onSuccess {
+                _feedbackMessage.value = "Primary SIM updated"
+                refreshWalletsOverview()
+            }.onFailure { err ->
+                if (err is UnauthorizedException) {
+                    handleUnauthorized(err.message)
+                } else {
+                    _feedbackMessage.value = err.message ?: "Failed to set primary SIM"
+                }
+            }
+            _isWalletMutating.value = false
+        }
+    }
+
+    fun deleteWallet(walletId: String) {
+        if (_isWalletMutating.value) return
+        viewModelScope.launch {
+            _isWalletMutating.value = true
+            val result = withContext(Dispatchers.IO) {
+                apiClient.deleteWallet(walletId)
+            }
+            result.onSuccess {
+                _feedbackMessage.value = "SIM number removed"
+                refreshWalletsOverview()
+            }.onFailure { err ->
+                if (err is UnauthorizedException) {
+                    handleUnauthorized(err.message)
+                } else {
+                    _feedbackMessage.value = err.message ?: "Failed to remove SIM number"
+                }
+            }
+            _isWalletMutating.value = false
+        }
+    }
+
     fun toggleTheme() {
         preferences.isDarkTheme = !preferences.isDarkTheme
     }
 
     companion object {
         private const val TAG = "MainViewModel"
+        private const val REFRESH_COOLDOWN_MS = 15_000L
     }
 }

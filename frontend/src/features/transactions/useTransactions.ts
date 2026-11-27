@@ -111,7 +111,9 @@ export function usePendingQueue() {
       }
     },
     enabled: Boolean(getAuthToken()),
-    refetchInterval: 10_000,
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
+    staleTime: 15_000,
   });
 }
 

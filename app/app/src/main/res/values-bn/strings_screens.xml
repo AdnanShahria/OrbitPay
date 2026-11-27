@@ -73,8 +73,8 @@
     <string name="history_detail_unknown">পাওয়া যায়নি</string>
 
     <!-- Verify Screen -->
-    <string name="verify_title">ম্যানুয়াল যাচাই</string>
-    <string name="verify_subtitle">অপেক্ষমাণ অর্ডারের সাথে যুক্ত করতে একটি অদাবিকৃত এসএমএসে ট্যাপ করুন</string>
+    <string name="verify_title">পেমেন্ট</string>
+    <string name="verify_subtitle">অপেক্ষমাণ পেমেন্ট অনুমোদন বা অদাবিকৃত এসএমএস ম্যাচ করুন</string>
     <string name="verify_loading_unclaimed">অদাবিকৃত পেমেন্ট লোড হচ্ছে…</string>
     <string name="verify_empty_title">সব পেমেন্ট সমন্বিত হয়েছে</string>
     <string name="verify_empty_desc">এই মুহূর্তে ম্যানুয়াল ম্যাচিংয়ের জন্য কোনো অদাবিকৃত MFS লেনদেন নেই।</string>

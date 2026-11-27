@@ -55,7 +55,11 @@ function getTrustFlagMeta(flag: string): { label: string; description: string } 
   );
 }
 
-export function TransactionTable() {
+export interface TransactionTableProps {
+  readOnlyLocked?: boolean;
+}
+
+export function TransactionTable({ readOnlyLocked = false }: TransactionTableProps = {}) {
   const [selectedStatus, setSelectedStatus] = useState<TransactionStatus | 'ALL'>('ALL');
   const [selectedProvider, setSelectedProvider] = useState<MfsProvider | 'ALL'>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
@@ -306,6 +310,7 @@ export function TransactionTable() {
                           <Button
                             variant="secondary"
                             size="small"
+                            disabled={readOnlyLocked}
                             leadingIcon={RiToolsLine}
                             onClick={() => setSelectedUnclaimed(tx)}
                           >

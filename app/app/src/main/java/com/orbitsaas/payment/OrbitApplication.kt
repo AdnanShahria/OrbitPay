@@ -17,6 +17,7 @@ import com.orbitsaas.payment.data.remote.OrbitApiClient
 import com.orbitsaas.payment.service.FcmTokenRegistrar
 import com.orbitsaas.payment.service.StickyForegroundService
 import com.orbitsaas.payment.service.SyncWorker
+import com.orbitsaas.payment.ui.locale.LocaleHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -34,6 +35,7 @@ class OrbitApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        LocaleHelper.applyAutoCountryLocaleIfUnset(this)
 
         createNotificationChannels()
         setupPeriodicSyncWorker()

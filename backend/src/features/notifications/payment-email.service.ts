@@ -185,10 +185,17 @@ function escapeHtml(value: string): string {
 
 function formatBdt(amount: number): string {
   const safe = Number.isFinite(amount) ? amount : 0;
+  const isWhole = Math.abs(safe - Math.round(safe)) < 0.005;
   return `৳${safe.toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
+    minimumFractionDigits: isWhole ? 0 : 2,
+    maximumFractionDigits: isWhole ? 0 : 2,
   })}`;
+}
+
+function formatTkCompact(amount: number): string {
+  const safe = Number.isFinite(amount) ? amount : 0;
+  const isWhole = Math.abs(safe - Math.round(safe)) < 0.005;
+  return isWhole ? `${Math.round(safe)}tk` : `${safe.toFixed(2)}tk`;
 }
 
 function formatProviderLabel(provider?: string | null): string {
@@ -204,25 +211,8 @@ function formatProviderLabel(provider?: string | null): string {
     case 'CELLFIN':
       return 'CellFin';
     default:
-      return provider ? provider : 'MFS Transfer';
+      return provider ? provider : 'Mobile Wallet';
   }
-}
-
-function formatVerificationModeLabel(
-  matchType?: string | null,
-  resolutionSource?: string | null
-): string {
-  if (matchType === 'EXACT_UNIQUE' || matchType === 'BASE_AMOUNT_FALLBACK') {
-    return 'Instant SMS Verification';
-  }
-  if (matchType === 'OVERPAID') return 'SMS Verification';
-  if (resolutionSource === 'LATE_SMS_AUTO') return 'Late SMS Auto-Reconciliation';
-  if (resolutionSource === 'ORBIT_ANDROID') return 'Merchant Companion Approval';
-  if (resolutionSource === 'CLIENT_ADMIN') return 'Store Admin Approval';
-  if (matchType === 'MANUAL_VERIFIED' || resolutionSource === 'ORBIT_DASHBOARD') {
-    return 'Store Manual Verification';
-  }
-  return 'Verified Settlement';
 }
 
 function formatDisplayTimestamp(value?: Date | string | number | null): string {
@@ -239,47 +229,50 @@ function formatDisplayTimestamp(value?: Date | string | number | null): string {
   })} BST`;
 }
 
-function buildInvoiceNumber(externalRefId: string): string {
-  const cleaned = externalRefId.replace(/[^A-Z0-9-]/gi, '').slice(0, 18).toUpperCase();
-  return `INV-${cleaned || 'ORBIT'}`;
+function buildInvoiceNumber(params: {
+  storeName?: string | null;
+  customerName?: string | null;
+  amount: number;
+  statusText: string;
+}): string {
+  const name = params.storeName?.trim() || params.customerName?.trim() || 'ORBIT';
+  const amountPart = formatTkCompact(params.amount);
+  return `${name}||${amountPart}||${params.statusText}`;
 }
 
-function buildSubmittedEmailContent(
-  params: PaymentSubmittedEmailParams,
-  recipientEmail: string
-): { subject: string; html: string; text: string } {
-  const storeName = params.storeName?.trim() || 'ORBIT Merchant';
-  const statusLabel =
-    params.status === 'MANUAL_REVIEW_REQUIRED' ? 'Under Store Review' : 'Awaiting SMS Match';
-  const statusDetail =
-    params.status === 'MANUAL_REVIEW_REQUIRED'
-      ? 'Your payment proof has been logged and forwarded to the store team for manual confirmation.'
-      : 'Your transfer details are queued and will be confirmed automatically as soon as the settlement SMS arrives.';
-  const providerLabel = formatProviderLabel(params.provider);
-  const amountFormatted = formatBdt(params.amount);
-  const trxId = params.trxId?.trim() || '—';
-  const senderNumber = params.senderNumber?.trim() || '—';
-  const timestamp = formatDisplayTimestamp(params.submittedAt);
-  const greetingName = params.customerName?.trim() || recipientEmail;
+function renderMinimalReceiptEmail(params: {
+  storeName: string;
+  invoiceId: string;
+  statusBadge: string;
+  isVerified: boolean;
+  amountFormatted: string;
+  timestamp: string;
+  subtitle: string;
+  rows: Array<[string, string]>;
+  subject: string;
+}): { subject: string; html: string; text: string } {
+  const {
+    storeName,
+    invoiceId,
+    statusBadge,
+    isVerified,
+    amountFormatted,
+    timestamp,
+    subtitle,
+    rows,
+    subject,
+  } = params;
 
-  const subject = `Payment Proof Received (${statusLabel}) · ${params.externalRefId} · ${storeName}`;
-
-  const rows: Array<[string, string]> = [
-    ['Store', storeName],
-    ['Reference ID', params.externalRefId],
-    ['Amount Submitted', amountFormatted],
-    ['MFS Provider', providerLabel],
-    ['Transaction ID (TrxID)', trxId],
-    ['Sender Number', senderNumber],
-    ['Submitted At', timestamp],
-  ];
+  const badgeBg = isVerified ? '#FFFFFF' : '#27272A';
+  const badgeColor = isVerified ? '#09090B' : '#FAFAFA';
+  const badgeBorder = isVerified ? 'none' : '1px solid #3F3F46';
 
   const htmlRows = rows
     .map(
       ([label, value], idx) => `
       <tr>
-        <td style="padding:11px 0;border-bottom:${idx === rows.length - 1 ? '0' : '1px solid #E4E4E7'};font-size:13px;line-height:18px;color:#71717A;font-weight:500;">${escapeHtml(label)}</td>
-        <td align="right" style="padding:11px 0;border-bottom:${idx === rows.length - 1 ? '0' : '1px solid #E4E4E7'};font-size:13px;line-height:18px;color:#09090B;font-weight:600;font-variant-numeric:tabular-nums;">${escapeHtml(value)}</td>
+        <td style="padding:10px 0;border-bottom:${idx === rows.length - 1 ? '0' : '1px solid #E4E4E7'};font-size:13px;line-height:18px;color:#71717A;">${escapeHtml(label)}</td>
+        <td align="right" style="padding:10px 0;border-bottom:${idx === rows.length - 1 ? '0' : '1px solid #E4E4E7'};font-size:13px;line-height:18px;color:#09090B;font-weight:600;font-variant-numeric:tabular-nums;">${escapeHtml(value)}</td>
       </tr>`
     )
     .join('');
@@ -292,28 +285,28 @@ function buildSubmittedEmailContent(
   <title>${escapeHtml(subject)}</title>
 </head>
 <body style="margin:0;padding:0;background-color:#F4F4F5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#09090B;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#F4F4F5;padding:32px 16px;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#F4F4F5;padding:28px 16px;">
     <tr>
       <td align="center">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:580px;background-color:#FFFFFF;border:1px solid #E4E4E7;border-radius:12px;overflow:hidden;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:520px;background-color:#FFFFFF;border:1px solid #E4E4E7;border-radius:14px;overflow:hidden;">
           <tr>
-            <td style="padding:28px 32px;background-color:#09090B;color:#FFFFFF;">
+            <td style="padding:24px 28px;background-color:#09090B;color:#FFFFFF;">
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
                 <tr>
-                  <td style="font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:#A1A1AA;font-weight:600;">ORBIT PAYMENT HUB</td>
+                  <td style="font-size:15px;font-weight:600;color:#FFFFFF;">${escapeHtml(storeName)}</td>
                   <td align="right">
-                    <span style="display:inline-block;padding:4px 10px;border-radius:999px;background-color:#27272A;border:1px solid #3F3F46;color:#FAFAFA;font-size:11px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;">${escapeHtml(statusLabel)}</span>
+                    <span style="display:inline-block;padding:4px 10px;border-radius:999px;background-color:${badgeBg};border:${badgeBorder};color:${badgeColor};font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;">${escapeHtml(statusBadge)}</span>
                   </td>
                 </tr>
               </table>
-              <h1 style="margin:14px 0 6px;font-size:22px;line-height:28px;font-weight:700;color:#FFFFFF;letter-spacing:-0.02em;">Payment Proof Received</h1>
-              <p style="margin:0;font-size:14px;line-height:20px;color:#D4D4D8;">${escapeHtml(statusDetail)}</p>
+              <div style="margin-top:16px;font-size:28px;line-height:34px;font-weight:700;color:#FFFFFF;font-variant-numeric:tabular-nums;">${escapeHtml(amountFormatted)}</div>
+              <div style="margin-top:6px;font-size:12px;color:#A1A1AA;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;">${escapeHtml(invoiceId)}</div>
             </td>
           </tr>
           <tr>
-            <td style="padding:28px 32px;">
-              <p style="margin:0 0 20px;font-size:14px;line-height:21px;color:#3F3F46;">Hi ${escapeHtml(greetingName)}, we have logged your ${escapeHtml(providerLabel)} payment submission for <strong style="color:#09090B;">${escapeHtml(storeName)}</strong>. You will receive your official invoice once confirmation completes.</p>
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#FAFAFA;border:1px solid #E4E4E7;border-radius:10px;padding:6px 18px;">
+            <td style="padding:24px 28px;">
+              <p style="margin:0 0 18px;font-size:13.5px;line-height:20px;color:#52525B;">${escapeHtml(subtitle)}</p>
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#FAFAFA;border:1px solid #E4E4E7;border-radius:10px;padding:4px 16px;">
                 <tr>
                   <td>
                     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
@@ -322,12 +315,11 @@ function buildSubmittedEmailContent(
                   </td>
                 </tr>
               </table>
-              <p style="margin:22px 0 0;font-size:12px;line-height:18px;color:#71717A;">Need to update your Transaction ID or contact the store? Reply to ${escapeHtml(storeName)} with reference <strong style="color:#18181B;">${escapeHtml(params.externalRefId)}</strong>.</p>
             </td>
           </tr>
           <tr>
-            <td style="padding:16px 32px;background-color:#FAFAFA;border-top:1px solid #E4E4E7;font-size:11px;line-height:16px;color:#71717A;">
-              Powered by ORBIT Payment Hub · Automated MFS Settlement Ledger
+            <td style="padding:14px 28px;background-color:#FAFAFA;border-top:1px solid #E4E4E7;font-size:11px;line-height:16px;color:#71717A;">
+              ${escapeHtml(storeName)} · ${escapeHtml(timestamp)}
             </td>
           </tr>
         </table>
@@ -338,213 +330,89 @@ function buildSubmittedEmailContent(
 </html>`;
 
   const text = [
-    `${storeName} via ORBIT Payment Hub`,
-    `Payment Proof Received (${statusLabel})`,
+    invoiceId,
     '',
-    statusDetail,
+    subtitle,
     '',
-    `Store: ${storeName}`,
-    `Reference ID: ${params.externalRefId}`,
-    `Amount Submitted: ${amountFormatted}`,
-    `MFS Provider: ${providerLabel}`,
-    `TrxID: ${trxId}`,
-    `Sender Number: ${senderNumber}`,
-    `Submitted At: ${timestamp}`,
-    '',
-    'You will receive your official paid invoice by email once verification completes.',
+    ...rows.map(([label, value]) => `${label}: ${value}`),
+    `Time: ${timestamp}`,
   ].join('\n');
 
   return { subject, html, text };
 }
 
+function buildSubmittedEmailContent(
+  params: PaymentSubmittedEmailParams,
+  _recipientEmail: string
+): { subject: string; html: string; text: string } {
+  const storeName = params.storeName?.trim() || 'ORBIT Pay';
+  const statusText =
+    params.status === 'MANUAL_REVIEW_REQUIRED' ? 'under review' : 'pending verification';
+  const statusBadge =
+    params.status === 'MANUAL_REVIEW_REQUIRED' ? 'Under Review' : 'Pending Verification';
+  const subtitle =
+    params.status === 'MANUAL_REVIEW_REQUIRED'
+      ? 'Your payment has been received and is currently under review.'
+      : 'Your payment details have been submitted and are being verified.';
+
+  const invoiceId = buildInvoiceNumber({
+    storeName,
+    customerName: params.customerName,
+    amount: params.amount,
+    statusText,
+  });
+
+  const rows: Array<[string, string]> = [
+    ...(params.customerName?.trim() ? [['Name', params.customerName.trim()] as [string, string]] : []),
+    ['Amount', formatBdt(params.amount)],
+    ['Method', formatProviderLabel(params.provider)],
+    ['Transaction ID', params.trxId?.trim() || '—'],
+    ['Mobile Number', params.senderNumber?.trim() || '—'],
+    ['Status', statusBadge],
+  ];
+
+  return renderMinimalReceiptEmail({
+    storeName,
+    invoiceId,
+    statusBadge,
+    isVerified: false,
+    amountFormatted: formatBdt(params.amount),
+    timestamp: formatDisplayTimestamp(params.submittedAt),
+    subtitle,
+    rows,
+    subject: invoiceId,
+  });
+}
+
 function buildVerifiedInvoiceContent(
   params: PaymentVerifiedInvoiceEmailParams,
-  recipientEmail: string,
-  invoiceNumber: string
+  _recipientEmail: string,
+  invoiceId: string
 ): { subject: string; html: string; text: string } {
-  const storeName = params.storeName?.trim() || 'ORBIT Merchant';
-  const baseAmount = Number.isFinite(params.baseAmount) ? params.baseAmount : params.paidAmount;
-  const paidAmount = Number.isFinite(params.paidAmount) ? params.paidAmount : baseAmount;
-  const rawOffsetCents =
-    typeof params.offsetCents === 'number'
-      ? params.offsetCents
-      : params.uniqueAmount != null
-        ? Math.round((params.uniqueAmount - baseAmount) * 100)
-        : Math.round((paidAmount - baseAmount) * 100);
-  const actualDeltaCents = Math.round((paidAmount - baseAmount) * 100);
-  const effectiveOffsetCents =
-    actualDeltaCents > 0 && rawOffsetCents > 0
-      ? Math.min(rawOffsetCents, actualDeltaCents)
-      : actualDeltaCents > 0
-        ? actualDeltaCents
-        : 0;
-  const adjustmentAmount = effectiveOffsetCents / 100;
-
-  const providerLabel = formatProviderLabel(params.provider);
-  const trxId = params.trxId?.trim() || '—';
+  const storeName = params.storeName?.trim() || 'ORBIT Pay';
+  const paidAmount = Number.isFinite(params.paidAmount) ? params.paidAmount : params.baseAmount;
   const senderNumber = params.senderNumber?.trim() || params.customerPhone?.trim() || '—';
-  const verificationModeLabel = formatVerificationModeLabel(
-    params.matchType,
-    params.resolutionSource
-  );
-  const confirmedAt = formatDisplayTimestamp(params.verifiedAt);
-  const billedToName = params.customerName?.trim() || recipientEmail;
 
-  const subject = `Invoice ${invoiceNumber} (PAID) · ${formatBdt(paidAmount)} · ${storeName}`;
-
-  const itemRows: Array<{ label: string; amount: string }> = [
-    { label: `Order Payment (${params.externalRefId})`, amount: formatBdt(baseAmount) },
-  ];
-  if (effectiveOffsetCents > 0) {
-    itemRows.push({
-      label: 'Unique Verification Adjustment',
-      amount: formatBdt(adjustmentAmount),
-    });
-  }
-  itemRows.push({ label: 'Gateway Fee (0%)', amount: '৳0.00' });
-
-  const itemRowsHtml = itemRows
-    .map(
-      (item) => `
-      <tr>
-        <td style="padding:11px 0;border-bottom:1px solid #E4E4E7;font-size:13px;line-height:19px;color:#27272A;">${escapeHtml(item.label)}</td>
-        <td align="right" style="padding:11px 0;border-bottom:1px solid #E4E4E7;font-size:13px;line-height:19px;color:#09090B;font-weight:500;font-variant-numeric:tabular-nums;">${escapeHtml(item.amount)}</td>
-      </tr>`
-    )
-    .join('');
-
-  const settlementRows: Array<[string, string]> = [
-    ['Provider', providerLabel],
-    ['Transaction ID (TrxID)', trxId],
-    ['Sender Number', senderNumber],
-    ['Verification Mode', verificationModeLabel],
-    ['Reference ID', params.externalRefId],
-    ['Confirmed Timestamp', confirmedAt],
+  const rows: Array<[string, string]> = [
+    ...(params.customerName?.trim() ? [['Name', params.customerName.trim()] as [string, string]] : []),
+    ['Amount Paid', formatBdt(paidAmount)],
+    ['Method', formatProviderLabel(params.provider)],
+    ['Transaction ID', params.trxId?.trim() || '—'],
+    ['Mobile Number', senderNumber],
+    ['Status', 'Verified'],
   ];
 
-  const settlementRowsHtml = settlementRows
-    .map(
-      ([label, value], idx) => `
-      <tr>
-        <td style="padding:9px 0;border-bottom:${idx === settlementRows.length - 1 ? '0' : '1px solid #E4E4E7'};font-size:12px;line-height:18px;color:#71717A;">${escapeHtml(label)}</td>
-        <td align="right" style="padding:9px 0;border-bottom:${idx === settlementRows.length - 1 ? '0' : '1px solid #E4E4E7'};font-size:12px;line-height:18px;color:#18181B;font-weight:600;font-variant-numeric:tabular-nums;">${escapeHtml(value)}</td>
-      </tr>`
-    )
-    .join('');
-
-  const html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>${escapeHtml(subject)}</title>
-</head>
-<body style="margin:0;padding:0;background-color:#F4F4F5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#09090B;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#F4F4F5;padding:32px 16px;">
-    <tr>
-      <td align="center">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;background-color:#FFFFFF;border:1px solid #E4E4E7;border-radius:12px;overflow:hidden;">
-          <tr>
-            <td style="padding:28px 32px;background-color:#09090B;color:#FFFFFF;">
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-                <tr>
-                  <td>
-                    <div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:#A1A1AA;font-weight:600;">OFFICIAL PAYMENT INVOICE</div>
-                    <div style="margin-top:6px;font-size:20px;line-height:26px;font-weight:700;color:#FFFFFF;letter-spacing:-0.02em;">${escapeHtml(invoiceNumber)}</div>
-                  </td>
-                  <td align="right" valign="top">
-                    <span style="display:inline-block;padding:5px 12px;border-radius:999px;background-color:#FFFFFF;color:#09090B;font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;">PAID</span>
-                  </td>
-                </tr>
-              </table>
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:18px;border-top:1px solid #27272A;padding-top:16px;">
-                <tr>
-                  <td>
-                    <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:#A1A1AA;">Total Settled</div>
-                    <div style="margin-top:4px;font-size:28px;line-height:34px;font-weight:700;color:#FFFFFF;font-variant-numeric:tabular-nums;">${escapeHtml(formatBdt(paidAmount))}</div>
-                  </td>
-                  <td align="right" valign="bottom" style="font-size:12px;line-height:18px;color:#D4D4D8;">
-                    ${escapeHtml(confirmedAt)}
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:28px 32px;">
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:24px;">
-                <tr>
-                  <td width="50%" valign="top" style="padding-right:12px;">
-                    <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:#71717A;font-weight:600;">Merchant</div>
-                    <div style="margin-top:5px;font-size:14px;line-height:20px;color:#09090B;font-weight:600;">${escapeHtml(storeName)}</div>
-                    <div style="font-size:12px;line-height:18px;color:#71717A;">Merchant ID: ${escapeHtml(params.merchantId)}</div>
-                  </td>
-                  <td width="50%" valign="top" style="padding-left:12px;">
-                    <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:#71717A;font-weight:600;">Billed To</div>
-                    <div style="margin-top:5px;font-size:14px;line-height:20px;color:#09090B;font-weight:600;">${escapeHtml(billedToName)}</div>
-                    <div style="font-size:12px;line-height:18px;color:#71717A;">${escapeHtml(recipientEmail)}</div>
-                  </td>
-                </tr>
-              </table>
-
-              <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:#71717A;font-weight:600;margin-bottom:6px;">Itemized Breakdown</div>
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid #E4E4E7;">
-                ${itemRowsHtml}
-                <tr>
-                  <td style="padding:14px 0 4px;font-size:14px;line-height:20px;color:#09090B;font-weight:700;">Total Paid</td>
-                  <td align="right" style="padding:14px 0 4px;font-size:15px;line-height:20px;color:#09090B;font-weight:700;font-variant-numeric:tabular-nums;">${escapeHtml(formatBdt(paidAmount))}</td>
-                </tr>
-              </table>
-
-              <div style="margin-top:24px;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:#71717A;font-weight:600;margin-bottom:8px;">Settlement Details</div>
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#FAFAFA;border:1px solid #E4E4E7;border-radius:10px;padding:6px 18px;">
-                <tr>
-                  <td>
-                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-                      ${settlementRowsHtml}
-                    </table>
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:16px 32px;background-color:#FAFAFA;border-top:1px solid #E4E4E7;font-size:11px;line-height:17px;color:#71717A;">
-              This is an automated payment receipt &amp; invoice issued via ORBIT Payment Hub on behalf of ${escapeHtml(storeName)}. Keep this email for your records.
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>`;
-
-  const textLines = [
-    `${storeName} via ORBIT Payment Hub`,
-    `OFFICIAL INVOICE: ${invoiceNumber} [PAID]`,
-    '',
-    `Merchant: ${storeName} (${params.merchantId})`,
-    `Billed To: ${billedToName} <${recipientEmail}>`,
-    '',
-    'Itemized Breakdown:',
-    `- Base Amount (${params.externalRefId}): ${formatBdt(baseAmount)}`,
-    ...(effectiveOffsetCents > 0
-      ? [`- Unique Verification Adjustment: ${formatBdt(adjustmentAmount)}`]
-      : []),
-    '- Gateway Fee: ৳0.00 (0%)',
-    `Total Paid: ${formatBdt(paidAmount)}`,
-    '',
-    'Settlement Details:',
-    `- Provider: ${providerLabel}`,
-    `- TrxID: ${trxId}`,
-    `- Sender: ${senderNumber}`,
-    `- Verification Mode: ${verificationModeLabel}`,
-    `- Reference ID: ${params.externalRefId}`,
-    `- Confirmed At: ${confirmedAt}`,
-  ];
-
-  return { subject, html, text: textLines.join('\n') };
+  return renderMinimalReceiptEmail({
+    storeName,
+    invoiceId,
+    statusBadge: 'Verified',
+    isVerified: true,
+    amountFormatted: formatBdt(paidAmount),
+    timestamp: formatDisplayTimestamp(params.verifiedAt),
+    subtitle: `Thank you! Your payment to ${storeName} has been verified.`,
+    rows,
+    subject: invoiceId,
+  });
 }
 
 /**
@@ -623,7 +491,13 @@ export async function notifyPaymentVerifiedInvoiceEmail(
       return { sent: false, skippedDuplicate: true };
     }
 
-    const invoiceNumber = buildInvoiceNumber(params.externalRefId);
+    const paidAmount = Number.isFinite(params.paidAmount) ? params.paidAmount : params.baseAmount;
+    const invoiceNumber = buildInvoiceNumber({
+      storeName: params.storeName,
+      customerName: params.customerName,
+      amount: paidAmount,
+      statusText: 'verified',
+    });
     const { subject, html, text } = buildVerifiedInvoiceContent(params, email, invoiceNumber);
 
     const dispatch = await routeEmail(

@@ -12,9 +12,11 @@ import io.ktor.client.plugins.logging.LogLevel
 import io.ktor.client.plugins.logging.Logger
 import io.ktor.client.plugins.logging.Logging
 import io.ktor.client.request.HttpRequestBuilder
+import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.parameter
+import io.ktor.client.request.patch
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
@@ -713,6 +715,188 @@ class OrbitApiClient(
                     throw Exception(envelope.error ?: envelope.message ?: "Preflight check failed")
                 }
             } else {
+                throwHttpException(response)
+            }
+        }
+    }
+
+    /**
+     * Lists shareable merchant Payment Links.
+     */
+    suspend fun listPaymentLinks(): Result<List<PaymentLinkDto>> {
+        return runCatching {
+            val resolvedBaseUrl = PreferencesManager.normalizeServerUrl(baseUrl)
+            val url = "$resolvedBaseUrl/api/v1/payment-links"
+            val response: HttpResponse = client.get(url) {
+                applyAuthHeaders()
+            }
+            if (response.status.isSuccess()) {
+                val envelope = response.body<ApiEnvelope<List<PaymentLinkDto>>>()
+                if (envelope.success && envelope.data != null) {
+                    envelope.data
+                } else {
+                    throw Exception(envelope.error ?: envelope.message ?: "Failed to load payment links")
+                }
+            } else {
+                throwHttpException(response)
+            }
+        }
+    }
+
+    /**
+     * Creates a new shareable merchant Payment Link.
+     */
+    suspend fun createPaymentLink(request: CreatePaymentLinkRequest): Result<PaymentLinkDto> {
+        return runCatching {
+            val resolvedBaseUrl = PreferencesManager.normalizeServerUrl(baseUrl)
+            val url = "$resolvedBaseUrl/api/v1/payment-links"
+            val response: HttpResponse = client.post(url) {
+                contentType(ContentType.Application.Json)
+                applyAuthHeaders()
+                setBody(request)
+            }
+            if (response.status.isSuccess()) {
+                val envelope = response.body<ApiEnvelope<PaymentLinkDto>>()
+                if (envelope.success && envelope.data != null) {
+                    envelope.data
+                } else {
+                    throw Exception(envelope.error ?: envelope.message ?: "Failed to create payment link")
+                }
+            } else {
+                throwHttpException(response)
+            }
+        }
+    }
+
+    /**
+     * Updates a Payment Link (e.g., toggle active/paused).
+     */
+    suspend fun updatePaymentLink(id: String, request: UpdatePaymentLinkRequest): Result<PaymentLinkDto> {
+        return runCatching {
+            val resolvedBaseUrl = PreferencesManager.normalizeServerUrl(baseUrl)
+            val encodedId = id.trim().encodeURLPathPart()
+            val url = "$resolvedBaseUrl/api/v1/payment-links/$encodedId"
+            val response: HttpResponse = client.patch(url) {
+                contentType(ContentType.Application.Json)
+                applyAuthHeaders()
+                setBody(request)
+            }
+            if (response.status.isSuccess()) {
+                val envelope = response.body<ApiEnvelope<PaymentLinkDto>>()
+                if (envelope.success && envelope.data != null) {
+                    envelope.data
+                } else {
+                    throw Exception(envelope.error ?: envelope.message ?: "Failed to update payment link")
+                }
+            } else {
+                throwHttpException(response)
+            }
+        }
+    }
+
+    /**
+     * Deletes a Payment Link.
+     */
+    suspend fun deletePaymentLink(id: String): Result<Unit> {
+        return runCatching {
+            val resolvedBaseUrl = PreferencesManager.normalizeServerUrl(baseUrl)
+            val encodedId = id.trim().encodeURLPathPart()
+            val url = "$resolvedBaseUrl/api/v1/payment-links/$encodedId"
+            val response: HttpResponse = client.delete(url) {
+                applyAuthHeaders()
+            }
+            if (!response.status.isSuccess()) {
+                throwHttpException(response)
+            }
+        }
+    }
+
+    /**
+     * Fetches SIM Pool & Limits overview including connected phones and monthly limits.
+     */
+    suspend fun fetchWalletsOverview(): Result<WalletsOverviewDto> {
+        return runCatching {
+            val resolvedBaseUrl = PreferencesManager.normalizeServerUrl(baseUrl)
+            val url = "$resolvedBaseUrl/api/v1/wallets/overview"
+            val response: HttpResponse = client.get(url) {
+                applyAuthHeaders()
+            }
+            if (response.status.isSuccess()) {
+                val envelope = response.body<ApiEnvelope<WalletsOverviewDto>>()
+                if (envelope.success && envelope.data != null) {
+                    envelope.data
+                } else {
+                    throw Exception(envelope.error ?: envelope.message ?: "Failed to load SIM pool")
+                }
+            } else {
+                throwHttpException(response)
+            }
+        }
+    }
+
+    /**
+     * Adds a new MFS SIM number to the merchant's SIM Pool.
+     */
+    suspend fun createWallet(request: CreateWalletRequest): Result<WalletRotationDto> {
+        return runCatching {
+            val resolvedBaseUrl = PreferencesManager.normalizeServerUrl(baseUrl)
+            val url = "$resolvedBaseUrl/api/v1/wallets"
+            val response: HttpResponse = client.post(url) {
+                contentType(ContentType.Application.Json)
+                applyAuthHeaders()
+                setBody(request)
+            }
+            if (response.status.isSuccess()) {
+                val envelope = response.body<ApiEnvelope<WalletRotationDto>>()
+                if (envelope.success && envelope.data != null) {
+                    envelope.data
+                } else {
+                    throw Exception(envelope.error ?: envelope.message ?: "Failed to add SIM number")
+                }
+            } else {
+                throwHttpException(response)
+            }
+        }
+    }
+
+    /**
+     * Updates a SIM wallet (pause/resume, set primary, update limits).
+     */
+    suspend fun updateWallet(id: String, request: UpdateWalletRequest): Result<WalletRotationDto> {
+        return runCatching {
+            val resolvedBaseUrl = PreferencesManager.normalizeServerUrl(baseUrl)
+            val encodedId = id.trim().encodeURLPathPart()
+            val url = "$resolvedBaseUrl/api/v1/wallets/$encodedId"
+            val response: HttpResponse = client.patch(url) {
+                contentType(ContentType.Application.Json)
+                applyAuthHeaders()
+                setBody(request)
+            }
+            if (response.status.isSuccess()) {
+                val envelope = response.body<ApiEnvelope<WalletRotationDto>>()
+                if (envelope.success && envelope.data != null) {
+                    envelope.data
+                } else {
+                    throw Exception(envelope.error ?: envelope.message ?: "Failed to update SIM wallet")
+                }
+            } else {
+                throwHttpException(response)
+            }
+        }
+    }
+
+    /**
+     * Removes a SIM wallet from the merchant's SIM Pool.
+     */
+    suspend fun deleteWallet(id: String): Result<Unit> {
+        return runCatching {
+            val resolvedBaseUrl = PreferencesManager.normalizeServerUrl(baseUrl)
+            val encodedId = id.trim().encodeURLPathPart()
+            val url = "$resolvedBaseUrl/api/v1/wallets/$encodedId"
+            val response: HttpResponse = client.delete(url) {
+                applyAuthHeaders()
+            }
+            if (!response.status.isSuccess()) {
                 throwHttpException(response)
             }
         }

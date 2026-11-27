@@ -57,7 +57,13 @@ export const listMerchantWebhooksQuerySchema = z.object({
   offset: z.coerce.number().int().min(0).default(0),
 });
 
+export const verifySetupUnlockOtpSchema = z.object({
+  code: z.string().trim().regex(/^\d{6}$/, 'Enter the 6-digit OTP code'),
+  otpId: z.string().trim().min(1).max(120).optional(),
+});
+
 export type UpdateMerchantSettingsInput = z.infer<typeof updateMerchantSettingsSchema>;
 export type RotateKeysInput = z.infer<typeof rotateKeysSchema>;
 export type RegisterMerchantInput = z.infer<typeof registerMerchantSchema>;
 export type ListMerchantWebhooksQuery = z.infer<typeof listMerchantWebhooksQuerySchema>;
+export type VerifySetupUnlockOtpInput = z.infer<typeof verifySetupUnlockOtpSchema>;

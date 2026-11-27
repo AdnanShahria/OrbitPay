@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { authFetch, getAuthToken, unwrapApiResponse } from '@/shared/utils/api';
+import { getSetupLockHeaders } from './useSetupLock';
 import type { VerificationMode } from '@/features/checkout/useCheckout';
 
 export type MerchantReceiptPolicy =
@@ -98,7 +99,10 @@ export function useUpdateMerchantSettings() {
     mutationFn: async (payload: UpdateMerchantSettingsDTO) => {
       const res = await authFetch('/api/v1/merchants/settings', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...getSetupLockHeaders(),
+        },
         body: JSON.stringify(payload),
       });
 
@@ -120,7 +124,10 @@ export function useRotateWebhookSecret() {
       const normalizedTarget = target === 'DEVICE_KEY' ? 'DEVICE_API_KEY' : target;
       const res = await authFetch('/api/v1/merchants/keys/rotate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...getSetupLockHeaders(),
+        },
         body: JSON.stringify({ target: normalizedTarget }),
       });
 
@@ -155,7 +162,10 @@ export function useTestWebhookPing() {
     mutationFn: async (webhookUrl?: string) => {
       const res = await authFetch('/api/v1/merchants/webhook/test', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...getSetupLockHeaders(),
+        },
         body: JSON.stringify(webhookUrl ? { webhookUrl } : {}),
       });
 
@@ -201,7 +211,12 @@ export function useReplayMerchantWebhook() {
     mutationFn: async (deliveryId: string) => {
       const res = await authFetch(
         `/api/v1/merchants/webhooks/${encodeURIComponent(deliveryId)}/replay`,
-        { method: 'POST' },
+        {
+          method: 'POST',
+          headers: {
+            ...getSetupLockHeaders(),
+          },
+        },
       );
       return unwrapApiResponse<{ status?: string; responseStatus?: number }>(
         res,

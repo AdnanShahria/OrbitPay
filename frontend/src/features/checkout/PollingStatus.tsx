@@ -95,7 +95,6 @@ function formatEscalationLabel(reason?: string | null): string {
 function buildPrintableInvoiceHtml(params: {
   invoiceNumber: string;
   storeName: string;
-  orderId: string;
   trxId: string;
   providerName: string;
   senderNumber: string;
@@ -105,7 +104,6 @@ function buildPrintableInvoiceHtml(params: {
   const {
     invoiceNumber,
     storeName,
-    orderId,
     trxId,
     providerName,
     senderNumber,
@@ -118,7 +116,7 @@ function buildPrintableInvoiceHtml(params: {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Receipt ${escapeHtml(invoiceNumber)} — ${escapeHtml(storeName)}</title>
+  <title>${escapeHtml(invoiceNumber)}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -128,7 +126,7 @@ function buildPrintableInvoiceHtml(params: {
       padding: 32px 16px;
     }
     .sheet {
-      max-width: 560px;
+      max-width: 500px;
       margin: 0 auto;
       background: #ffffff;
       border: 1px solid #e4e4e7;
@@ -136,7 +134,7 @@ function buildPrintableInvoiceHtml(params: {
       overflow: hidden;
     }
     .header {
-      padding: 24px 28px;
+      padding: 22px 24px;
       border-bottom: 1px solid #e4e4e7;
       display: flex;
       justify-content: space-between;
@@ -155,7 +153,7 @@ function buildPrintableInvoiceHtml(params: {
       text-transform: uppercase;
     }
     .hero {
-      padding: 20px 28px;
+      padding: 20px 24px;
       background: #f4f4f6;
       border-bottom: 1px solid #e4e4e7;
       display: flex;
@@ -164,7 +162,7 @@ function buildPrintableInvoiceHtml(params: {
     }
     .hero-label { font-size: 12px; color: #71717a; font-weight: 500; }
     .hero-amount { font-size: 26px; font-weight: 600; font-family: ui-monospace, monospace; }
-    .section { padding: 20px 28px; }
+    .section { padding: 18px 24px; }
     .row {
       display: flex;
       justify-content: space-between;
@@ -184,18 +182,17 @@ function buildPrintableInvoiceHtml(params: {
         <div class="brand">${escapeHtml(storeName)}</div>
         <div class="sub">${escapeHtml(invoiceNumber)}</div>
       </div>
-      <span class="badge">Paid</span>
+      <span class="badge">Verified</span>
     </div>
     <div class="hero">
       <span class="hero-label">Amount Paid</span>
       <span class="hero-amount">${escapeHtml(formatBDT(totalPaid))}</span>
     </div>
     <div class="section">
-      <div class="row"><span class="row-label">Order ID</span><span class="row-val mono">${escapeHtml(orderId)}</span></div>
       <div class="row"><span class="row-label">Method</span><span class="row-val">${escapeHtml(providerName)}</span></div>
       ${trxId ? `<div class="row"><span class="row-label">Transaction ID</span><span class="row-val mono">${escapeHtml(trxId)}</span></div>` : ''}
       ${senderNumber ? `<div class="row"><span class="row-label">Mobile Number</span><span class="row-val mono">${escapeHtml(senderNumber)}</span></div>` : ''}
-      <div class="row"><span class="row-label">Confirmed At</span><span class="row-val">${escapeHtml(confirmedAtText)}</span></div>
+      <div class="row"><span class="row-label">Time</span><span class="row-val">${escapeHtml(confirmedAtText)}</span></div>
     </div>
   </div>
 </body>
@@ -230,6 +227,7 @@ export function PollingStatus({
   const [confirmedAt, setConfirmedAt] = useState<Date>(() => new Date());
 
   const hasNotifiedVerifiedRef = useRef(initialVerified);
+  const isCheckingStatusRef = useRef(false);
 
   useEffect(() => {
     if (initialVerified) {
@@ -259,6 +257,9 @@ export function PollingStatus({
     }
 
     const checkStatus = async () => {
+      if (isCheckingStatusRef.current) return false;
+      if (typeof document !== 'undefined' && document.hidden) return false;
+      isCheckingStatusRef.current = true;
       try {
         const res = await fetch(
           `/api/v1/checkout/status/${encodeURIComponent(orderId)}?merchantId=${encodeURIComponent(merchantId)}`,
@@ -310,6 +311,8 @@ export function PollingStatus({
         }
       } catch {
         // Network retry on next interval
+      } finally {
+        isCheckingStatusRef.current = false;
       }
       return false;
     };
@@ -319,7 +322,7 @@ export function PollingStatus({
       if (done) {
         clearInterval(interval);
       }
-    }, 2500);
+    }, 3500);
 
     return () => clearInterval(interval);
   }, [merchantId, orderId, trxId, expectedAmount, pollStatus, meta.name, onVerified, onStatusChange]);
@@ -337,13 +340,14 @@ export function PollingStatus({
   };
 
   const handleSaveReceipt = () => {
-    const cleanRef = (orderId || 'RECEIPT').replace(/[^a-zA-Z0-9_-]/g, '');
-    const invoiceNumber = `ORB-${cleanRef.slice(0, 12).toUpperCase()}`;
+    const resolvedStore = storeName?.trim() || 'ORBIT Pay';
+    const isWhole = Math.abs(verifiedAmount - Math.round(verifiedAmount)) < 0.005;
+    const tkText = isWhole ? `${Math.round(verifiedAmount)}tk` : `${verifiedAmount.toFixed(2)}tk`;
+    const invoiceNumber = `${resolvedStore}||${tkText}||verified`;
 
     const html = buildPrintableInvoiceHtml({
       invoiceNumber,
-      storeName: storeName || 'ORBIT Pay',
-      orderId,
+      storeName: resolvedStore,
       trxId,
       providerName: meta.name,
       senderNumber,
@@ -367,11 +371,12 @@ export function PollingStatus({
       return;
     }
 
+    const safeFileSlug = (trxId || orderId || 'payment').replace(/[^a-zA-Z0-9_-]/g, '');
     const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = `receipt-${cleanRef || 'payment'}.html`;
+    anchor.download = `receipt-${safeFileSlug || 'payment'}.html`;
     document.body.appendChild(anchor);
     anchor.click();
     document.body.removeChild(anchor);

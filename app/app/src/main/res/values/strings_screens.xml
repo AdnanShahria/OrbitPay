@@ -73,8 +73,8 @@
     <string name="history_detail_unknown">Not available</string>
 
     <!-- Verify Screen -->
-    <string name="verify_title">Manual verification</string>
-    <string name="verify_subtitle">Tap an unclaimed SMS to link it with a pending order</string>
+    <string name="verify_title">Payments</string>
+    <string name="verify_subtitle">Review pending payments or match unmatched SMS</string>
     <string name="verify_loading_unclaimed">Loading unclaimed payments…</string>
     <string name="verify_empty_title">All payments reconciled</string>
     <string name="verify_empty_desc">There are no unclaimed MFS transactions waiting for manual matching right now.</string>

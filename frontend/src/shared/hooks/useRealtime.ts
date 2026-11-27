@@ -24,7 +24,8 @@ export interface UseRealtimeOptions {
 }
 
 const BACKOFF_STEPS_MS = [3000, 6000, 12000, 30000] as const;
-const EDGE_SYNC_INTERVAL_MS = 8000;
+const EDGE_SYNC_INTERVAL_CONNECTED_MS = 60_000;
+const EDGE_SYNC_INTERVAL_DISCONNECTED_MS = 20_000;
 
 interface RecentIntentSnapshot {
   id: string;
@@ -53,6 +54,12 @@ export function useRealtime(options?: UseRealtimeOptions) {
   const notifiedVerifiedRef = useRef<Set<string>>(new Set());
   const notifiedPendingRef = useRef<Set<string>>(new Set());
   const baselineSeededRef = useRef(false);
+  const statusRef = useRef<RealtimeStatus>('disconnected');
+  const isSyncingIntentsRef = useRef(false);
+
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
 
   const notifyPaymentVerified = useCallback(
     (payload: {
@@ -422,10 +429,24 @@ export function useRealtime(options?: UseRealtimeOptions) {
     }
 
     let cancelled = false;
+    let lastSyncAt = 0;
     baselineSeededRef.current = false;
 
-    const syncRecentIntents = async () => {
+    const syncRecentIntents = async (isInitial = false) => {
       if (cancelled || !getAuthToken()) return;
+      if (typeof document !== 'undefined' && document.hidden) return;
+      if (isSyncingIntentsRef.current) return;
+
+      const minInterval =
+        statusRef.current === 'connected'
+          ? EDGE_SYNC_INTERVAL_CONNECTED_MS
+          : EDGE_SYNC_INTERVAL_DISCONNECTED_MS;
+      if (!isInitial && baselineSeededRef.current && Date.now() - lastSyncAt < minInterval) {
+        return;
+      }
+
+      isSyncingIntentsRef.current = true;
+      lastSyncAt = Date.now();
       try {
         const res = await authFetch('/api/v1/payment-intents?limit=12&offset=0');
         if (!res.ok) return;
@@ -500,13 +521,15 @@ export function useRealtime(options?: UseRealtimeOptions) {
         }
       } catch {
         // Silent background retry
+      } finally {
+        isSyncingIntentsRef.current = false;
       }
     };
 
-    void syncRecentIntents();
+    void syncRecentIntents(true);
     const timer = setInterval(() => {
-      void syncRecentIntents();
-    }, EDGE_SYNC_INTERVAL_MS);
+      void syncRecentIntents(false);
+    }, EDGE_SYNC_INTERVAL_DISCONNECTED_MS);
 
     return () => {
       cancelled = true;

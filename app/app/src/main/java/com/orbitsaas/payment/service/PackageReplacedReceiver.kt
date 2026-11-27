@@ -6,6 +6,7 @@ import android.content.Intent
 import android.util.Log
 import com.orbitsaas.payment.data.local.PreferencesManager
 import com.orbitsaas.payment.update.AppUpdateManager
+import com.orbitsaas.payment.widget.PendingPaymentsWidgetProvider
 
 /**
  * Automatically cleans up cached APK installers and restarts StickyForegroundService
@@ -18,6 +19,7 @@ class PackageReplacedReceiver : BroadcastReceiver() {
 
         Log.i(TAG, "App updated (MY_PACKAGE_REPLACED). Cleaning update cache and resuming sync...")
         AppUpdateManager.cleanupUpdateCache(context)
+        PendingPaymentsWidgetProvider.updateAllWidgets(context)
 
         val prefs = PreferencesManager(context)
         if (prefs.isForegroundServiceEnabled && prefs.isConfigured()) {

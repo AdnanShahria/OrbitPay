@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react';
 import { DeviceLiveBadge } from '@/features/device/DeviceLiveBadge';
-import { DevicePairingQR } from '@/features/device/DevicePairingQR';
 import { AnalyticsOverview } from '@/features/transactions/AnalyticsOverview';
 import { TransactionTable } from '@/features/transactions/TransactionTable';
 import { WalletManager } from '@/features/wallets/WalletManager';
 import { useWallets } from '@/features/wallets/useWallets';
-import { MerchantSettings } from '@/features/merchants/MerchantSettings';
 import { useMerchant } from '@/features/merchants/useMerchant';
-import { IntegrationGuide } from '@/features/merchants/IntegrationGuide';
+import {
+  ConsolidatedSetupHub,
+  type DemoVerifiedResult,
+} from '@/features/merchants/ConsolidatedSetupHub';
 import { OrdersManager } from '@/features/orders/OrdersManager';
 import { PaymentIntentsManager } from '@/features/payments/PaymentIntentsManager';
 import { PaymentLinksManager } from '@/features/payment-links/PaymentLinksManager';
@@ -21,13 +22,11 @@ import { PollingStatus } from '@/features/checkout/PollingStatus';
 import { useCheckout, type CheckoutConfig } from '@/features/checkout/useCheckout';
 import { Button } from '@/components/base/buttons/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/base/card/card';
-import { Input } from '@/components/base/input/input';
 import { Drawer, DrawerHeader, DrawerBody } from '@/components/base/drawer/drawer';
 import { Chip } from '@/components/base/badges/chip';
 import { StatusDot } from '@/components/base/badges/status-dot';
 import { Spinner } from '@/components/base/spinner/spinner';
 import { ThemeToggle } from '@/components/application/theme/theme-toggle';
-import { toast } from '@/components/base/toast/toast';
 import { OrbitFloatingWhatsapp, OrbitMarketingBar } from '@/features/platform/OrbitMarketingBar';
 import { cx } from '@/utils/cx';
 import { useRealtime } from '@/shared/hooks/useRealtime';
@@ -36,8 +35,6 @@ import { formatBDT, MFS_METADATA } from '@/shared/utils/format';
 import {
   RiLayoutGridLine,
   RiSmartphoneLine,
-  RiFileList3Line,
-  RiQrCodeLine,
   RiSettings3Line,
   RiShoppingBag3Line,
   RiArrowDownSLine,
@@ -47,9 +44,7 @@ import {
   RiFlashlightLine,
   RiLock2Line,
   RiMenuLine,
-  RiFileCopyLine,
   RiShoppingCart2Line,
-  RiCodeSSlashLine,
   RiLogoutBoxRLine,
   RiUser3Line,
   RiBankCardLine,
@@ -63,11 +58,7 @@ export type PortalTab =
   | 'payment_links'
   | 'orders'
   | 'wallets'
-  | 'transactions'
-  | 'device'
-  | 'settings'
-  | 'integration'
-  | 'checkout_demo';
+  | 'setup';
 
 const ALL_NAV_ITEMS: Array<{
   id: PortalTab;
@@ -85,11 +76,7 @@ const ALL_NAV_ITEMS: Array<{
     requiresEcommerceModule: true,
   },
   { id: 'wallets', label: 'SIM Pool & Limits', icon: RiSmartphoneLine },
-  { id: 'transactions', label: 'Transactions & Typo', icon: RiFileList3Line },
-  { id: 'device', label: 'Device Pairing QR', icon: RiQrCodeLine },
-  { id: 'settings', label: 'Storefront & Webhook', icon: RiSettings3Line },
-  { id: 'integration', label: 'Integration Guide', icon: RiCodeSSlashLine },
-  { id: 'checkout_demo', label: 'Checkout Widget Demo', icon: RiShoppingBag3Line },
+  { id: 'setup', label: 'Setup & Controls', icon: RiSettings3Line },
 ];
 
 function extractHost(url?: string): string {
@@ -337,12 +324,7 @@ function AuthenticatedMerchantPortal({ onEnterAdmin }: { onEnterAdmin: () => voi
   const [demoAmount, setDemoAmount] = useState(50);
   const [demoOrderId, setDemoOrderId] = useState('ORD-10492');
   const [demoCustomerEmail, setDemoCustomerEmail] = useState('');
-  const [demoVerifiedResult, setDemoVerifiedResult] = useState<{
-    orderId: string;
-    trxId: string;
-    amount: number;
-    matchType?: string | null;
-  } | null>(null);
+  const [demoVerifiedResult, setDemoVerifiedResult] = useState<DemoVerifiedResult | null>(null);
 
   const handleSimulateSms = async () => {
     setIsSimulating(true);
@@ -359,28 +341,6 @@ function AuthenticatedMerchantPortal({ onEnterAdmin }: { onEnterAdmin: () => voi
   };
 
   const activeNavItem = navItems.find((item) => item.id === activeTab) ?? navItems[0];
-
-  const origin =
-    typeof window !== 'undefined' ? window.location.origin : 'https://payment.orbitsaas.cloud';
-
-  const embedSnippet = `<!-- 1. Include ORBIT Widget Script -->
-<script src="${origin}/widget.js"></script>
-
-<!-- 2. Trigger Checkout with server-created sessionId & sessionToken -->
-<script>
-  function launchOrbitPay(session) {
-    OrbitPay.open({
-      sessionId: session.sessionId,
-      sessionToken: session.sessionToken,
-      onSuccess: function(data) {
-        window.location.href = "/order-confirmed?id=" + data.orderId + "&trxId=" + data.trxId;
-      },
-      onPending: function(data) {
-        console.log("Submitted for verification:", data.status);
-      }
-    });
-  }
-</script>`;
 
   const renderNavList = (onSelect?: () => void) => (
     <nav className="space-y-1" aria-label="Portal sections">
@@ -616,7 +576,7 @@ function AuthenticatedMerchantPortal({ onEnterAdmin }: { onEnterAdmin: () => voi
                     <Button
                       variant="ghost"
                       size="small"
-                      onClick={() => setActiveTab('transactions')}
+                      onClick={() => setActiveTab('setup')}
                       trailingIcon={RiExternalLinkLine}
                     >
                       View full ledger
@@ -707,9 +667,9 @@ function AuthenticatedMerchantPortal({ onEnterAdmin }: { onEnterAdmin: () => voi
                         variant="secondary"
                         size="small"
                         className="w-full"
-                        onClick={() => setActiveTab('device')}
+                        onClick={() => setActiveTab('setup')}
                       >
-                        Device Pairing Instructions
+                        Open Setup &amp; Controls
                       </Button>
                     </CardContent>
                   </Card>
@@ -726,127 +686,19 @@ function AuthenticatedMerchantPortal({ onEnterAdmin }: { onEnterAdmin: () => voi
 
           {activeTab === 'wallets' && <WalletManager />}
 
-          {activeTab === 'transactions' && (
-            <div className="space-y-5">
-              <Card>
-                <CardContent className="flex flex-col justify-between gap-4 pt-5 sm:flex-row sm:items-center sm:pt-6">
-                  <div className="flex items-start gap-3">
-                    <div className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-border-button-default bg-background-secondary-default text-foreground-icon-primary">
-                      <RiFileList3Line className="size-5" aria-hidden />
-                    </div>
-                    <div className="space-y-0.5">
-                      <h2 className="text-title-2-medium text-text-primary">
-                        SMS Transaction Ledger &amp; Typo Resolver
-                      </h2>
-                      <p className="text-body-regular text-text-secondary">
-                        Captured MFS SMS alerts from your companion phone with one-click typo matching.
-                      </p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-              <TransactionTable />
-            </div>
-          )}
-
-          {activeTab === 'device' && <DevicePairingQR merchantId={merchantId} />}
-
-          {activeTab === 'settings' && <MerchantSettings />}
-
-          {activeTab === 'integration' && <IntegrationGuide />}
-
-          {activeTab === 'checkout_demo' && (
-            <div className="space-y-5">
-              <Card>
-                <CardContent className="flex flex-col justify-between gap-4 pt-5 sm:flex-row sm:items-center sm:pt-6">
-                  <div className="flex items-start gap-3">
-                    <div className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-border-button-default bg-background-secondary-default text-foreground-icon-primary">
-                      <RiShoppingBag3Line className="size-5" aria-hidden />
-                    </div>
-                    <div className="space-y-0.5">
-                      <h2 className="text-title-2-medium text-text-primary">
-                        Checkout Widget Playground
-                      </h2>
-                      <p className="text-body-regular text-text-secondary">
-                        Preview the minimal buyer checkout flow for {storeName}.
-                      </p>
-                    </div>
-                  </div>
-                  <Button
-                    variant="primary"
-                    size="medium"
-                    onClick={() => setIsDemoModalOpen(true)}
-                    leadingIcon={RiShoppingBag3Line}
-                    className="min-h-11 sm:min-h-10 shrink-0"
-                  >
-                    Launch Modal Checkout
-                  </Button>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardContent className="p-5 sm:p-6 space-y-6">
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <Input
-                      label="Simulated Order Amount (BDT)"
-                      type="number"
-                      value={String(demoAmount)}
-                      onChange={(val) => setDemoAmount(Number(val) || 0)}
-                      inputClassName="font-mono tnum"
-                    />
-                    <Input
-                      label="Simulated Order ID"
-                      value={demoOrderId}
-                      onChange={setDemoOrderId}
-                      inputClassName="font-mono"
-                    />
-                    <Input
-                      label="Customer Email (OrbitMail Invoice)"
-                      type="email"
-                      value={demoCustomerEmail}
-                      onChange={setDemoCustomerEmail}
-                      placeholder="buyer@example.com"
-                    />
-                  </div>
-
-                  {demoVerifiedResult && (
-                    <div className="p-4 rounded-2xl bg-notification-success-background border border-separator-border text-notification-success-foreground space-y-1">
-                      <span className="text-body-medium block">Demo payment verified</span>
-                      <p className="text-caption-1-regular">
-                        Order #{demoVerifiedResult.orderId} matched with TrxID{' '}
-                        <span className="font-mono">{demoVerifiedResult.trxId}</span> for{' '}
-                        <span className="font-mono tnum">
-                          {formatBDT(demoVerifiedResult.amount)}
-                        </span>
-                        {demoVerifiedResult.matchType ? ` (${demoVerifiedResult.matchType})` : ''}. Webhook dispatched.
-                      </p>
-                    </div>
-                  )}
-
-                  <div className="space-y-2.5 pt-4 border-t border-separator-border">
-                    <div className="flex items-center justify-between gap-2">
-                      <h3 className="text-body-medium text-text-primary">
-                        Storefront Script Embed Code
-                      </h3>
-                      <Button
-                        variant="secondary"
-                        size="xs"
-                        leadingIcon={RiFileCopyLine}
-                        onClick={() => {
-                          navigator.clipboard.writeText(embedSnippet);
-                          toast.success('Embed snippet copied to clipboard');
-                        }}
-                      >
-                        Copy snippet
-                      </Button>
-                    </div>
-                    <pre className="p-4 rounded-2xl bg-background-secondary-default border border-border-button-default text-text-primary font-mono text-caption-1-regular overflow-x-auto select-all leading-relaxed">
-                      {embedSnippet}
-                    </pre>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
+          {activeTab === 'setup' && (
+            <ConsolidatedSetupHub
+              merchantId={merchantId}
+              storeName={storeName}
+              demoAmount={demoAmount}
+              onChangeDemoAmount={setDemoAmount}
+              demoOrderId={demoOrderId}
+              onChangeDemoOrderId={setDemoOrderId}
+              demoCustomerEmail={demoCustomerEmail}
+              onChangeDemoCustomerEmail={setDemoCustomerEmail}
+              demoVerifiedResult={demoVerifiedResult}
+              onLaunchDemoModal={() => setIsDemoModalOpen(true)}
+            />
           )}
         </main>
       </div>

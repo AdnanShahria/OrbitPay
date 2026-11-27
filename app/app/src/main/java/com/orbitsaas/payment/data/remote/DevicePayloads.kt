@@ -496,3 +496,85 @@ data class DevicePreflightData(
     val deviceStatus: PreflightDeviceStatusDto = PreflightDeviceStatusDto(),
     val recommendations: List<String> = emptyList()
 )
+
+@Serializable
+data class PaymentLinkDto(
+    val id: String = "",
+    val merchantId: String = "",
+    val merchantSlug: String? = null,
+    val slug: String = "",
+    val sharePath: String = "",
+    val shareUrl: String = "",
+    val title: String = "",
+    val description: String? = null,
+    val vertical: String = "custom",
+    val amountType: String = "FIXED",
+    val fixedAmount: Double? = null,
+    val minAmount: Double? = null,
+    val maxAmount: Double? = null,
+    val currency: String = "BDT",
+    val isActive: Boolean = true,
+    val maxUses: Int? = null,
+    val usedCount: Int = 0,
+    val expiresAt: String? = null,
+    val createdAt: String? = null,
+    val updatedAt: String? = null
+)
+
+@Serializable
+data class CreatePaymentLinkRequest(
+    val title: String,
+    val description: String? = null,
+    val vertical: String = "custom",
+    val amountType: String = "FIXED",
+    val fixedAmount: Double? = null,
+    val minAmount: Double? = null,
+    val maxAmount: Double? = null
+)
+
+@Serializable
+data class UpdatePaymentLinkRequest(
+    val isActive: Boolean? = null,
+    val title: String? = null,
+    val description: String? = null,
+    val fixedAmount: Double? = null
+)
+
+@Serializable
+data class WalletsOverviewSummaryDto(
+    val totalWallets: Int = 0,
+    val activeWallets: Int = 0,
+    val onlineDeviceCount: Int = 0,
+    val totalDeviceCount: Int = 0,
+    val overflowWarningCount: Int = 0,
+    val hardLimitReachedCount: Int = 0
+)
+
+@Serializable
+data class WalletsOverviewDto(
+    val wallets: List<WalletRotationDto> = emptyList(),
+    val devices: List<ConnectedDeviceDto> = emptyList(),
+    val summary: WalletsOverviewSummaryDto = WalletsOverviewSummaryDto()
+)
+
+@Serializable
+data class CreateWalletRequest(
+    val provider: String,
+    val walletNumber: String,
+    val accountType: String = "PERSONAL",
+    val label: String? = null,
+    val simSlotIndex: Int? = null,
+    val safeVolumeLimit: Double = 250000.0,
+    val monthlyVolumeLimit: Double = 300000.0,
+    val isPrimary: Boolean = false
+)
+
+@Serializable
+data class UpdateWalletRequest(
+    val isActive: Boolean? = null,
+    val isPrimary: Boolean? = null,
+    val label: String? = null,
+    val safeVolumeLimit: Double? = null,
+    val monthlyVolumeLimit: Double? = null,
+    val simSlotIndex: Int? = null
+)

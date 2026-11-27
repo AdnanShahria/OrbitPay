@@ -10,6 +10,7 @@ import {
   registerMerchantSchema,
   rotateKeysSchema,
   updateMerchantSettingsSchema,
+  verifySetupUnlockOtpSchema,
 } from './merchants.schema';
 import {
   getMerchantProfile,
@@ -20,6 +21,15 @@ import {
   sendMerchantTestWebhook,
   updateMerchantSettings,
 } from './merchants.service';
+import {
+  assertSetupUnlockedForJwt,
+  maskEmailAddress,
+  requestSetupUnlockOtp,
+  SETUP_LOCK_ADMIN_EMAIL,
+  SETUP_UNLOCK_HEADER,
+  validateSetupUnlockToken,
+  verifySetupUnlockOtp,
+} from './setup-lock.service';
 
 const router = new Hono<AppContextEnv>();
 
@@ -48,10 +58,64 @@ router.get('/profile', authMerchantMiddleware, async (c) => {
 });
 
 /**
+ * GET /api/v1/merchants/setup-lock/status
+ * Checks whether setup/developer editing is currently unlocked via X-Setup-Unlock-Token.
+ */
+router.get('/setup-lock/status', authMerchantMiddleware, async (c) => {
+  const merchantId = c.get('merchantId')!;
+  const claims = await validateSetupUnlockToken(
+    c.env,
+    c.req.header(SETUP_UNLOCK_HEADER),
+    merchantId,
+    c.get('sessionId')
+  );
+  return c.json({
+    success: true,
+    data: {
+      locked: !claims,
+      emailHint: maskEmailAddress(SETUP_LOCK_ADMIN_EMAIL),
+      expiresAt: claims ? new Date(claims.exp * 1000).toISOString() : null,
+    },
+  });
+});
+
+/**
+ * POST /api/v1/merchants/setup-lock/request-otp
+ * Sends a 6-digit setup unlock OTP strictly to the authorized administrator email.
+ */
+router.post('/setup-lock/request-otp', authMerchantMiddleware, requireOwnerRoleMiddleware, async (c) => {
+  const db = c.get('db');
+  const merchant = c.get('merchant')!;
+  const result = await requestSetupUnlockOtp(db, c.env, merchant);
+  return c.json({ success: true, data: result });
+});
+
+/**
+ * POST /api/v1/merchants/setup-lock/verify-otp
+ * Verifies the 6-digit setup unlock OTP and returns a 30-minute unlock token.
+ */
+router.post('/setup-lock/verify-otp', authMerchantMiddleware, requireOwnerRoleMiddleware, async (c) => {
+  const db = c.get('db');
+  const merchant = c.get('merchant')!;
+  const body = await c.req.json();
+  const input = verifySetupUnlockOtpSchema.parse(body);
+  const result = await verifySetupUnlockOtp(
+    db,
+    c.env,
+    merchant,
+    c.get('sessionId'),
+    input.code,
+    input.otpId
+  );
+  return c.json({ success: true, data: result });
+});
+
+/**
  * POST /api/v1/merchants/settings
  * Updates merchant configuration (owner role or server API key required).
  */
 router.post('/settings', authMerchantMiddleware, requireOwnerRoleMiddleware, async (c) => {
+  await assertSetupUnlockedForJwt(c);
   const db = c.get('db');
   const merchantId = c.get('merchantId')!;
   const body = await c.req.json();
@@ -66,6 +130,7 @@ router.post('/settings', authMerchantMiddleware, requireOwnerRoleMiddleware, asy
  * Rotates webhook signing secret, API key, and/or companion app device key.
  */
 router.post('/keys/rotate', authMerchantMiddleware, requireOwnerRoleMiddleware, async (c) => {
+  await assertSetupUnlockedForJwt(c);
   const db = c.get('db');
   const merchantId = c.get('merchantId')!;
   const body = await c.req.json();
@@ -80,6 +145,7 @@ router.post('/keys/rotate', authMerchantMiddleware, requireOwnerRoleMiddleware, 
  * Dispatches a signed `webhook.test` event to the merchant's configured webhookUrl.
  */
 router.post('/webhook/test', authMerchantMiddleware, requireOwnerRoleMiddleware, async (c) => {
+  await assertSetupUnlockedForJwt(c);
   const db = c.get('db');
   const merchant = c.get('merchant')!;
   const result = await sendMerchantTestWebhook(db, c.env, merchant);
@@ -103,6 +169,7 @@ router.get('/webhooks', authMerchantMiddleware, async (c) => {
  * Replays an immutable webhook delivery record.
  */
 router.post('/webhooks/:id/replay', authMerchantMiddleware, requireOwnerRoleMiddleware, async (c) => {
+  await assertSetupUnlockedForJwt(c);
   const db = c.get('db');
   const merchant = c.get('merchant')!;
   const id = c.req.param('id');

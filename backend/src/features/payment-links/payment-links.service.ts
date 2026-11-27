@@ -417,14 +417,13 @@ export async function payPublicPaymentLink(
       expiresInMinutes: 15,
       customer: {
         name: input.customerName,
-        email: input.customerEmail,
-        phone: input.customerPhone,
+        email: input.customerEmail || undefined,
+        phone: input.customerPhone || undefined,
       },
       display: {
         appName: display.appName || merchant.storeName,
         appDomain: display.appDomain,
-        category: display.category || link.vertical,
-        referenceLabel: display.referenceLabel || 'Link Ref',
+        referenceLabel: display.referenceLabel || 'Link',
         title: link.title,
         subtitle: input.referenceNote || display.subtitle || link.description || undefined,
         highlights: display.highlights,

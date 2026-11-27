@@ -19,12 +19,14 @@ export interface DevicePairingQRProps {
   endpoint?: string;
   apiKey?: string;
   merchantId?: string;
+  readOnlyLocked?: boolean;
 }
 
 export function DevicePairingQR({
   endpoint = typeof window !== 'undefined' ? window.location.origin : 'https://payment.orbitsaas.cloud',
   apiKey,
   merchantId = '',
+  readOnlyLocked = false,
 }: DevicePairingQRProps) {
   const [copiedKey, setCopiedKey] = useState(false);
   const [copiedPayload, setCopiedPayload] = useState(false);
@@ -60,6 +62,7 @@ export function DevicePairingQR({
   };
 
   const handleRotateKey = async () => {
+    if (readOnlyLocked) return;
     try {
       const res = await rotateKeyMutation.mutateAsync('DEVICE_KEY');
       if (res?.deviceKey) {
@@ -94,6 +97,7 @@ export function DevicePairingQR({
           <Button
             variant="secondary"
             size="small"
+            disabled={readOnlyLocked}
             onClick={handleRotateKey}
             isLoading={rotateKeyMutation.isPending}
             leadingIcon={RiRefreshLine}

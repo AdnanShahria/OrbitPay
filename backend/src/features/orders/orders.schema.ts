@@ -42,7 +42,12 @@ export const listOrdersQuerySchema = z.object({
 
 export const orderActionSchema = z.object({
   action: z.enum(ORDER_ACTIONS),
-  note: z.string().trim().max(500).optional(),
+  note: z
+    .string()
+    .trim()
+    .max(500)
+    .nullish()
+    .transform((v) => (v == null || v === '' ? undefined : v)),
 });
 
 export type NotifyOrderInput = z.infer<typeof notifyOrderSchema>;

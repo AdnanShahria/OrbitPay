@@ -61,10 +61,27 @@ export const listPaymentIntentsQuerySchema = z.object({
   offset: z.coerce.number().int().min(0).default(0),
 });
 
+const optionalNullableTrimmed = (max: number, min = 0) =>
+  z
+    .string()
+    .trim()
+    .min(min)
+    .max(max)
+    .nullish()
+    .transform((v) => (v == null || v === '' ? undefined : v));
+
 export const resolvePaymentSchema = z.object({
   decision: z.enum(['APPROVE', 'REJECT']),
-  expectedStateVersion: z.number().int().positive().optional(),
-  resolutionSource: z.enum(RESOLUTION_SOURCES).optional(),
+  expectedStateVersion: z
+    .number()
+    .int()
+    .positive()
+    .nullish()
+    .transform((v) => (v == null ? undefined : v)),
+  resolutionSource: z
+    .enum(RESOLUTION_SOURCES)
+    .nullish()
+    .transform((v) => (v == null ? undefined : v)),
   resolvedBy: z
     .object({
       id: z.string().optional(),
@@ -72,21 +89,28 @@ export const resolvePaymentSchema = z.object({
       name: z.string().optional(),
       role: z.string().optional(),
     })
-    .optional(),
-  reason: z.string().trim().max(500).optional(),
-  suppressWebhookEcho: z.boolean().optional().default(false),
-  trxId: z.string().trim().min(3).max(40).optional(),
+    .nullish()
+    .transform((v) => (v == null ? undefined : v)),
+  reason: optionalNullableTrimmed(500),
+  suppressWebhookEcho: z
+    .boolean()
+    .nullish()
+    .transform((v) => Boolean(v)),
+  trxId: optionalNullableTrimmed(40, 3),
 });
 
 export const checkoutResolveAliasSchema = resolvePaymentSchema.extend({
-  paymentIntentId: z.string().trim().optional(),
-  externalOrderId: z.string().trim().optional(),
+  paymentIntentId: z.string().trim().nullish().transform((v) => v ?? undefined),
+  externalOrderId: z.string().trim().nullish().transform((v) => v ?? undefined),
 });
 
 export const paymentActionTriggerSchema = z.object({
   actionId: z.string().trim().min(1).max(64),
-  note: z.string().trim().max(500).optional(),
-  payload: z.record(z.unknown()).optional(),
+  note: optionalNullableTrimmed(500),
+  payload: z
+    .record(z.unknown())
+    .nullish()
+    .transform((v) => (v == null ? undefined : v)),
 });
 
 export const backfillPaymentIntentSchema = z.object({

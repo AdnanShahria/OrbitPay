@@ -35,6 +35,7 @@ const corsMiddleware = cors({
     'X-Device-Key',
     'X-Admin-Key',
     'X-Session-Token',
+    'X-Setup-Unlock-Token',
     'X-Orbit-Signature',
     'X-Orbit-Signature-V2',
   ],

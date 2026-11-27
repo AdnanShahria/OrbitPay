@@ -1234,7 +1234,7 @@ export async function verifyCheckoutPayment(
           appDomain: display.appDomain,
           category: display.category || intent.vertical,
           referenceLabel: display.referenceLabel,
-          title: 'Payment Verified (6-Factor Auto)',
+          title: 'Payment Verified',
           subtitle: display.subtitle || `TrxID ${submittedTrxId}`,
           amountFormatted: `৳${matchedSms.amount}`,
           provider: matchedSms.provider,

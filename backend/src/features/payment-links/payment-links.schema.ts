@@ -64,7 +64,7 @@ export const updatePaymentLinkSchema = z.object({
 export const payPaymentLinkSchema = z.object({
   amount: z.number().positive().optional(),
   provider: z.enum(MFS_PROVIDERS).optional(),
-  customerName: z.string().trim().max(150).optional(),
+  customerName: z.string().trim().min(2, 'Please enter your name').max(150),
   customerEmail: z.union([z.string().trim().email(), z.literal('')]).optional(),
   customerPhone: z.string().trim().max(30).optional(),
   referenceNote: z.string().trim().max(200).optional(),

@@ -40,7 +40,8 @@ export function useDeviceStats(merchantId?: string) {
       };
     },
     enabled: Boolean(getAuthToken()),
-    refetchInterval: 15_000,
-    staleTime: 10_000,
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
+    staleTime: 25_000,
   });
 }

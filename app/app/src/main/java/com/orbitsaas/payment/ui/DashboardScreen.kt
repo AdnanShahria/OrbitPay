@@ -37,6 +37,8 @@ import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -69,6 +71,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -76,6 +79,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.orbitsaas.payment.R
+import com.orbitsaas.payment.widget.PendingPaymentsWidgetProvider
 import com.orbitsaas.payment.data.local.SmsEntity
 import com.orbitsaas.payment.data.remote.MerchantOrderDto
 import com.orbitsaas.payment.data.remote.PaymentIntentDto
@@ -215,6 +219,17 @@ fun DashboardScreen(
                             )
                         }
                     }
+                    IconButton(
+                        onClick = onSettingsClick,
+                        modifier = Modifier.size(48.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = stringResource(R.string.cd_settings),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background
@@ -243,6 +258,24 @@ fun DashboardScreen(
                         onClick = onOpenDiagnostics
                     )
                 }
+            }
+
+            // 0.5 Live Waiting-for-Verification Widget Card (pinned inside Overview + pin-to-home shortcut)
+            item {
+                val waitingIntents = remember(state.paymentIntents) {
+                    state.paymentIntents.filter {
+                        it.status.uppercase(Locale.US) in setOf(
+                            "OPEN",
+                            "WAITING_FOR_SMS",
+                            "MANUAL_REVIEW_REQUIRED"
+                        )
+                    }
+                }
+                WaitingForVerificationWidgetCard(
+                    waitingIntents = waitingIntents,
+                    onInspectIntent = { intent -> inspectedIntent = intent },
+                    onApproveIntent = { intent -> pendingApproveIntent = intent }
+                )
             }
 
             // 1. Calm Hero Moment Card (Verified this month + Active SIM Rotation Strip)
@@ -420,6 +453,185 @@ fun DashboardScreen(
                 pendingRejectIntent = null
             }
         )
+    }
+}
+
+@Composable
+private fun WaitingForVerificationWidgetCard(
+    waitingIntents: List<PaymentIntentDto>,
+    onInspectIntent: (PaymentIntentDto) -> Unit,
+    onApproveIntent: (PaymentIntentDto) -> Unit
+) {
+    val context = LocalContext.current
+    val cardShape = RoundedCornerShape(16.dp)
+    val canPin = remember { PendingPaymentsWidgetProvider.canRequestPin(context) }
+    var pinFeedback by remember { mutableStateOf(false) }
+
+    val hasWaiting = waitingIntents.isNotEmpty()
+    val badgeBg = if (hasWaiting) Color(0x1AF59E0B) else Color(0x1A10B981)
+    val badgeFg = if (hasWaiting) OrbitSemanticColors.statusAmber else OrbitSemanticColors.statusGreen
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(
+                width = if (hasWaiting) 1.5.dp else 1.dp,
+                color = if (hasWaiting) StatusAmber.copy(alpha = 0.45f) else MaterialTheme.colorScheme.outline,
+                shape = cardShape
+            ),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        shape = cardShape
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        text = stringResource(R.string.dashboard_waiting_widget_title),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = stringResource(R.string.dashboard_waiting_widget_subtitle),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                CompactStatusChip(
+                    label = stringResource(R.string.widget_pending_count_badge, waitingIntents.size),
+                    foreground = badgeFg,
+                    background = badgeBg
+                )
+            }
+
+            if (waitingIntents.isEmpty()) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp)),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(
+                        text = stringResource(R.string.dashboard_waiting_widget_empty),
+                        modifier = Modifier.padding(12.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = OrbitSemanticColors.statusGreen,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    waitingIntents.take(3).forEach { intent ->
+                        val title = intent.display.title?.takeIf { it.isNotBlank() }
+                            ?: "#${intent.externalRefId}"
+                        val meta = buildList {
+                            intent.provider?.takeIf { it.isNotBlank() }?.let { add(providerDisplayName(it)) }
+                            intent.senderNumber?.takeIf { it.isNotBlank() }?.let { add(it) }
+                            intent.trxId?.takeIf { it.isNotBlank() }?.let { add(it) }
+                        }.joinToString(" · ")
+                        val amount = formatCleanBdt(intent.paidAmount ?: intent.uniqueAmount)
+
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp))
+                                .clickable { onInspectIntent(intent) },
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
+                                    Text(
+                                        text = title,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    if (meta.isNotBlank()) {
+                                        Text(
+                                            text = meta,
+                                            style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = amount,
+                                    style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"),
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Button(
+                                    onClick = { onApproveIntent(intent) },
+                                    modifier = Modifier.heightIn(min = 38.dp),
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                                ) {
+                                    Text(
+                                        text = stringResource(R.string.dashboard_waiting_widget_approve),
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (canPin) {
+                OutlinedButton(
+                    onClick = {
+                        if (PendingPaymentsWidgetProvider.requestPinWidget(context)) {
+                            pinFeedback = true
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 44.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Widgets,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.size(6.dp))
+                    Text(
+                        text = if (pinFeedback) {
+                            stringResource(R.string.widget_pin_added)
+                        } else {
+                            stringResource(R.string.dashboard_waiting_widget_pin)
+                        },
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -894,15 +1106,42 @@ private fun CompactPaymentIntentRow(
     val (statusLabel, statusFg, statusBg) = intentStatusBadgeColors(intent.status)
     val primaryAmount = intent.paidAmount ?: intent.uniqueAmount
     val normalizedStatus = intent.status.uppercase(Locale.US)
+    val cleanAmountText = formatCleanBdt(primaryAmount)
+
+    val cleanedDisplaySubtitle = remember(intent.display.subtitle, displayTitle, cleanAmountText, primaryAmount) {
+        val raw = intent.display.subtitle?.trim().orEmpty()
+        if (raw.isBlank()) {
+            null
+        } else {
+            val amountDigits = Regex("[^0-9.]")
+            val compactCleanAmount = cleanAmountText.lowercase(Locale.US).replace(",", "").replace(" ", "")
+            raw.split("·")
+                .map { it.trim() }
+                .filter { part ->
+                    if (part.isBlank()) return@filter false
+                    if (part.equals(displayTitle, ignoreCase = true)) return@filter false
+                    val compactPart = part.lowercase(Locale.US).replace(",", "").replace(" ", "")
+                    if (compactPart == compactCleanAmount) return@filter false
+                    val parsedPartAmount = part.replace(",", "").replace(amountDigits, "").toDoubleOrNull()
+                    if (parsedPartAmount != null && abs(parsedPartAmount - primaryAmount) < 0.01) {
+                        return@filter false
+                    }
+                    true
+                }
+                .distinct()
+                .joinToString(" · ")
+                .takeIf { it.isNotBlank() }
+        }
+    }
 
     val subtitleParts = buildList {
         intent.provider?.takeIf { it.isNotBlank() }?.let { add(providerDisplayName(it)) }
         intent.trxId?.takeIf { it.isNotBlank() }?.let { add(it) }
         intent.senderNumber?.takeIf { it.isNotBlank() }?.let { add(it) }
         if (isEmpty()) {
-            intent.display.subtitle?.takeIf { it.isNotBlank() }?.let { add(it) }
-                ?: displayApp?.let { add(it) }
-                ?: add(intent.externalRefId)
+            cleanedDisplaySubtitle?.let { add(it) }
+                ?: displayApp?.takeIf { !it.equals(displayTitle, ignoreCase = true) }?.let { add(it) }
+                ?: if (!displayTitle.contains(intent.externalRefId)) add(intent.externalRefId) else Unit
         }
     }
 
@@ -940,7 +1179,7 @@ private fun CompactPaymentIntentRow(
                 )
 
                 Text(
-                    text = formatCleanBdt(primaryAmount),
+                    text = cleanAmountText,
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontFeatureSettings = "tnum"
                     ),
@@ -1257,7 +1496,50 @@ private fun OrderDetailSheetContent(
 ) {
     val normalizedOrderStatus = order.orderStatus.uppercase(Locale.US)
     val normalizedPaymentStatus = order.paymentStatus.uppercase(Locale.US)
+    val normalizedMethod = order.paymentMethod.uppercase(Locale.US)
     val redFg = OrbitSemanticColors.statusRed
+
+    val methodLabel = when (normalizedMethod) {
+        "COD" -> stringResource(R.string.payment_method_cod)
+        "ORBIT_MFS" -> stringResource(R.string.payment_method_orbit_mfs)
+        "CARD" -> stringResource(R.string.payment_method_card)
+        else -> normalizedMethod.replace("_", " ")
+    }
+
+    val localizedOrderStatus = when (normalizedOrderStatus) {
+        "PENDING" -> stringResource(R.string.order_status_pending)
+        "CONFIRMED" -> stringResource(R.string.order_status_confirmed)
+        "READY_TO_SHIP" -> stringResource(R.string.order_status_ready_to_ship)
+        "SHIPPED" -> stringResource(R.string.order_status_shipped)
+        "DELIVERED" -> stringResource(R.string.order_status_delivered)
+        "COMPLETED" -> stringResource(R.string.order_status_completed)
+        "CANCELLED" -> stringResource(R.string.order_status_cancelled)
+        "REJECTED" -> stringResource(R.string.order_status_rejected)
+        else -> normalizedOrderStatus.replace("_", " ")
+    }
+
+    val (orderStatusFg, orderStatusBg) = when (normalizedOrderStatus) {
+        "CONFIRMED", "DELIVERED", "COMPLETED" -> OrbitSemanticColors.statusGreen to Color(0x1A10B981)
+        "READY_TO_SHIP", "SHIPPED" -> MaterialTheme.colorScheme.onSurface to MaterialTheme.colorScheme.surfaceVariant
+        "CANCELLED", "REJECTED" -> OrbitSemanticColors.statusRed to Color(0x1AEF4444)
+        else -> OrbitSemanticColors.statusAmber to Color(0x1AF59E0B)
+    }
+
+    val localizedPaymentStatus = when (normalizedPaymentStatus) {
+        "PENDING" -> stringResource(R.string.pay_status_pending)
+        "PAID" -> stringResource(R.string.pay_status_paid)
+        "VERIFIED" -> stringResource(R.string.pay_status_verified)
+        "FAILED" -> stringResource(R.string.pay_status_failed)
+        "REFUNDED" -> stringResource(R.string.pay_status_refunded)
+        else -> normalizedPaymentStatus.replace("_", " ")
+    }
+
+    val (payStatusFg, payStatusBg) = when (normalizedPaymentStatus) {
+        "PAID", "VERIFIED" -> OrbitSemanticColors.statusGreen to Color(0x1A10B981)
+        "FAILED" -> OrbitSemanticColors.statusRed to Color(0x1AEF4444)
+        "REFUNDED" -> OrbitSemanticColors.statusGray to Color(0x1A71717A)
+        else -> OrbitSemanticColors.statusAmber to Color(0x1AF59E0B)
+    }
 
     Column(
         modifier = Modifier
@@ -1287,37 +1569,42 @@ private fun OrderDetailSheetContent(
             )
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
             CompactStatusChip(
-                label = order.paymentMethod.uppercase(Locale.US),
+                label = methodLabel,
                 foreground = MaterialTheme.colorScheme.onSurfaceVariant,
                 background = MaterialTheme.colorScheme.surfaceVariant
             )
             CompactStatusChip(
-                label = stringResource(R.string.order_status_label, normalizedOrderStatus.replace("_", " ")),
-                foreground = MaterialTheme.colorScheme.onSurface,
-                background = MaterialTheme.colorScheme.surfaceVariant
+                label = localizedOrderStatus,
+                foreground = orderStatusFg,
+                background = orderStatusBg
             )
-            CompactStatusChip(
-                label = stringResource(R.string.payment_status_label, normalizedPaymentStatus.replace("_", " ")),
-                foreground = MaterialTheme.colorScheme.onSurface,
-                background = MaterialTheme.colorScheme.surfaceVariant
-            )
+            if (localizedPaymentStatus != localizedOrderStatus) {
+                CompactStatusChip(
+                    label = localizedPaymentStatus,
+                    foreground = payStatusFg,
+                    background = payStatusBg
+                )
+            }
         }
 
         HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outline)
 
         val customerLine = listOfNotNull(
-            order.customerName?.takeIf { it.isNotBlank() },
-            order.customerPhone?.takeIf { it.isNotBlank() }
-        ).joinToString(" · ")
+            order.customerName?.trim()?.takeIf { it.isNotBlank() },
+            order.customerPhone?.trim()?.takeIf { it.isNotBlank() }
+        ).distinct().joinToString(" · ")
         if (customerLine.isNotBlank()) {
             SheetMetaRow(stringResource(R.string.dashboard_detail_customer), customerLine)
         }
-        order.itemsSummary?.takeIf { it.isNotBlank() }?.let {
+        order.itemsSummary?.trim()?.takeIf { it.isNotBlank() }?.let {
             SheetMetaRow(stringResource(R.string.dashboard_detail_items), it)
         }
-        order.shippingAddress?.takeIf { it.isNotBlank() }?.let {
+        order.shippingAddress?.trim()?.takeIf { it.isNotBlank() }?.let {
             SheetMetaRow(stringResource(R.string.dashboard_detail_address), it)
         }
 

@@ -17,10 +17,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.FactCheck
-import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.ShoppingBag
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -54,11 +55,14 @@ import com.orbitsaas.payment.service.DynamicPushDispatcher
 import com.orbitsaas.payment.service.StickyForegroundService
 import com.orbitsaas.payment.ui.diagnostics.DiagnosticsScreen
 import com.orbitsaas.payment.ui.history.HistoryScreen
+import com.orbitsaas.payment.ui.links.PaymentLinksScreen
+import com.orbitsaas.payment.ui.orders.OrdersScreen
 import com.orbitsaas.payment.ui.theme.OrbitPaymentTheme
 import com.orbitsaas.payment.ui.update.AppUpdateDialog
 import com.orbitsaas.payment.ui.verify.VerifyScreen
 import com.orbitsaas.payment.ui.viewmodel.DashboardUiState
 import com.orbitsaas.payment.ui.viewmodel.MainViewModel
+import com.orbitsaas.payment.ui.wallets.SimPoolScreen
 import com.orbitsaas.payment.update.AppUpdateManager
 import kotlinx.coroutines.launch
 
@@ -104,10 +108,7 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         checkAndStartForegroundService()
-        viewModel.refreshStatsFromServer()
-        viewModel.refreshOrders()
-        viewModel.refreshPaymentIntents()
-        viewModel.refreshPreflight()
+        viewModel.refreshAllIfStale(force = false)
         lifecycleScope.launch {
             AppUpdateManager.checkForUpdates(
                 context = this@MainActivity,
@@ -160,8 +161,11 @@ class MainActivity : AppCompatActivity() {
 
 sealed class Screen(val route: String) {
     data object Dashboard : Screen("dashboard")
-    data object History : Screen("history")
     data object Verify : Screen("verify")
+    data object Links : Screen("links")
+    data object Orders : Screen("orders")
+    data object Wallets : Screen("wallets")
+    data object History : Screen("history")
     data object Diagnostics : Screen("diagnostics")
     data object Onboarding : Screen("onboarding")
     data object Login : Screen("login")
@@ -175,17 +179,19 @@ private data class BottomNavDestination(
 )
 
 private val bottomNavDestinations = listOf(
-    BottomNavDestination(Screen.Dashboard.route, R.string.nav_home, Icons.Default.Home),
-    BottomNavDestination(Screen.Verify.route, R.string.nav_verify, Icons.Default.FactCheck),
-    BottomNavDestination(Screen.History.route, R.string.nav_activity, Icons.Default.History),
-    BottomNavDestination(Screen.Settings.route, R.string.nav_settings, Icons.Default.Settings)
+    BottomNavDestination(Screen.Dashboard.route, R.string.nav_overview, Icons.Default.Home),
+    BottomNavDestination(Screen.Verify.route, R.string.nav_payments, Icons.Default.FactCheck),
+    BottomNavDestination(Screen.Links.route, R.string.nav_links, Icons.Default.Link),
+    BottomNavDestination(Screen.Orders.route, R.string.nav_orders, Icons.Default.ShoppingBag),
+    BottomNavDestination(Screen.Wallets.route, R.string.nav_sim_pool, Icons.Default.AccountBalanceWallet)
 )
 
 private val loggedInRoutes = setOf(
     Screen.Dashboard.route,
     Screen.Verify.route,
-    Screen.History.route,
-    Screen.Settings.route
+    Screen.Links.route,
+    Screen.Orders.route,
+    Screen.Wallets.route
 )
 
 @Composable
@@ -216,6 +222,9 @@ fun OrbitPaymentApp(
                 Screen.Dashboard.route,
                 Screen.History.route,
                 Screen.Verify.route,
+                Screen.Links.route,
+                Screen.Orders.route,
+                Screen.Wallets.route,
                 Screen.Diagnostics.route
             ) || (activeRoute == Screen.Settings.route && previousRoute != Screen.Login.route)
 
@@ -325,7 +334,11 @@ fun OrbitPaymentApp(
                 DashboardScreen(
                     state = uiState,
                     onSyncClick = { viewModel.syncNow() },
-                    onSettingsClick = { navigateTopLevel(Screen.Settings.route) },
+                    onSettingsClick = {
+                        navController.navigate(Screen.Settings.route) {
+                            launchSingleTop = true
+                        }
+                    },
                     onToggleTheme = { viewModel.toggleTheme() },
                     onClearFeedback = { viewModel.clearFeedbackMessage() },
                     onOrderAction = { externalOrderId, action ->
@@ -344,12 +357,60 @@ fun OrbitPaymentApp(
                 )
             }
 
-            composable(Screen.History.route) {
-                HistoryScreen()
-            }
-
             composable(Screen.Verify.route) {
                 VerifyScreen()
+            }
+
+            composable(Screen.Links.route) {
+                PaymentLinksScreen(
+                    state = uiState,
+                    onRefresh = { viewModel.refreshPaymentLinks() },
+                    onCreateLink = { title, desc, amountType, fixedAmt, minAmt, maxAmt, onDone ->
+                        viewModel.createPaymentLink(title, desc, amountType, fixedAmt, minAmt, maxAmt, onDone)
+                    },
+                    onToggleActive = { linkId, isActive ->
+                        viewModel.togglePaymentLinkActive(linkId, isActive)
+                    },
+                    onDeleteLink = { linkId ->
+                        viewModel.deletePaymentLink(linkId)
+                    },
+                    onClearFeedback = { viewModel.clearFeedbackMessage() }
+                )
+            }
+
+            composable(Screen.Orders.route) {
+                OrdersScreen(
+                    state = uiState,
+                    onRefreshOrders = { viewModel.refreshOrders() },
+                    onOrderAction = { externalOrderId, action ->
+                        viewModel.performOrderAction(externalOrderId, action)
+                    },
+                    onClearFeedback = { viewModel.clearFeedbackMessage() }
+                )
+            }
+
+            composable(Screen.Wallets.route) {
+                SimPoolScreen(
+                    state = uiState,
+                    onRefresh = { viewModel.refreshWalletsOverview() },
+                    onCreateWallet = { provider, number, accountType, label, slotIdx, isPrimary, onDone ->
+                        viewModel.createWallet(provider, number, accountType, label, slotIdx, isPrimary, onDone)
+                    },
+                    onToggleActive = { walletId, isActive ->
+                        viewModel.toggleWalletActive(walletId, isActive)
+                    },
+                    onSetPrimary = { walletId ->
+                        viewModel.setPrimaryWallet(walletId)
+                    },
+                    onDeleteWallet = { walletId ->
+                        viewModel.deleteWallet(walletId)
+                    },
+                    onClearFeedback = { viewModel.clearFeedbackMessage() }
+                )
+            }
+
+            composable(Screen.History.route) {
+                HistoryScreen()
             }
 
             composable(Screen.Diagnostics.route) {
@@ -406,6 +467,11 @@ fun OrbitPaymentApp(
                     },
                     onToggleTheme = { viewModel.toggleTheme() },
                     onOpenDiagnostics = navigateToDiagnostics,
+                    onOpenSetupGuide = {
+                        navController.navigate(Screen.Onboarding.route) {
+                            launchSingleTop = true
+                        }
+                    },
                     onSaveSettings = { serverUrl, merchantId, deviceKey, enableForeground ->
                         val cameFromLogin = navController.previousBackStackEntry?.destination?.route == Screen.Login.route
                         viewModel.saveSettings(serverUrl, merchantId, deviceKey, enableForeground)
