@@ -12,47 +12,42 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DarkMode
-import androidx.compose.material.icons.filled.Error
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material.icons.filled.Payments
-import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.ShoppingBag
-import androidx.compose.material.icons.filled.Sync
-import androidx.compose.material.icons.filled.VerifiedUser
-import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material.icons.filled.Wifi
-import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -61,6 +56,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -73,7 +69,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -82,27 +77,25 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.orbitsaas.payment.R
 import com.orbitsaas.payment.data.local.SmsEntity
-import com.orbitsaas.payment.data.remote.DevicePreflightData
 import com.orbitsaas.payment.data.remote.MerchantOrderDto
 import com.orbitsaas.payment.data.remote.PaymentIntentDto
+import com.orbitsaas.payment.data.remote.WalletRotationDto
 import com.orbitsaas.payment.ui.components.ApproveIntentDialog
 import com.orbitsaas.payment.ui.components.PaymentIntentCard
+import com.orbitsaas.payment.ui.components.ProviderDot
 import com.orbitsaas.payment.ui.components.RejectIntentDialog
-import com.orbitsaas.payment.ui.theme.ColorBkash
+import com.orbitsaas.payment.ui.components.intentStatusBadgeColors
+import com.orbitsaas.payment.ui.components.providerDisplayName
 import com.orbitsaas.payment.ui.theme.OrbitSemanticColors
 import com.orbitsaas.payment.ui.theme.StatusAmber
-import com.orbitsaas.payment.ui.theme.StatusAmberBg
-import com.orbitsaas.payment.ui.theme.StatusGray
-import com.orbitsaas.payment.ui.theme.StatusGrayBg
 import com.orbitsaas.payment.ui.theme.StatusGreen
-import com.orbitsaas.payment.ui.theme.StatusGreenBg
 import com.orbitsaas.payment.ui.theme.StatusRed
-import com.orbitsaas.payment.ui.theme.StatusRedBg
 import com.orbitsaas.payment.ui.viewmodel.DashboardUiState
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -124,11 +117,33 @@ fun DashboardScreen(
     var selectedFeedTab by rememberSaveable { mutableIntStateOf(0) }
     var pendingApproveIntent by remember { mutableStateOf<PaymentIntentDto?>(null) }
     var pendingRejectIntent by remember { mutableStateOf<PaymentIntentDto?>(null) }
-    val amberTextColor = OrbitSemanticColors.statusAmber
 
-    LaunchedEffect(state.focusedPaymentIntentId) {
-        if (!state.focusedPaymentIntentId.isNullOrBlank()) {
+    var inspectedIntent by remember { mutableStateOf<PaymentIntentDto?>(null) }
+    var inspectedOrder by remember { mutableStateOf<MerchantOrderDto?>(null) }
+    var inspectedSms by remember { mutableStateOf<SmsEntity?>(null) }
+
+    LaunchedEffect(state.focusedPaymentIntentId, state.paymentIntents) {
+        val focusedId = state.focusedPaymentIntentId
+        if (!focusedId.isNullOrBlank()) {
             selectedFeedTab = 0
+            val matched = state.paymentIntents.firstOrNull {
+                it.id == focusedId || it.externalRefId == focusedId
+            }
+            if (matched != null) {
+                inspectedIntent = matched
+            }
+        }
+    }
+
+    // Keep open bottom sheets in sync with live state updates
+    LaunchedEffect(state.paymentIntents) {
+        inspectedIntent?.let { current ->
+            inspectedIntent = state.paymentIntents.firstOrNull { it.id == current.id }
+        }
+    }
+    LaunchedEffect(state.orders) {
+        inspectedOrder?.let { current ->
+            inspectedOrder = state.orders.firstOrNull { it.externalOrderId == current.externalOrderId }
         }
     }
 
@@ -143,62 +158,27 @@ fun DashboardScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text(
-                                text = state.storeName.ifBlank { stringResource(R.string.app_name) },
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onBackground,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            val manualReviewCount = state.paymentIntents.count {
-                                it.status.uppercase() in setOf("MANUAL_REVIEW_REQUIRED", "WAITING_FOR_SMS")
-                            }
-                            val totalPendingBadge = state.pendingOrderCount + manualReviewCount
-                            if (totalPendingBadge > 0) {
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = StatusAmberBg,
-                                    modifier = Modifier.border(
-                                        width = 1.dp,
-                                        color = StatusAmber.copy(alpha = 0.4f),
-                                        shape = RoundedCornerShape(8.dp)
-                                    )
-                                ) {
-                                    Text(
-                                        text = pluralStringResource(
-                                            R.plurals.dashboard_pending_orders,
-                                            totalPendingBadge,
-                                            totalPendingBadge
-                                        ),
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                                        style = MaterialTheme.typography.labelMedium.copy(
-                                            fontFeatureSettings = "tnum"
-                                        ),
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = amberTextColor,
-                                        maxLines = 1
-                                    )
-                                }
-                            }
-                        }
-                        if (state.merchantId.isNotBlank()) {
-                            Text(
-                                text = state.merchantId,
-                                style = MaterialTheme.typography.labelMedium.copy(
-                                    fontFeatureSettings = "tnum"
-                                ),
-                                fontFamily = FontFamily.Monospace,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
+                    Column(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(onClick = onOpenDiagnostics)
+                            .padding(vertical = 2.dp, horizontal = 2.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text(
+                            text = state.storeName.ifBlank { stringResource(R.string.app_name) },
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onBackground,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        QuietLiveStatusLine(
+                            isOnline = state.isOnline,
+                            onlineDeviceCount = state.onlineDeviceCount,
+                            totalDeviceCount = state.totalDeviceCount,
+                            pendingUploadCount = state.pendingUploadCount
+                        )
                     }
                 },
                 actions = {
@@ -211,7 +191,8 @@ fun DashboardScreen(
                             contentDescription = stringResource(
                                 if (state.isDarkTheme) R.string.cd_switch_light_theme else R.string.cd_switch_dark_theme
                             ),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
                         )
                     }
                     IconButton(
@@ -221,7 +202,7 @@ fun DashboardScreen(
                     ) {
                         if (state.isSyncing) {
                             CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
+                                modifier = Modifier.size(18.dp),
                                 strokeWidth = 2.dp,
                                 color = MaterialTheme.colorScheme.primary
                             )
@@ -229,59 +210,16 @@ fun DashboardScreen(
                             Icon(
                                 imageVector = Icons.Default.Refresh,
                                 contentDescription = stringResource(R.string.action_sync_now),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
                             )
                         }
-                    }
-                    IconButton(
-                        onClick = onSettingsClick,
-                        modifier = Modifier.size(48.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Settings,
-                            contentDescription = stringResource(R.string.cd_settings),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background
                 )
             )
-        },
-        floatingActionButton = {
-            FloatingActionButton(
-                onClick = onSyncClick,
-                modifier = Modifier.heightIn(min = 48.dp),
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-                shape = CircleShape
-            ) {
-                if (state.isSyncing) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(22.dp),
-                        color = MaterialTheme.colorScheme.onPrimary,
-                        strokeWidth = 2.dp
-                    )
-                } else {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Sync,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Text(
-                            text = stringResource(R.string.action_sync_now),
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                }
-            }
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
         containerColor = MaterialTheme.colorScheme.background
@@ -291,38 +229,34 @@ fun DashboardScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .padding(horizontal = 16.dp),
-            contentPadding = PaddingValues(top = 8.dp, bottom = 96.dp),
+            contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // 1. Connection Status Banner / Pill
-            item {
-                ConnectionStatusPill(
-                    isOnline = state.isOnline,
-                    isSyncing = state.isSyncing,
-                    pendingCount = state.pendingUploadCount
-                )
-            }
-
-            // 1b. Preflight / Number Profile Banner
-            state.preflightState?.let { preflight ->
+            // Optional quiet 1-line setup warning only when preflight requires action
+            val preflight = state.preflightState
+            if (preflight != null && !preflight.overallStatus.equals("READY", ignoreCase = true)) {
                 item {
-                    PreflightStatusBanner(
-                        preflight = preflight,
+                    QuietSetupNoticeRow(
+                        isError = preflight.overallStatus.equals("ERROR", ignoreCase = true),
+                        message = preflight.recommendations.firstOrNull()?.takeIf { it.isNotBlank() }
+                            ?: stringResource(R.string.dashboard_preflight_attention_short),
                         onClick = onOpenDiagnostics
                     )
                 }
             }
 
-            // 2. Three Metric Cards
+            // 1. Calm Hero Moment Card (Verified this month + Active SIM Rotation Strip)
             item {
-                MetricCardsSection(
+                HeroSummaryAndSimRotationCard(
                     totalVolume = state.totalVerifiedVolume,
-                    verifiedOrders = state.verifiedCount,
-                    unclaimedCount = state.unclaimedCount
+                    verifiedCount = state.verifiedCount,
+                    unclaimedCount = state.unclaimedCount,
+                    wallets = state.wallets,
+                    totalDeviceCount = state.totalDeviceCount
                 )
             }
 
-            // 3. Segmented Feed Toggle: Payments vs Orders vs Live MFS Feed
+            // 2. Clean Segmented Feed (Pending | Orders | SMS)
             item {
                 FeedSegmentedToggle(
                     selectedTab = selectedFeedTab,
@@ -340,39 +274,25 @@ fun DashboardScreen(
                 )
             }
 
-            // 4. Tab Content
+            // 3. Compact, Scannable Feed Rows
             when (selectedFeedTab) {
                 0 -> {
                     if (state.isIntentsLoading && state.paymentIntents.isEmpty()) {
-                        item {
-                            IntentsLoadingCard()
-                        }
+                        item { IntentsLoadingCard() }
                     } else if (state.paymentIntents.isEmpty()) {
-                        item {
-                            EmptyIntentsStateCard(onRefresh = onRefreshIntents)
-                        }
+                        item { EmptyIntentsStateCard(onRefresh = onRefreshIntents) }
                     } else {
                         items(state.paymentIntents, key = { it.id }) { intent ->
                             val isFocused = state.focusedPaymentIntentId != null &&
                                 (intent.id == state.focusedPaymentIntentId ||
                                     intent.externalRefId == state.focusedPaymentIntentId)
-                            PaymentIntentCard(
+                            CompactPaymentIntentRow(
                                 intent = intent,
-                                serverBaseUrl = state.serverUrl,
                                 fallbackAppName = state.storeName,
                                 isHighlighted = isFocused,
-                                isActionInProgress = state.actionInProgressIntentId == intent.id,
-                                onApproveClick = {
+                                onClick = {
                                     if (isFocused) onClearFocusedIntent()
-                                    pendingApproveIntent = intent
-                                },
-                                onRejectClick = {
-                                    if (isFocused) onClearFocusedIntent()
-                                    pendingRejectIntent = intent
-                                },
-                                onDynamicActionClick = { action ->
-                                    if (isFocused) onClearFocusedIntent()
-                                    onTriggerIntentAction(intent.id, action.id, action.label)
+                                    inspectedIntent = intent
                                 }
                             )
                         }
@@ -381,21 +301,14 @@ fun DashboardScreen(
 
                 1 -> {
                     if (state.isOrdersLoading && state.orders.isEmpty()) {
-                        item {
-                            OrdersLoadingCard()
-                        }
+                        item { OrdersLoadingCard() }
                     } else if (state.orders.isEmpty()) {
-                        item {
-                            EmptyOrdersStateCard(onRefresh = onRefreshOrders)
-                        }
+                        item { EmptyOrdersStateCard(onRefresh = onRefreshOrders) }
                     } else {
                         items(state.orders, key = { it.externalOrderId }) { order ->
-                            MerchantOrderCard(
+                            CompactOrderRow(
                                 order = order,
-                                isActionInProgress = state.actionInProgressOrderId == order.externalOrderId,
-                                onActionClick = { action ->
-                                    onOrderAction(order.externalOrderId, action)
-                                }
+                                onClick = { inspectedOrder = order }
                             )
                         }
                     }
@@ -403,16 +316,85 @@ fun DashboardScreen(
 
                 else -> {
                     if (state.transactions.isEmpty()) {
-                        item {
-                            EmptyStateCard()
-                        }
+                        item { EmptyStateCard() }
                     } else {
                         items(state.transactions, key = { it.id }) { sms ->
-                            TransactionItemCard(sms = sms)
+                            CompactSmsRow(
+                                sms = sms,
+                                onClick = { inspectedSms = sms }
+                            )
                         }
                     }
                 }
             }
+        }
+    }
+
+    // Payment Intent Inspector Sheet (preserves Approve/Reject, Dynamic Actions, Receipt & Admin links)
+    inspectedIntent?.let { intent ->
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = {
+                if (state.focusedPaymentIntentId != null) onClearFocusedIntent()
+                inspectedIntent = null
+            },
+            sheetState = sheetState,
+            containerColor = MaterialTheme.colorScheme.surface
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp)
+                    .padding(bottom = 28.dp)
+            ) {
+                PaymentIntentCard(
+                    intent = intent,
+                    serverBaseUrl = state.serverUrl,
+                    fallbackAppName = state.storeName,
+                    isHighlighted = false,
+                    isActionInProgress = state.actionInProgressIntentId == intent.id,
+                    onApproveClick = {
+                        pendingApproveIntent = intent
+                    },
+                    onRejectClick = {
+                        pendingRejectIntent = intent
+                    },
+                    onDynamicActionClick = { action ->
+                        onTriggerIntentAction(intent.id, action.id, action.label)
+                    }
+                )
+            }
+        }
+    }
+
+    // Order Inspector Sheet (preserves all 1-tap bi-directional order actions)
+    inspectedOrder?.let { order ->
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { inspectedOrder = null },
+            sheetState = sheetState,
+            containerColor = MaterialTheme.colorScheme.surface
+        ) {
+            OrderDetailSheetContent(
+                order = order,
+                isActionInProgress = state.actionInProgressOrderId == order.externalOrderId,
+                onActionClick = { action ->
+                    onOrderAction(order.externalOrderId, action)
+                }
+            )
+        }
+    }
+
+    // SMS Inspector Sheet (shows SIM slot, receiver SIM, raw SMS, TrxID)
+    inspectedSms?.let { sms ->
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { inspectedSms = null },
+            sheetState = sheetState,
+            containerColor = MaterialTheme.colorScheme.surface
+        ) {
+            SmsDetailSheetContent(sms = sms)
         }
     }
 
@@ -442,6 +424,377 @@ fun DashboardScreen(
 }
 
 @Composable
+private fun QuietLiveStatusLine(
+    isOnline: Boolean,
+    onlineDeviceCount: Int,
+    totalDeviceCount: Int,
+    pendingUploadCount: Int
+) {
+    val dotColor = if (isOnline) StatusGreen else StatusAmber
+    val baseStatus = when {
+        !isOnline -> stringResource(R.string.dashboard_status_offline_simple)
+        totalDeviceCount > 1 -> stringResource(R.string.dashboard_devices_online, onlineDeviceCount, totalDeviceCount)
+        totalDeviceCount == 1 && onlineDeviceCount >= 1 -> stringResource(R.string.dashboard_single_device_online)
+        totalDeviceCount == 1 -> stringResource(R.string.dashboard_devices_online, onlineDeviceCount, totalDeviceCount)
+        else -> stringResource(R.string.dashboard_status_online_simple)
+    }
+    val fullStatus = if (pendingUploadCount > 0) {
+        "$baseStatus · ${stringResource(R.string.dashboard_queued_count, pendingUploadCount)}"
+    } else {
+        baseStatus
+    }
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(7.dp)
+                .clip(CircleShape)
+                .background(dotColor)
+        )
+        Text(
+            text = fullStatus,
+            style = MaterialTheme.typography.labelMedium.copy(
+                fontFeatureSettings = "tnum"
+            ),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+private fun QuietSetupNoticeRow(
+    isError: Boolean,
+    message: String,
+    onClick: () -> Unit
+) {
+    val fg = if (isError) OrbitSemanticColors.statusRed else OrbitSemanticColors.statusAmber
+    val dot = if (isError) StatusRed else StatusAmber
+    val shape = RoundedCornerShape(12.dp)
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .clip(shape)
+            .border(1.dp, MaterialTheme.colorScheme.outline, shape)
+            .clickable(onClick = onClick),
+        color = MaterialTheme.colorScheme.surface,
+        shape = shape
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(dot)
+            )
+            Text(
+                text = message,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Medium,
+                color = fg,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Icon(
+                imageVector = Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun HeroSummaryAndSimRotationCard(
+    totalVolume: Double,
+    verifiedCount: Int,
+    unclaimedCount: Int,
+    wallets: List<WalletRotationDto>,
+    totalDeviceCount: Int
+) {
+    val cardShape = RoundedCornerShape(16.dp)
+    val activeWallets = remember(wallets) {
+        val nonPlaceholder = wallets.filter { it.isActive && !it.isPlaceholder }
+        if (nonPlaceholder.isNotEmpty()) nonPlaceholder else wallets.filter { it.isActive }
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, MaterialTheme.colorScheme.outline, cardShape),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        shape = cardShape
+    ) {
+        Column {
+            // Top Hero Section: Verified this month
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = stringResource(R.string.dashboard_verified_this_month),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (unclaimedCount > 0) {
+                        Text(
+                            text = stringResource(R.string.dashboard_unclaimed_count_label, unclaimedCount),
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontFeatureSettings = "tnum"
+                            ),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    Text(
+                        text = formatCleanBdt(totalVolume),
+                        style = MaterialTheme.typography.headlineLarge.copy(
+                            fontFeatureSettings = "tnum"
+                        ),
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = stringResource(R.string.dashboard_verified_count_label, verifiedCount),
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontFeatureSettings = "tnum"
+                        ),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outline)
+
+            // Bottom Strip: Active SIM Rotation
+            Column(
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = stringResource(R.string.dashboard_sim_rotation_title),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = stringResource(R.string.dashboard_sim_rotation_limits_hint),
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontFeatureSettings = "tnum"
+                        ),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                if (activeWallets.isEmpty()) {
+                    Text(
+                        text = stringResource(R.string.dashboard_sim_rotation_empty),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        activeWallets.forEach { wallet ->
+                            SimRotationWalletRow(
+                                wallet = wallet,
+                                showDeviceName = totalDeviceCount > 1 && !wallet.deviceName.isNullOrBlank()
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SimRotationWalletRow(
+    wallet: WalletRotationDto,
+    showDeviceName: Boolean
+) {
+    val hardLimit = wallet.monthlyVolumeLimit.takeIf { it > 0.0 } ?: 300_000.0
+    val safeLimit = wallet.safeVolumeLimit.takeIf { it > 0.0 } ?: 250_000.0
+    val progress = (wallet.currentMonthVolume / hardLimit).toFloat().coerceIn(0f, 1f)
+
+    val (stateLabel, dotColor, textColor) = when (wallet.rotationState.uppercase(Locale.US)) {
+        "ACTIVE_PRIMARY" -> Triple(
+            stringResource(R.string.dashboard_rotation_active),
+            StatusGreen,
+            OrbitSemanticColors.statusGreen
+        )
+        "SAFE_LIMIT_OVERFLOW" -> Triple(
+            stringResource(R.string.dashboard_rotation_overflow),
+            StatusAmber,
+            OrbitSemanticColors.statusAmber
+        )
+        "HARD_LIMIT_REACHED" -> Triple(
+            stringResource(R.string.dashboard_rotation_capped),
+            StatusRed,
+            OrbitSemanticColors.statusRed
+        )
+        "DEVICE_OFFLINE" -> Triple(
+            stringResource(R.string.dashboard_rotation_offline),
+            MaterialTheme.colorScheme.outlineVariant,
+            MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        "DISABLED" -> Triple(
+            stringResource(R.string.dashboard_rotation_disabled),
+            MaterialTheme.colorScheme.outlineVariant,
+            MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        else -> Triple(
+            stringResource(R.string.dashboard_rotation_standby),
+            StatusGreen.copy(alpha = 0.65f),
+            MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+
+    val meterColor = when (wallet.rotationState.uppercase(Locale.US)) {
+        "SAFE_LIMIT_OVERFLOW" -> StatusAmber
+        "HARD_LIMIT_REACHED" -> StatusRed
+        "DEVICE_OFFLINE", "DISABLED" -> MaterialTheme.colorScheme.outlineVariant
+        "ACTIVE_PRIMARY" -> StatusGreen
+        else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(end = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                ProviderDot(provider = wallet.provider, size = 8.dp)
+                val slotTag = wallet.simSlotIndex?.let {
+                    stringResource(R.string.dashboard_sim_slot_short, it)
+                }
+                val titleParts = buildList {
+                    add(providerDisplayName(wallet.provider))
+                    if (slotTag != null) add(slotTag) else add(wallet.walletNumber)
+                    if (showDeviceName && !wallet.deviceName.isNullOrBlank()) add(wallet.deviceName)
+                }
+                Text(
+                    text = titleParts.joinToString(" · "),
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontFeatureSettings = "tnum"
+                    ),
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(dotColor)
+                )
+                Text(
+                    text = stateLabel,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = textColor,
+                    maxLines = 1
+                )
+            }
+        }
+
+        // Slim 4dp progress meter
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(4.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+        ) {
+            if (progress > 0f) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(progress)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(meterColor)
+                )
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            val numberMeta = if (wallet.simSlotIndex != null && wallet.walletNumber.isNotBlank()) {
+                "${formatCleanBdt(wallet.currentMonthVolume)} · ${wallet.walletNumber}"
+            } else {
+                formatCleanBdt(wallet.currentMonthVolume)
+            }
+            Text(
+                text = numberMeta,
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontFeatureSettings = "tnum"
+                ),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            Text(
+                text = stringResource(
+                    R.string.dashboard_sim_limit_meter,
+                    formatLimitShort(safeLimit),
+                    formatLimitShort(hardLimit)
+                ),
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontFeatureSettings = "tnum"
+                ),
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
 fun FeedSegmentedToggle(
     selectedTab: Int,
     intentsCount: Int,
@@ -450,8 +803,8 @@ fun FeedSegmentedToggle(
     transactionsCount: Int,
     onSelectTab: (Int) -> Unit
 ) {
-    val containerShape = RoundedCornerShape(16.dp)
-    val pillShape = RoundedCornerShape(12.dp)
+    val containerShape = RoundedCornerShape(14.dp)
+    val pillShape = RoundedCornerShape(10.dp)
 
     Surface(
         modifier = Modifier
@@ -468,9 +821,9 @@ fun FeedSegmentedToggle(
         ) {
             val displayOrderCount = if (pendingOrderCount > 0) pendingOrderCount else ordersCount
             val tabs = listOf(
-                stringResource(R.string.dashboard_tab_payments, intentsCount),
-                stringResource(R.string.dashboard_tab_orders_short, displayOrderCount),
-                stringResource(R.string.dashboard_tab_mfs_short, transactionsCount)
+                stringResource(R.string.dashboard_tab_pending, intentsCount),
+                stringResource(R.string.dashboard_tab_orders_clean, displayOrderCount),
+                stringResource(R.string.dashboard_tab_sms_clean, transactionsCount)
             )
 
             tabs.forEachIndexed { index, title ->
@@ -483,16 +836,21 @@ fun FeedSegmentedToggle(
                         .clickable { onSelectTab(index) },
                     shape = pillShape,
                     color = if (isSelected) {
-                        MaterialTheme.colorScheme.primary
+                        MaterialTheme.colorScheme.surface
                     } else {
                         Color.Transparent
+                    },
+                    border = if (isSelected) {
+                        BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                    } else {
+                        null
                     }
                 ) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .heightIn(min = 48.dp)
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
@@ -500,9 +858,9 @@ fun FeedSegmentedToggle(
                             style = MaterialTheme.typography.labelLarge.copy(
                                 fontFeatureSettings = "tnum"
                             ),
-                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
                             color = if (isSelected) {
-                                MaterialTheme.colorScheme.onPrimary
+                                MaterialTheme.colorScheme.onSurface
                             } else {
                                 MaterialTheme.colorScheme.onSurfaceVariant
                             },
@@ -517,42 +875,126 @@ fun FeedSegmentedToggle(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun MerchantOrderCard(
-    order: MerchantOrderDto,
-    isActionInProgress: Boolean,
-    onActionClick: (String) -> Unit
+private fun CompactPaymentIntentRow(
+    intent: PaymentIntentDto,
+    fallbackAppName: String,
+    isHighlighted: Boolean,
+    onClick: () -> Unit
 ) {
-    val cardShape = RoundedCornerShape(16.dp)
-    val currencyFormat = remember {
-        NumberFormat.getNumberInstance(Locale.US).apply {
-            minimumFractionDigits = 2
-            maximumFractionDigits = 2
+    val cardShape = RoundedCornerShape(14.dp)
+    val borderColor = if (isHighlighted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+    val borderWidth = if (isHighlighted) 1.5.dp else 1.dp
+
+    val displayTitle = intent.display.title?.takeIf { it.isNotBlank() }
+        ?: "#${intent.externalRefId}"
+    val displayApp = intent.display.appName?.takeIf { it.isNotBlank() }
+        ?: fallbackAppName.takeIf { it.isNotBlank() }
+
+    val (statusLabel, statusFg, statusBg) = intentStatusBadgeColors(intent.status)
+    val primaryAmount = intent.paidAmount ?: intent.uniqueAmount
+    val normalizedStatus = intent.status.uppercase(Locale.US)
+
+    val subtitleParts = buildList {
+        intent.provider?.takeIf { it.isNotBlank() }?.let { add(providerDisplayName(it)) }
+        intent.trxId?.takeIf { it.isNotBlank() }?.let { add(it) }
+        intent.senderNumber?.takeIf { it.isNotBlank() }?.let { add(it) }
+        if (isEmpty()) {
+            intent.display.subtitle?.takeIf { it.isNotBlank() }?.let { add(it) }
+                ?: displayApp?.let { add(it) }
+                ?: add(intent.externalRefId)
         }
     }
 
-    val greenFg = OrbitSemanticColors.statusGreen
-    val amberFg = OrbitSemanticColors.statusAmber
-    val redFg = OrbitSemanticColors.statusRed
-    val bkashFg = OrbitSemanticColors.providerColor("BKASH")
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .clip(cardShape)
+            .border(borderWidth, borderColor, cardShape)
+            .clickable(onClick = onClick),
+        color = MaterialTheme.colorScheme.surface,
+        shape = cardShape
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = displayTitle,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 10.dp),
+                    style = MaterialTheme.typography.bodyLarge.copy(
+                        fontFeatureSettings = "tnum"
+                    ),
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
 
-    val normalizedMethod = order.paymentMethod.uppercase()
-    val normalizedOrderStatus = order.orderStatus.uppercase()
-    val normalizedPaymentStatus = order.paymentStatus.uppercase()
+                Text(
+                    text = formatCleanBdt(primaryAmount),
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontFeatureSettings = "tnum"
+                    ),
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (normalizedStatus == "VERIFIED") {
+                        OrbitSemanticColors.statusGreen
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    }
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = subtitleParts.joinToString(" · "),
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 10.dp),
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontFeatureSettings = "tnum"
+                    ),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                CompactStatusChip(
+                    label = statusLabel,
+                    foreground = statusFg,
+                    background = statusBg
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CompactOrderRow(
+    order: MerchantOrderDto,
+    onClick: () -> Unit
+) {
+    val cardShape = RoundedCornerShape(14.dp)
+    val normalizedMethod = order.paymentMethod.uppercase(Locale.US)
+    val normalizedOrderStatus = order.orderStatus.uppercase(Locale.US)
 
     val methodLabel = when (normalizedMethod) {
         "COD" -> stringResource(R.string.payment_method_cod)
         "ORBIT_MFS" -> stringResource(R.string.payment_method_orbit_mfs)
         "CARD" -> stringResource(R.string.payment_method_card)
         else -> normalizedMethod
-    }
-
-    val (methodBg, methodFg) = when (normalizedMethod) {
-        "COD" -> StatusAmberBg to amberFg
-        "ORBIT_MFS" -> ColorBkash.copy(alpha = 0.14f) to bkashFg
-        "CARD" -> StatusGreenBg to greenFg
-        else -> StatusGrayBg to MaterialTheme.colorScheme.onSurfaceVariant
     }
 
     val localizedOrderStatus = when (normalizedOrderStatus) {
@@ -567,371 +1009,567 @@ fun MerchantOrderCard(
         else -> normalizedOrderStatus.replace("_", " ")
     }
 
-    val (orderStatusBg, orderStatusFg) = when (normalizedOrderStatus) {
-        "CONFIRMED", "DELIVERED", "COMPLETED" -> StatusGreenBg to greenFg
-        "READY_TO_SHIP", "SHIPPED" -> MaterialTheme.colorScheme.surfaceVariant to MaterialTheme.colorScheme.onSurface
-        "CANCELLED", "REJECTED" -> StatusRedBg to redFg
-        else -> StatusAmberBg to amberFg
+    val (statusFg, statusBg) = when (normalizedOrderStatus) {
+        "CONFIRMED", "DELIVERED", "COMPLETED" -> OrbitSemanticColors.statusGreen to Color(0x1A10B981)
+        "READY_TO_SHIP", "SHIPPED" -> MaterialTheme.colorScheme.onSurface to MaterialTheme.colorScheme.surfaceVariant
+        "CANCELLED", "REJECTED" -> OrbitSemanticColors.statusRed to Color(0x1AEF4444)
+        else -> OrbitSemanticColors.statusAmber to Color(0x1AF59E0B)
     }
 
-    val localizedPaymentStatus = when (normalizedPaymentStatus) {
-        "PENDING" -> stringResource(R.string.pay_status_pending)
-        "PAID" -> stringResource(R.string.pay_status_paid)
-        "VERIFIED" -> stringResource(R.string.pay_status_verified)
-        "FAILED" -> stringResource(R.string.pay_status_failed)
-        "REFUNDED" -> stringResource(R.string.pay_status_refunded)
-        else -> normalizedPaymentStatus.replace("_", " ")
-    }
+    val subtitleText = listOfNotNull(
+        order.customerName?.takeIf { it.isNotBlank() },
+        order.customerPhone?.takeIf { it.isNotBlank() },
+        order.itemsSummary?.takeIf { it.isNotBlank() }
+    ).take(2).joinToString(" · ").ifBlank { methodLabel }
 
-    val (payStatusBg, payStatusFg) = when (normalizedPaymentStatus) {
-        "PAID", "VERIFIED" -> StatusGreenBg to greenFg
-        "FAILED", "REFUNDED" -> StatusRedBg to redFg
-        else -> StatusGrayBg to MaterialTheme.colorScheme.onSurfaceVariant
-    }
-
-    Card(
+    Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .border(1.dp, MaterialTheme.colorScheme.outline, cardShape),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+            .heightIn(min = 48.dp)
+            .clip(cardShape)
+            .border(1.dp, MaterialTheme.colorScheme.outline, cardShape)
+            .clickable(onClick = onClick),
+        color = MaterialTheme.colorScheme.surface,
         shape = cardShape
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            // Top Row: Order ID + Payment Method Badge + Amount
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text(
                         text = "#${order.externalOrderId}",
-                        style = MaterialTheme.typography.titleMedium.copy(
+                        style = MaterialTheme.typography.bodyLarge.copy(
                             fontFeatureSettings = "tnum"
                         ),
-                        fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = methodBg,
-                        modifier = Modifier.border(
-                            width = 1.dp,
-                            color = methodFg.copy(alpha = 0.35f),
-                            shape = RoundedCornerShape(8.dp)
-                        )
-                    ) {
-                        Text(
-                            text = methodLabel,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = methodFg,
-                            maxLines = 1
-                        )
-                    }
-                }
-
-                Column(horizontalAlignment = Alignment.End) {
                     Text(
-                        text = stringResource(
-                            R.string.currency_bdt_amount,
-                            currencyFormat.format(order.baseAmount)
-                        ),
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontFeatureSettings = "tnum"
-                        ),
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
+                        text = "· $methodLabel",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1
                     )
-                    if (order.paidAmount > 0.0 && order.paidAmount < order.baseAmount) {
-                        Text(
-                            text = stringResource(
-                                R.string.order_paid_amount,
-                                currencyFormat.format(order.paidAmount)
-                            ),
-                            style = MaterialTheme.typography.labelMedium.copy(
-                                fontFeatureSettings = "tnum"
-                            ),
-                            color = greenFg
-                        )
-                    }
                 }
+
+                Text(
+                    text = formatCleanBdt(order.baseAmount),
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontFeatureSettings = "tnum"
+                    ),
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
             }
 
-            // Status Badges Row: Order Status + Payment Status
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = orderStatusBg,
-                    modifier = Modifier.border(
-                        width = 1.dp,
-                        color = orderStatusFg.copy(alpha = 0.35f),
-                        shape = RoundedCornerShape(8.dp)
-                    )
-                ) {
-                    Text(
-                        text = stringResource(R.string.order_status_label, localizedOrderStatus),
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = orderStatusFg
-                    )
-                }
+                Text(
+                    text = subtitleText,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 10.dp),
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontFeatureSettings = "tnum"
+                    ),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
 
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = payStatusBg,
-                    modifier = Modifier.border(
-                        width = 1.dp,
-                        color = payStatusFg.copy(alpha = 0.3f),
-                        shape = RoundedCornerShape(8.dp)
-                    )
+                CompactStatusChip(
+                    label = localizedOrderStatus,
+                    foreground = statusFg,
+                    background = statusBg
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CompactSmsRow(
+    sms: SmsEntity,
+    onClick: () -> Unit
+) {
+    val cardShape = RoundedCornerShape(14.dp)
+    val timeFormatter = remember { SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault()) }
+    val formattedTime = remember(sms.receivedAt) { timeFormatter.format(Date(sms.receivedAt)) }
+
+    val (statusLabel, statusFg, statusBg) = when (sms.status) {
+        SmsEntity.STATUS_VERIFIED -> Triple(
+            stringResource(R.string.tx_status_verified),
+            OrbitSemanticColors.statusGreen,
+            Color(0x1A10B981)
+        )
+        SmsEntity.STATUS_PENDING_UPLOAD -> Triple(
+            stringResource(R.string.tx_status_pending_upload),
+            OrbitSemanticColors.statusAmber,
+            Color(0x1AF59E0B)
+        )
+        else -> Triple(
+            stringResource(R.string.tx_status_unclaimed),
+            OrbitSemanticColors.statusGray,
+            Color(0x1A71717A)
+        )
+    }
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .clip(cardShape)
+            .border(1.dp, MaterialTheme.colorScheme.outline, cardShape)
+            .clickable(onClick = onClick),
+        color = MaterialTheme.colorScheme.surface,
+        shape = cardShape
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    ProviderDot(provider = sms.provider, size = 8.dp)
                     Text(
-                        text = stringResource(R.string.payment_status_label, localizedPaymentStatus),
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        style = MaterialTheme.typography.labelMedium,
+                        text = buildString {
+                            append(providerDisplayName(sms.provider))
+                            append(" · ")
+                            append(sms.trxId)
+                            sms.simSlotIndex?.let {
+                                append(" · SIM ")
+                                append(it)
+                            }
+                        },
+                        style = MaterialTheme.typography.bodyLarge.copy(
+                            fontFeatureSettings = "tnum"
+                        ),
                         fontWeight = FontWeight.Medium,
-                        color = payStatusFg
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
+
+                Text(
+                    text = formatCleanBdt(sms.amount),
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontFeatureSettings = "tnum"
+                    ),
+                    fontWeight = FontWeight.SemiBold,
+                    color = OrbitSemanticColors.statusGreen
+                )
             }
 
-            // Customer & Items Details
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                val customerLabel = listOfNotNull(
-                    order.customerName?.takeIf { it.isNotBlank() },
-                    order.customerPhone?.takeIf { it.isNotBlank() }
-                ).joinToString(" · ")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                val metaLeft = buildString {
+                    append(sms.senderNumber)
+                    if (!sms.externalOrderId.isNullOrBlank()) {
+                        append(" · #")
+                        append(sms.externalOrderId)
+                    }
+                    append(" · ")
+                    append(formattedTime)
+                }
+                Text(
+                    text = metaLeft,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 10.dp),
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontFeatureSettings = "tnum"
+                    ),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
 
-                if (customerLabel.isNotBlank()) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                CompactStatusChip(
+                    label = statusLabel,
+                    foreground = statusFg,
+                    background = statusBg
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CompactStatusChip(
+    label: String,
+    foreground: Color,
+    background: Color
+) {
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = background
+    ) {
+        Text(
+            text = label,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Medium,
+            color = foreground,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun OrderDetailSheetContent(
+    order: MerchantOrderDto,
+    isActionInProgress: Boolean,
+    onActionClick: (String) -> Unit
+) {
+    val normalizedOrderStatus = order.orderStatus.uppercase(Locale.US)
+    val normalizedPaymentStatus = order.paymentStatus.uppercase(Locale.US)
+    val redFg = OrbitSemanticColors.statusRed
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp)
+            .padding(bottom = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "#${order.externalOrderId}",
+                style = MaterialTheme.typography.titleLarge.copy(fontFeatureSettings = "tnum"),
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = formatCleanBdt(order.baseAmount),
+                style = MaterialTheme.typography.titleLarge.copy(fontFeatureSettings = "tnum"),
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            CompactStatusChip(
+                label = order.paymentMethod.uppercase(Locale.US),
+                foreground = MaterialTheme.colorScheme.onSurfaceVariant,
+                background = MaterialTheme.colorScheme.surfaceVariant
+            )
+            CompactStatusChip(
+                label = stringResource(R.string.order_status_label, normalizedOrderStatus.replace("_", " ")),
+                foreground = MaterialTheme.colorScheme.onSurface,
+                background = MaterialTheme.colorScheme.surfaceVariant
+            )
+            CompactStatusChip(
+                label = stringResource(R.string.payment_status_label, normalizedPaymentStatus.replace("_", " ")),
+                foreground = MaterialTheme.colorScheme.onSurface,
+                background = MaterialTheme.colorScheme.surfaceVariant
+            )
+        }
+
+        HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outline)
+
+        val customerLine = listOfNotNull(
+            order.customerName?.takeIf { it.isNotBlank() },
+            order.customerPhone?.takeIf { it.isNotBlank() }
+        ).joinToString(" · ")
+        if (customerLine.isNotBlank()) {
+            SheetMetaRow(stringResource(R.string.dashboard_detail_customer), customerLine)
+        }
+        order.itemsSummary?.takeIf { it.isNotBlank() }?.let {
+            SheetMetaRow(stringResource(R.string.dashboard_detail_items), it)
+        }
+        order.shippingAddress?.takeIf { it.isNotBlank() }?.let {
+            SheetMetaRow(stringResource(R.string.dashboard_detail_address), it)
+        }
+
+        val isTerminal = normalizedOrderStatus in setOf("CANCELLED", "DELIVERED", "COMPLETED")
+        if (!isTerminal) {
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                val btnShape = RoundedCornerShape(12.dp)
+                val isPendingConfirm = normalizedOrderStatus in setOf(
+                    "PENDING", "NEW", "PLACED", "UNCONFIRMED", "AWAITING_CONFIRMATION"
+                )
+
+                if (isPendingConfirm) {
+                    Button(
+                        onClick = { onActionClick("CONFIRM") },
+                        enabled = !isActionInProgress,
+                        modifier = Modifier.heightIn(min = 48.dp),
+                        shape = btnShape,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        )
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Phone,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = customerLabel,
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                fontFeatureSettings = "tnum"
-                            ),
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        if (isActionInProgress) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.onPrimary
+                            )
+                        } else {
+                            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                        }
+                        Spacer(modifier = Modifier.size(8.dp))
+                        Text(stringResource(R.string.order_action_confirm), style = MaterialTheme.typography.labelLarge)
                     }
                 }
 
-                if (!order.itemsSummary.isNullOrBlank()) {
-                    Row(
-                        verticalAlignment = Alignment.Top,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.ShoppingBag,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier
-                                .padding(top = 2.dp)
-                                .size(16.dp)
-                        )
-                        Text(
-                            text = order.itemsSummary,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-            }
-
-            // 1-Tap Bi-directional Action Buttons (>= 48dp touch targets)
-            val isTerminal = normalizedOrderStatus in setOf("CANCELLED", "DELIVERED", "COMPLETED")
-            if (!isTerminal) {
-                FlowRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    val btnShape = RoundedCornerShape(12.dp)
-                    val isPendingConfirm = normalizedOrderStatus in setOf("PENDING", "NEW", "PLACED", "UNCONFIRMED", "AWAITING_CONFIRMATION")
-
-                    if (isPendingConfirm) {
+                if (normalizedOrderStatus !in setOf("READY_TO_SHIP", "SHIPPED")) {
+                    val isPrimaryStep = normalizedOrderStatus == "CONFIRMED"
+                    if (isPrimaryStep) {
                         Button(
-                            onClick = { onActionClick("CONFIRM") },
+                            onClick = { onActionClick("READY_TO_SHIP") },
                             enabled = !isActionInProgress,
                             modifier = Modifier.heightIn(min = 48.dp),
                             shape = btnShape,
-                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = MaterialTheme.colorScheme.primary,
                                 contentColor = MaterialTheme.colorScheme.onPrimary
                             )
                         ) {
-                            if (isActionInProgress) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(16.dp),
-                                    strokeWidth = 2.dp,
-                                    color = MaterialTheme.colorScheme.onPrimary
-                                )
-                            } else {
-                                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
-                            }
+                            Icon(Icons.Default.Inventory2, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.size(8.dp))
-                            Text(
-                                text = stringResource(R.string.order_action_confirm),
-                                style = MaterialTheme.typography.labelLarge
-                            )
+                            Text(stringResource(R.string.order_action_ready_to_ship), style = MaterialTheme.typography.labelLarge)
                         }
-                    }
-
-                    if (normalizedOrderStatus !in setOf("READY_TO_SHIP", "SHIPPED")) {
-                        val isPrimaryStep = normalizedOrderStatus == "CONFIRMED"
-                        if (isPrimaryStep) {
-                            Button(
-                                onClick = { onActionClick("READY_TO_SHIP") },
-                                enabled = !isActionInProgress,
-                                modifier = Modifier.heightIn(min = 48.dp),
-                                shape = btnShape,
-                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.primary,
-                                    contentColor = MaterialTheme.colorScheme.onPrimary
-                                )
-                            ) {
-                                Icon(Icons.Default.Inventory2, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.size(8.dp))
-                                Text(
-                                    text = stringResource(R.string.order_action_ready_to_ship),
-                                    style = MaterialTheme.typography.labelLarge
-                                )
-                            }
-                        } else {
-                            OutlinedButton(
-                                onClick = { onActionClick("READY_TO_SHIP") },
-                                enabled = !isActionInProgress,
-                                modifier = Modifier.heightIn(min = 48.dp),
-                                shape = btnShape,
-                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
-                            ) {
-                                Icon(Icons.Default.Inventory2, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.size(8.dp))
-                                Text(
-                                    text = stringResource(R.string.order_action_ready_to_ship),
-                                    style = MaterialTheme.typography.labelLarge
-                                )
-                            }
-                        }
-                    }
-
-                    if (normalizedOrderStatus != "SHIPPED") {
-                        val isPrimaryShip = normalizedOrderStatus == "READY_TO_SHIP"
-                        if (isPrimaryShip) {
-                            Button(
-                                onClick = { onActionClick("SHIP") },
-                                enabled = !isActionInProgress,
-                                modifier = Modifier.heightIn(min = 48.dp),
-                                shape = btnShape,
-                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.primary,
-                                    contentColor = MaterialTheme.colorScheme.onPrimary
-                                )
-                            ) {
-                                Icon(Icons.Default.LocalShipping, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.size(8.dp))
-                                Text(
-                                    text = stringResource(R.string.order_action_mark_shipped),
-                                    style = MaterialTheme.typography.labelLarge
-                                )
-                            }
-                        } else {
-                            OutlinedButton(
-                                onClick = { onActionClick("SHIP") },
-                                enabled = !isActionInProgress,
-                                modifier = Modifier.heightIn(min = 48.dp),
-                                shape = btnShape,
-                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
-                            ) {
-                                Icon(Icons.Default.LocalShipping, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.size(8.dp))
-                                Text(
-                                    text = stringResource(R.string.order_action_mark_shipped),
-                                    style = MaterialTheme.typography.labelLarge
-                                )
-                            }
-                        }
-                    }
-
-                    if (normalizedPaymentStatus != "PAID") {
-                        Button(
-                            onClick = { onActionClick("MARK_PAID") },
-                            enabled = !isActionInProgress,
-                            modifier = Modifier.heightIn(min = 48.dp),
-                            shape = btnShape,
-                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.primary,
-                                contentColor = MaterialTheme.colorScheme.onPrimary
-                            )
-                        ) {
-                            Icon(Icons.Default.Payments, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.size(8.dp))
-                            Text(
-                                text = stringResource(R.string.order_action_mark_paid),
-                                style = MaterialTheme.typography.labelLarge
-                            )
-                        }
-                    }
-
-                    if (normalizedOrderStatus != "SHIPPED") {
+                    } else {
                         OutlinedButton(
-                            onClick = { onActionClick("CANCEL") },
+                            onClick = { onActionClick("READY_TO_SHIP") },
                             enabled = !isActionInProgress,
                             modifier = Modifier.heightIn(min = 48.dp),
                             shape = btnShape,
-                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-                            border = BorderStroke(1.dp, StatusRed.copy(alpha = 0.45f)),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = redFg)
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
                         ) {
-                            Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.Inventory2, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.size(8.dp))
-                            Text(
-                                text = stringResource(R.string.order_action_cancel),
-                                style = MaterialTheme.typography.labelLarge
-                            )
+                            Text(stringResource(R.string.order_action_ready_to_ship), style = MaterialTheme.typography.labelLarge)
                         }
+                    }
+                }
+
+                if (normalizedOrderStatus != "SHIPPED") {
+                    val isPrimaryShip = normalizedOrderStatus == "READY_TO_SHIP"
+                    if (isPrimaryShip) {
+                        Button(
+                            onClick = { onActionClick("SHIP") },
+                            enabled = !isActionInProgress,
+                            modifier = Modifier.heightIn(min = 48.dp),
+                            shape = btnShape,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary
+                            )
+                        ) {
+                            Icon(Icons.Default.LocalShipping, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.size(8.dp))
+                            Text(stringResource(R.string.order_action_mark_shipped), style = MaterialTheme.typography.labelLarge)
+                        }
+                    } else {
+                        OutlinedButton(
+                            onClick = { onActionClick("SHIP") },
+                            enabled = !isActionInProgress,
+                            modifier = Modifier.heightIn(min = 48.dp),
+                            shape = btnShape,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                        ) {
+                            Icon(Icons.Default.LocalShipping, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.size(8.dp))
+                            Text(stringResource(R.string.order_action_mark_shipped), style = MaterialTheme.typography.labelLarge)
+                        }
+                    }
+                }
+
+                if (normalizedPaymentStatus != "PAID") {
+                    Button(
+                        onClick = { onActionClick("MARK_PAID") },
+                        enabled = !isActionInProgress,
+                        modifier = Modifier.heightIn(min = 48.dp),
+                        shape = btnShape,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        )
+                    ) {
+                        Icon(Icons.Default.Payments, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.size(8.dp))
+                        Text(stringResource(R.string.order_action_mark_paid), style = MaterialTheme.typography.labelLarge)
+                    }
+                }
+
+                if (normalizedOrderStatus != "SHIPPED") {
+                    OutlinedButton(
+                        onClick = { onActionClick("CANCEL") },
+                        enabled = !isActionInProgress,
+                        modifier = Modifier.heightIn(min = 48.dp),
+                        shape = btnShape,
+                        border = BorderStroke(1.dp, StatusRed.copy(alpha = 0.45f)),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = redFg)
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.size(8.dp))
+                        Text(stringResource(R.string.order_action_cancel), style = MaterialTheme.typography.labelLarge)
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SmsDetailSheetContent(sms: SmsEntity) {
+    val timeFormatter = remember { SimpleDateFormat("dd MMM yyyy, hh:mm:ss a", Locale.getDefault()) }
+    val formattedTime = remember(sms.receivedAt) { timeFormatter.format(Date(sms.receivedAt)) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp)
+            .padding(bottom = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                ProviderDot(provider = sms.provider, size = 10.dp)
+                Text(
+                    text = providerDisplayName(sms.provider),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+            Text(
+                text = formatCleanBdt(sms.amount),
+                style = MaterialTheme.typography.titleLarge.copy(fontFeatureSettings = "tnum"),
+                fontWeight = FontWeight.SemiBold,
+                color = OrbitSemanticColors.statusGreen
+            )
+        }
+
+        HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outline)
+
+        SheetMetaRow(stringResource(R.string.history_detail_trx_id), sms.trxId, monospace = true)
+        SheetMetaRow(stringResource(R.string.history_detail_sender), sms.senderNumber, monospace = true)
+        sms.simSlotIndex?.let {
+            SheetMetaRow(
+                stringResource(R.string.dashboard_detail_sim_slot),
+                stringResource(R.string.dashboard_sim_slot_short, it)
+            )
+        }
+        sms.receiverNumber?.takeIf { it.isNotBlank() }?.let {
+            SheetMetaRow(stringResource(R.string.dashboard_detail_receiver), it, monospace = true)
+        }
+        if (sms.smsSender.isNotBlank()) {
+            SheetMetaRow(stringResource(R.string.history_detail_sms_sender), sms.smsSender)
+        }
+        SheetMetaRow(stringResource(R.string.history_detail_source), sms.source)
+        SheetMetaRow(stringResource(R.string.history_detail_status), sms.status)
+        sms.externalOrderId?.takeIf { it.isNotBlank() }?.let {
+            SheetMetaRow(stringResource(R.string.history_detail_order_id), "#$it", monospace = true)
+        }
+        SheetMetaRow(stringResource(R.string.history_detail_received_at), formattedTime)
+
+        Text(
+            text = stringResource(R.string.history_detail_raw_sms),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp)),
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            SelectionContainer {
+                Text(
+                    text = sms.rawSms,
+                    modifier = Modifier.padding(12.dp),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SheetMetaRow(
+    label: String,
+    value: String,
+    monospace: Boolean = false
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.Top
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(0.85f)
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum"),
+            fontFamily = if (monospace) FontFamily.Monospace else FontFamily.Default,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurface,
+            textAlign = TextAlign.End,
+            modifier = Modifier.weight(1.15f)
+        )
     }
 }
 
@@ -990,7 +1628,7 @@ fun EmptyIntentsStateCard(onRefresh: () -> Unit) {
                 imageVector = Icons.Default.Payments,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.outlineVariant,
-                modifier = Modifier.size(36.dp)
+                modifier = Modifier.size(32.dp)
             )
             Text(
                 text = stringResource(R.string.dashboard_empty_intents_title),
@@ -1078,7 +1716,7 @@ fun EmptyOrdersStateCard(onRefresh: () -> Unit) {
                 imageVector = Icons.Default.ReceiptLong,
                 contentDescription = stringResource(R.string.cd_empty_orders),
                 tint = MaterialTheme.colorScheme.outlineVariant,
-                modifier = Modifier.size(36.dp)
+                modifier = Modifier.size(32.dp)
             )
             Text(
                 text = stringResource(R.string.dashboard_empty_orders_title),
@@ -1112,476 +1750,6 @@ fun EmptyOrdersStateCard(onRefresh: () -> Unit) {
 }
 
 @Composable
-fun PreflightStatusBanner(
-    preflight: DevicePreflightData,
-    onClick: () -> Unit
-) {
-    val normalizedStatus = preflight.overallStatus.uppercase(Locale.US)
-    val isReady = normalizedStatus == "READY"
-    val isError = normalizedStatus == "ERROR"
-
-    val bgColor = when {
-        isReady -> StatusGreenBg
-        isError -> StatusRedBg
-        else -> StatusAmberBg
-    }
-    val borderColor = when {
-        isReady -> StatusGreen
-        isError -> StatusRed
-        else -> StatusAmber
-    }
-    val fgColor = when {
-        isReady -> OrbitSemanticColors.statusGreen
-        isError -> OrbitSemanticColors.statusRed
-        else -> OrbitSemanticColors.statusAmber
-    }
-    val leadingIcon = when {
-        isReady -> Icons.Default.VerifiedUser
-        isError -> Icons.Default.Error
-        else -> Icons.Default.Warning
-    }
-    val titleText = when {
-        isReady -> stringResource(R.string.dashboard_preflight_ready_title)
-        isError -> stringResource(R.string.dashboard_preflight_error_title)
-        else -> stringResource(R.string.dashboard_preflight_action_title)
-    }
-    val subtitleText = if (isReady) {
-        stringResource(R.string.dashboard_preflight_ready_desc, preflight.walletSummary.activeCount)
-    } else {
-        preflight.recommendations.firstOrNull()?.takeIf { it.isNotBlank() }
-            ?: stringResource(R.string.dashboard_preflight_action_fallback, preflight.walletSummary.activeCount)
-    }
-    val actionLabel = stringResource(
-        if (isReady) R.string.dashboard_preflight_tap_view else R.string.dashboard_preflight_tap_fix
-    )
-    val shape = RoundedCornerShape(16.dp)
-
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = 48.dp)
-            .clip(shape)
-            .border(1.dp, borderColor.copy(alpha = 0.38f), shape)
-            .clickable(onClick = onClick),
-        color = bgColor,
-        shape = shape
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Icon(
-                imageVector = leadingIcon,
-                contentDescription = null,
-                tint = fgColor,
-                modifier = Modifier.size(20.dp)
-            )
-
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
-                Text(
-                    text = titleText,
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    color = fgColor,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = subtitleText,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
-                Text(
-                    text = actionLabel,
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = fgColor
-                )
-                Icon(
-                    imageVector = Icons.Default.ChevronRight,
-                    contentDescription = null,
-                    tint = fgColor,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun ConnectionStatusPill(
-    isOnline: Boolean,
-    isSyncing: Boolean,
-    pendingCount: Int
-) {
-    val pillBg = if (isOnline) StatusGreenBg else StatusAmberBg
-    val pillBorder = if (isOnline) StatusGreen else StatusAmber
-    val dotColor = if (isOnline) StatusGreen else StatusAmber
-    val textColor = if (isOnline) OrbitSemanticColors.statusGreen else OrbitSemanticColors.statusAmber
-
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(1.dp, pillBorder.copy(alpha = 0.35f), RoundedCornerShape(16.dp)),
-        color = pillBg,
-        shape = RoundedCornerShape(16.dp)
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(
-                modifier = Modifier.weight(1f),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(10.dp)
-                        .clip(CircleShape)
-                        .background(dotColor)
-                )
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        text = when {
-                            isSyncing -> stringResource(R.string.status_syncing_hub)
-                            isOnline -> stringResource(R.string.status_online_syncing)
-                            else -> stringResource(R.string.status_offline_queue)
-                        },
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = textColor
-                    )
-                    Text(
-                        text = if (pendingCount > 0) {
-                            pluralStringResource(R.plurals.status_pending_uploads, pendingCount, pendingCount)
-                        } else {
-                            stringResource(R.string.status_all_synced)
-                        },
-                        style = MaterialTheme.typography.labelMedium.copy(
-                            fontFeatureSettings = "tnum"
-                        ),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            Icon(
-                imageVector = if (isOnline) Icons.Default.Wifi else Icons.Default.WifiOff,
-                contentDescription = stringResource(
-                    if (isOnline) R.string.cd_status_online else R.string.cd_status_offline
-                ),
-                tint = textColor,
-                modifier = Modifier.size(18.dp)
-            )
-        }
-    }
-}
-
-@Composable
-fun MetricCardsSection(
-    totalVolume: Double,
-    verifiedOrders: Int,
-    unclaimedCount: Int
-) {
-    val currencyFormat = remember {
-        NumberFormat.getNumberInstance(Locale.US).apply {
-            minimumFractionDigits = 2
-            maximumFractionDigits = 2
-        }
-    }
-
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        // Card 1: Total Verified Volume
-        MetricCard(
-            modifier = Modifier.weight(1.3f),
-            label = stringResource(R.string.metric_total_verified),
-            value = stringResource(R.string.currency_bdt_amount, currencyFormat.format(totalVolume)),
-            badgeText = stringResource(R.string.metric_store_volume),
-            badgeFgColor = OrbitSemanticColors.statusGreen,
-            badgeBgColor = StatusGreenBg
-        )
-
-        // Card 2: Verified Orders
-        MetricCard(
-            modifier = Modifier.weight(1f),
-            label = stringResource(R.string.metric_verified),
-            value = verifiedOrders.toString(),
-            badgeText = stringResource(R.string.metric_orders),
-            badgeFgColor = MaterialTheme.colorScheme.primary,
-            badgeBgColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
-        )
-
-        // Card 3: Unclaimed SMS
-        MetricCard(
-            modifier = Modifier.weight(1f),
-            label = stringResource(R.string.metric_unclaimed),
-            value = unclaimedCount.toString(),
-            badgeText = stringResource(R.string.metric_personal_queue),
-            badgeFgColor = OrbitSemanticColors.statusGray,
-            badgeBgColor = StatusGrayBg
-        )
-    }
-}
-
-@Composable
-fun MetricCard(
-    modifier: Modifier = Modifier,
-    label: String,
-    value: String,
-    badgeText: String,
-    badgeFgColor: Color,
-    badgeBgColor: Color = badgeFgColor.copy(alpha = 0.12f)
-) {
-    val cardShape = RoundedCornerShape(16.dp)
-
-    Card(
-        modifier = modifier.border(1.dp, MaterialTheme.colorScheme.outline, cardShape),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        shape = cardShape
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = value,
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontFeatureSettings = "tnum"
-                ),
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = badgeBgColor
-            ) {
-                Text(
-                    text = badgeText,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = badgeFgColor,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun TransactionItemCard(sms: SmsEntity) {
-    val providerColor = OrbitSemanticColors.providerColor(sms.provider)
-    val greenFg = OrbitSemanticColors.statusGreen
-    val amberFg = OrbitSemanticColors.statusAmber
-
-    val timeFormatter = remember { SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault()) }
-    val formattedTime = remember(sms.receivedAt) { timeFormatter.format(Date(sms.receivedAt)) }
-    val cardShape = RoundedCornerShape(16.dp)
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(1.dp, MaterialTheme.colorScheme.outline, cardShape),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        shape = cardShape
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            // Top row: Provider Chip, TrxID, and Amount
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    modifier = Modifier.weight(1f),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = providerColor.copy(alpha = 0.14f),
-                        modifier = Modifier.border(
-                            width = 1.dp,
-                            color = providerColor.copy(alpha = 0.35f),
-                            shape = RoundedCornerShape(8.dp)
-                        )
-                    ) {
-                        Text(
-                            text = sms.provider,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = providerColor
-                        )
-                    }
-
-                    Text(
-                        text = sms.trxId,
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontFeatureSettings = "tnum"
-                        ),
-                        fontWeight = FontWeight.SemiBold,
-                        fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-
-                Text(
-                    text = stringResource(
-                        R.string.currency_bdt_amount,
-                        String.format(Locale.US, "%.2f", sms.amount)
-                    ),
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontFeatureSettings = "tnum"
-                    ),
-                    fontWeight = FontWeight.Bold,
-                    color = greenFg
-                )
-            }
-
-            // Middle row: Sender Phone and Timestamp
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = stringResource(R.string.tx_from_sender, sms.senderNumber),
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontFeatureSettings = "tnum"
-                    ),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = formattedTime,
-                    style = MaterialTheme.typography.labelMedium.copy(
-                        fontFeatureSettings = "tnum"
-                    ),
-                    color = MaterialTheme.colorScheme.outlineVariant
-                )
-            }
-
-            // Bottom row: Verification Badge
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                when (sms.status) {
-                    SmsEntity.STATUS_VERIFIED -> {
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = StatusGreenBg,
-                            modifier = Modifier.border(
-                                width = 1.dp,
-                                color = StatusGreen.copy(alpha = 0.35f),
-                                shape = RoundedCornerShape(8.dp)
-                            )
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.CheckCircle,
-                                    contentDescription = null,
-                                    tint = greenFg,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Text(
-                                    text = if (sms.externalOrderId != null) {
-                                        stringResource(R.string.tx_status_verified_order, sms.externalOrderId)
-                                    } else {
-                                        stringResource(R.string.tx_status_verified)
-                                    },
-                                    style = MaterialTheme.typography.labelMedium.copy(
-                                        fontFeatureSettings = "tnum"
-                                    ),
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = greenFg
-                                )
-                            }
-                        }
-                    }
-                    SmsEntity.STATUS_PENDING_UPLOAD -> {
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = StatusAmberBg,
-                            modifier = Modifier.border(
-                                width = 1.dp,
-                                color = StatusAmber.copy(alpha = 0.35f),
-                                shape = RoundedCornerShape(8.dp)
-                            )
-                        ) {
-                            Text(
-                                text = stringResource(R.string.tx_status_pending_upload),
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                color = amberFg
-                            )
-                        }
-                    }
-                    else -> {
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = StatusGrayBg,
-                            modifier = Modifier.border(
-                                width = 1.dp,
-                                color = StatusGray.copy(alpha = 0.3f),
-                                shape = RoundedCornerShape(8.dp)
-                            )
-                        ) {
-                            Text(
-                                text = stringResource(R.string.tx_status_unclaimed),
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Medium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
 fun EmptyStateCard() {
     val cardShape = RoundedCornerShape(16.dp)
 
@@ -1598,13 +1766,13 @@ fun EmptyStateCard() {
                 .fillMaxWidth()
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Icon(
-                imageVector = Icons.Default.Info,
+                imageVector = Icons.Default.Payments,
                 contentDescription = stringResource(R.string.cd_empty_transactions),
                 tint = MaterialTheme.colorScheme.outlineVariant,
-                modifier = Modifier.size(36.dp)
+                modifier = Modifier.size(32.dp)
             )
             Text(
                 text = stringResource(R.string.dashboard_empty_tx_title),
@@ -1616,9 +1784,32 @@ fun EmptyStateCard() {
                 text = stringResource(R.string.dashboard_empty_tx_desc),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 12.dp),
                 textAlign = TextAlign.Center
             )
         }
+    }
+}
+
+private fun formatCleanBdt(amount: Double): String {
+    val hasFraction = abs(amount - amount.toLong().toDouble()) >= 0.005
+    val formatter = NumberFormat.getNumberInstance(Locale.US).apply {
+        minimumFractionDigits = if (hasFraction) 2 else 0
+        maximumFractionDigits = if (hasFraction) 2 else 0
+    }
+    return "৳ ${formatter.format(amount)}"
+}
+
+private fun formatLimitShort(limit: Double): String {
+    return when {
+        limit >= 100_000.0 -> {
+            val lakhs = limit / 100_000.0
+            if (abs(lakhs - lakhs.toLong()) < 0.05) {
+                "৳${lakhs.toLong()}.0L"
+            } else {
+                "৳${String.format(Locale.US, "%.1f", lakhs)}L"
+            }
+        }
+        limit >= 1_000.0 -> "৳${(limit / 1_000.0).toInt()}k"
+        else -> "৳${limit.toInt()}"
     }
 }

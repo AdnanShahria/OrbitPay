@@ -15,11 +15,11 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FactCheck
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.MonitorHeart
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -176,17 +176,15 @@ private data class BottomNavDestination(
 
 private val bottomNavDestinations = listOf(
     BottomNavDestination(Screen.Dashboard.route, R.string.nav_home, Icons.Default.Home),
-    BottomNavDestination(Screen.History.route, R.string.nav_history, Icons.Default.History),
     BottomNavDestination(Screen.Verify.route, R.string.nav_verify, Icons.Default.FactCheck),
-    BottomNavDestination(Screen.Diagnostics.route, R.string.nav_diagnostics, Icons.Default.MonitorHeart),
+    BottomNavDestination(Screen.History.route, R.string.nav_activity, Icons.Default.History),
     BottomNavDestination(Screen.Settings.route, R.string.nav_settings, Icons.Default.Settings)
 )
 
 private val loggedInRoutes = setOf(
     Screen.Dashboard.route,
-    Screen.History.route,
     Screen.Verify.route,
-    Screen.Diagnostics.route,
+    Screen.History.route,
     Screen.Settings.route
 )
 
@@ -252,6 +250,12 @@ fun OrbitPaymentApp(
         }
     }
 
+    val navigateToDiagnostics: () -> Unit = {
+        navController.navigate(Screen.Diagnostics.route) {
+            launchSingleTop = true
+        }
+    }
+
     val showBottomBar = uiState.isLoggedIn && currentRoute in loggedInRoutes
 
     Scaffold(
@@ -281,22 +285,23 @@ fun OrbitPaymentApp(
                                 icon = {
                                     Icon(
                                         imageVector = destination.icon,
-                                        contentDescription = label
+                                        contentDescription = label,
+                                        modifier = Modifier.size(20.dp)
                                     )
                                 },
                                 label = {
                                     Text(
                                         text = label,
                                         style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
                                 },
                                 alwaysShowLabel = true,
                                 colors = NavigationBarItemDefaults.colors(
-                                    selectedIconColor = MaterialTheme.colorScheme.primary,
-                                    selectedTextColor = MaterialTheme.colorScheme.primary,
+                                    selectedIconColor = MaterialTheme.colorScheme.onSurface,
+                                    selectedTextColor = MaterialTheme.colorScheme.onSurface,
                                     indicatorColor = MaterialTheme.colorScheme.surfaceVariant,
                                     unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
                                     unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
@@ -335,7 +340,7 @@ fun OrbitPaymentApp(
                     },
                     onRefreshIntents = { viewModel.refreshPaymentIntents() },
                     onClearFocusedIntent = { viewModel.clearFocusedPaymentIntent() },
-                    onOpenDiagnostics = { navigateTopLevel(Screen.Diagnostics.route) }
+                    onOpenDiagnostics = navigateToDiagnostics
                 )
             }
 
@@ -348,7 +353,13 @@ fun OrbitPaymentApp(
             }
 
             composable(Screen.Diagnostics.route) {
-                DiagnosticsScreen()
+                DiagnosticsScreen(
+                    onBackClick = {
+                        if (!navController.popBackStack()) {
+                            navigateTopLevel(Screen.Dashboard.route)
+                        }
+                    }
+                )
             }
 
             composable(Screen.Onboarding.route) {
@@ -394,6 +405,7 @@ fun OrbitPaymentApp(
                         }
                     },
                     onToggleTheme = { viewModel.toggleTheme() },
+                    onOpenDiagnostics = navigateToDiagnostics,
                     onSaveSettings = { serverUrl, merchantId, deviceKey, enableForeground ->
                         val cameFromLogin = navController.previousBackStackEntry?.destination?.route == Screen.Login.route
                         viewModel.saveSettings(serverUrl, merchantId, deviceKey, enableForeground)

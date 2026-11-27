@@ -26,8 +26,8 @@ android {
         applicationId = "com.orbitsaas.payment"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "localtest"
+        versionCode = 3
+        versionName = "1.0.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

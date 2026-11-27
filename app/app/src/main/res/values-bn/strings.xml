@@ -286,4 +286,45 @@
     <string name="dashboard_preflight_action_fallback">%1$dটি সক্রিয় ওয়ালেট · পরীক্ষা ও ঠিক করতে ট্যাপ করুন</string>
     <string name="dashboard_preflight_tap_fix">পরীক্ষা</string>
     <string name="dashboard_preflight_tap_view">বিস্তারিত</string>
+
+    <!-- Multi-Device, SIM Rotation & Redesigned Console -->
+    <string name="dashboard_devices_online">%1$d/%2$d ডিভাইস অনলাইন</string>
+    <string name="dashboard_single_device_online">১টি ডিভাইস অনলাইন</string>
+    <string name="dashboard_status_online_simple">অনলাইন</string>
+    <string name="dashboard_status_offline_simple">অফলাইন</string>
+    <string name="dashboard_queued_count">%1$dটি বাকি</string>
+    <string name="dashboard_verified_this_month">এই মাসে যাচাইকৃত</string>
+    <string name="dashboard_verified_count_label">%1$dটি যাচাইকৃত</string>
+    <string name="dashboard_unclaimed_count_label">%1$dটি অদাবিকৃত</string>
+    <string name="dashboard_sim_rotation_title">সক্রিয় সিম রোটেশন</string>
+    <string name="dashboard_sim_rotation_limits_hint">৳২.৫ লাখ সেফ · ৳৩.০ লাখ সীমা</string>
+    <string name="dashboard_sim_rotation_empty">এখনো কোনো সক্রিয় MFS সিম সিঙ্ক হয়নি</string>
+    <string name="dashboard_sim_slot_short">SIM %1$d</string>
+    <string name="dashboard_sim_limit_meter">%1$s সেফ / %2$s সীমা</string>
+    <string name="dashboard_rotation_active">সক্রিয়</string>
+    <string name="dashboard_rotation_standby">স্ট্যান্ডবাই</string>
+    <string name="dashboard_rotation_overflow">২.৫ লাখ ওভারফ্লো</string>
+    <string name="dashboard_rotation_capped">৩ লাখ সীমা</string>
+    <string name="dashboard_rotation_offline">অফলাইন</string>
+    <string name="dashboard_rotation_disabled">বিরতি</string>
+    <string name="dashboard_preflight_attention_short">সেটআপ পরীক্ষা প্রয়োজন · দেখতে ট্যাপ করুন</string>
+    <string name="dashboard_tab_pending">অপেক্ষমাণ (%1$d)</string>
+    <string name="dashboard_tab_orders_clean">অর্ডার (%1$d)</string>
+    <string name="dashboard_tab_sms_clean">SMS (%1$d)</string>
+    <string name="dashboard_tap_to_review">পর্যালোচনা করতে ট্যাপ করুন</string>
+    <string name="dashboard_sms_sim_tag">SIM %1$d</string>
+    <string name="dashboard_detail_customer">গ্রাহক</string>
+    <string name="dashboard_detail_items">পণ্যসমূহ</string>
+    <string name="dashboard_detail_address">ঠিকানা</string>
+    <string name="dashboard_detail_sim_slot">সিম স্লট</string>
+    <string name="dashboard_detail_receiver">রিসিভার সিম</string>
+
+    <string name="settings_devices_diagnostics_title">ডিভাইস ও ডায়াগনস্টিকস</string>
+    <string name="settings_devices_online_ratio">%1$d / %2$d অনলাইন</string>
+    <string name="settings_devices_none">এখনো কোনো ডিভাইস সিঙ্ক হয়নি</string>
+    <string name="settings_device_battery">%1$d%%</string>
+    <string name="settings_diagnostics_row_title">সিস্টেম ডায়াগনস্টিকস ও সিম স্বাস্থ্য</string>
+    <string name="settings_diagnostics_row_desc_default">সিম নম্বর, অনুমতি ও পুশ পরীক্ষা করুন</string>
+    <string name="settings_diagnostics_row_desc_ready">প্রস্তুত · %1$dটি সক্রিয় ওয়ালেট</string>
+    <string name="settings_diagnostics_row_desc_attention">পদক্ষেপ প্রয়োজন · পরীক্ষা করতে ট্যাপ করুন</string>
 </resources>

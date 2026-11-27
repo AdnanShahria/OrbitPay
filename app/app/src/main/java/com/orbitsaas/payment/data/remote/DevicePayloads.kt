@@ -19,7 +19,9 @@ data class IngestSmsItem(
     val rawSms: String,
     val receivedAt: Long,
     val smsSender: String? = null,
-    val source: String = "SMS"
+    val source: String = "SMS",
+    val simSlotIndex: Int? = null,
+    val receiverNumber: String? = null
 )
 
 @Serializable
@@ -58,16 +60,57 @@ data class RecentTransactionDto(
 )
 
 @Serializable
+data class ConnectedDeviceDto(
+    val id: String = "",
+    val deviceName: String = "",
+    val isOnline: Boolean = false,
+    val isActive: Boolean = true,
+    val lastSeenAt: String? = null,
+    val batteryLevel: Int? = null,
+    val networkType: String? = null,
+    val appVersion: String? = null,
+    val smsPermission: Boolean? = null,
+    val listenerEnabled: Boolean? = null,
+    val simSlots: List<PreflightSimSlotDto> = emptyList()
+)
+
+@Serializable
+data class WalletRotationDto(
+    val id: String = "",
+    val provider: String = "",
+    val accountType: String = "PERSONAL",
+    val walletNumber: String = "",
+    val label: String? = null,
+    val deviceId: String? = null,
+    val deviceName: String? = null,
+    val simSlotIndex: Int? = null,
+    val safeVolumeLimit: Double = 250000.0,
+    val monthlyVolumeLimit: Double = 300000.0,
+    val currentMonthVolume: Double = 0.0,
+    val utilizationPct: Int = 0,
+    val safeUtilizationPct: Int = 0,
+    val rotationState: String = "HEALTHY_STANDBY",
+    val deviceOnline: Boolean? = null,
+    val isPrimary: Boolean = false,
+    val isActive: Boolean = true,
+    val isPlaceholder: Boolean = false
+)
+
+@Serializable
 data class DeviceStatsResponse(
     val merchantId: String = "",
     val storeName: String = "",
     val isOnline: Boolean = false,
     val lastSeenAt: String? = null,
+    val onlineDeviceCount: Int = 0,
+    val totalDeviceCount: Int = 0,
     val totalVerifiedVolume: Double = 0.0,
     val verifiedCount: Int = 0,
     val unclaimedCount: Int = 0,
     val pendingQueueCount: Int = 0,
-    val recentTransactions: List<RecentTransactionDto> = emptyList()
+    val recentTransactions: List<RecentTransactionDto> = emptyList(),
+    val devices: List<ConnectedDeviceDto> = emptyList(),
+    val wallets: List<WalletRotationDto> = emptyList()
 )
 
 @Serializable
@@ -152,9 +195,11 @@ data class HeartbeatRequest(
     val isCharging: Boolean,
     val fcmToken: String? = null,
     val appVersion: String = "1.0.0",
+    val networkType: String? = null,
     val fcmEnabled: Boolean = false,
     val smsPermission: Boolean = false,
-    val listenerEnabled: Boolean = false
+    val listenerEnabled: Boolean = false,
+    val simSlots: List<PreflightSimSlotDto>? = null
 )
 
 @Serializable
@@ -381,7 +426,7 @@ data class TriggerActionData(
 data class PreflightSimSlotDto(
     val slotIndex: Int? = null,
     val carrierName: String? = null,
-    val phoneNumber: String,
+    val phoneNumber: String = "",
     val source: String = "HARDWARE"
 )
 

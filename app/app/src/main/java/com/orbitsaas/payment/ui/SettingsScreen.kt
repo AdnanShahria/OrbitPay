@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -16,6 +18,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -23,16 +26,20 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.MonitorHeart
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Store
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Translate
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -84,7 +91,7 @@ import com.orbitsaas.payment.update.AppUpdateManager
 import com.orbitsaas.payment.update.UpdateStatus
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun SettingsScreen(
     state: DashboardUiState,
@@ -92,7 +99,8 @@ fun SettingsScreen(
     onToggleTheme: () -> Unit,
     onSaveSettings: (serverUrl: String, merchantId: String, deviceKey: String, enableForeground: Boolean) -> Unit,
     onTestConnection: (serverUrl: String, merchantId: String, deviceKey: String, (Boolean, String) -> Unit) -> Unit,
-    onLogoutClick: () -> Unit = {}
+    onLogoutClick: () -> Unit = {},
+    onOpenDiagnostics: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val preferencesManager = remember(context) { PreferencesManager(context) }
@@ -205,6 +213,236 @@ fun SettingsScreen(
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = textColor,
                                 fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Devices & Diagnostics Card
+            if (state.isLoggedIn) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, MaterialTheme.colorScheme.outline, cardShape),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                    shape = cardShape
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Devices,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = stringResource(R.string.settings_devices_diagnostics_title),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+
+                            if (state.totalDeviceCount > 0) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(8.dp)
+                                            .clip(CircleShape)
+                                            .background(if (state.onlineDeviceCount > 0) StatusGreen else MaterialTheme.colorScheme.outlineVariant)
+                                    )
+                                    Text(
+                                        text = stringResource(
+                                            R.string.settings_devices_online_ratio,
+                                            state.onlineDeviceCount,
+                                            state.totalDeviceCount
+                                        ),
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontFeatureSettings = "tnum"
+                                        ),
+                                        color = if (state.onlineDeviceCount > 0) greenFg else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+
+                        if (state.connectedDevices.isEmpty()) {
+                            Text(
+                                text = stringResource(R.string.settings_devices_none),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                state.connectedDevices.forEach { device ->
+                                    Surface(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .border(1.dp, MaterialTheme.colorScheme.outline, fieldShape),
+                                        color = MaterialTheme.colorScheme.surfaceVariant,
+                                        shape = fieldShape
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.weight(1f),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                ) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(8.dp)
+                                                            .clip(CircleShape)
+                                                            .background(
+                                                                if (device.isOnline) StatusGreen else MaterialTheme.colorScheme.outlineVariant
+                                                            )
+                                                    )
+                                                    Text(
+                                                        text = device.deviceName.ifBlank { stringResource(R.string.settings_default_merchant_name) },
+                                                        style = MaterialTheme.typography.bodyMedium,
+                                                        fontWeight = FontWeight.Medium,
+                                                        color = MaterialTheme.colorScheme.onSurface,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                }
+
+                                                val metaParts = buildList {
+                                                    device.batteryLevel?.let { add(stringResource(R.string.settings_device_battery, it)) }
+                                                    device.networkType?.takeIf { it.isNotBlank() }?.let { add(it) }
+                                                }
+                                                if (metaParts.isNotEmpty()) {
+                                                    Text(
+                                                        text = metaParts.joinToString(" · "),
+                                                        style = MaterialTheme.typography.labelMedium.copy(
+                                                            fontFeatureSettings = "tnum"
+                                                        ),
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
+                                            }
+
+                                            if (device.simSlots.isNotEmpty()) {
+                                                FlowRow(
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                                ) {
+                                                    device.simSlots.forEach { slot ->
+                                                        val slotNum = slot.slotIndex ?: 1
+                                                        val slotSummary = listOfNotNull(
+                                                            stringResource(R.string.dashboard_sim_slot_short, slotNum),
+                                                            slot.phoneNumber.takeIf { it.isNotBlank() }
+                                                                ?: slot.carrierName?.takeIf { it.isNotBlank() }
+                                                        ).joinToString(" · ")
+                                                        Surface(
+                                                            shape = RoundedCornerShape(8.dp),
+                                                            color = MaterialTheme.colorScheme.surface,
+                                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                                                        ) {
+                                                            Text(
+                                                                text = slotSummary,
+                                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                                                style = MaterialTheme.typography.labelSmall.copy(
+                                                                    fontFeatureSettings = "tnum"
+                                                                ),
+                                                                fontFamily = if (slot.phoneNumber.isNotBlank()) FontFamily.Monospace else FontFamily.Default,
+                                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outline)
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 48.dp)
+                                .clip(fieldShape)
+                                .clickable(onClick = onOpenDiagnostics)
+                                .padding(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(end = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                                        .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(10.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.MonitorHeart,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text(
+                                        text = stringResource(R.string.settings_diagnostics_row_title),
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    val preflight = state.preflightState
+                                    val diagSubtitle = when {
+                                        preflight == null -> stringResource(R.string.settings_diagnostics_row_desc_default)
+                                        preflight.overallStatus.equals("READY", ignoreCase = true) ->
+                                            stringResource(R.string.settings_diagnostics_row_desc_ready, preflight.walletSummary.activeCount)
+                                        else -> stringResource(R.string.settings_diagnostics_row_desc_attention)
+                                    }
+                                    Text(
+                                        text = diagSubtitle,
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontFeatureSettings = "tnum"
+                                        ),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            Icon(
+                                imageVector = Icons.Default.ChevronRight,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
                             )
                         }
                     }

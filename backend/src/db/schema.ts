@@ -148,18 +148,23 @@ export const merchants = sqliteTable('merchants', {
   uniqueSlug: uniqueIndex('uq_merchants_slug').on(table.slug),
 }));
 
-// 2. Merchant Wallets (Multi-SIM Pooling & Limit Rotation)
+// 2. Merchant Wallets (Multi-SIM Pooling & Intelligent 250k Safe / 300k Hard Limit Rotation)
 export const merchantWallets = sqliteTable('merchant_wallets', {
   id: text('id').primaryKey(),
   merchantId: text('merchant_id').notNull().references(() => merchants.id),
   provider: text('provider', { enum: ['BKASH', 'NAGAD', 'ROCKET', 'UPAY', 'CELLFIN'] }).notNull(),
   accountType: text('account_type', { enum: ['PERSONAL', 'PRA', 'MERCHANT'] }).default('PERSONAL').notNull(),
   walletNumber: text('wallet_number').notNull(),
+  label: text('label'),
+  deviceId: text('device_id'),
+  simSlotIndex: integer('sim_slot_index'),
+  safeVolumeLimit: real('safe_volume_limit').default(250000).notNull(),
   monthlyVolumeLimit: real('monthly_volume_limit').default(300000).notNull(),
   currentMonthVolume: real('current_month_volume').default(0).notNull(),
   isPrimary: integer('is_primary', { mode: 'boolean' }).default(false).notNull(),
   isActive: integer('is_active', { mode: 'boolean' }).default(true).notNull(),
   priorityOrder: integer('priority_order').default(0).notNull(),
+  lastRotatedAt: integer('last_rotated_at', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()).notNull(),
 }, (table) => ({
   walletLookupIdx: index('idx_wallets_lookup').on(table.merchantId, table.provider, table.isActive),
@@ -180,6 +185,9 @@ export const smsLedger = sqliteTable('sms_ledger', {
   }),
   externalOrderId: text('external_order_id'),
   paymentIntentId: text('payment_intent_id'),
+  deviceId: text('device_id'),
+  simSlotIndex: integer('sim_slot_index'),
+  receiverNumber: text('receiver_number'),
   smsReceivedAt: integer('sms_received_at', { mode: 'timestamp' }).notNull(),
   verifiedAt: integer('verified_at', { mode: 'timestamp' }),
   smsSender: text('sms_sender'),
@@ -354,7 +362,7 @@ export const authSessions = sqliteTable('auth_sessions', {
   sessionMerchantIdx: index('idx_auth_sessions_merchant').on(table.merchantId, table.revokedAt),
 }));
 
-// 12. Merchant Devices (Per-Login Android Companion Keys & FCM Tokens)
+// 12. Merchant Devices (Multi-Device Android Companion Keys, SIM Slots & Telemetry)
 export const merchantDevices = sqliteTable('merchant_devices', {
   id: text('id').primaryKey(), // dev_xxxx
   merchantId: text('merchant_id').notNull().references(() => merchants.id),
@@ -362,6 +370,12 @@ export const merchantDevices = sqliteTable('merchant_devices', {
   deviceName: text('device_name').notNull(),
   deviceKeyHash: text('device_key_hash').notNull(),
   fcmToken: text('fcm_token'),
+  simSlotsJson: text('sim_slots_json'),
+  batteryLevel: integer('battery_level'),
+  networkType: text('network_type'),
+  appVersion: text('app_version'),
+  smsPermission: integer('sms_permission', { mode: 'boolean' }),
+  listenerEnabled: integer('listener_enabled', { mode: 'boolean' }),
   lastSeenAt: integer('last_seen_at', { mode: 'timestamp' }),
   isActive: integer('is_active', { mode: 'boolean' }).default(true).notNull(),
   createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()).notNull(),

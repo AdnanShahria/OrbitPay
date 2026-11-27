@@ -1,7 +1,9 @@
-import { eq, and, desc, asc, inArray } from 'drizzle-orm';
+import { eq, and, desc, asc, inArray, sql } from 'drizzle-orm';
 import type { AppDb } from '../../db/client';
 import {
+  merchantDevices,
   merchantWallets,
+  type MerchantRecord,
   type MerchantWalletRecord,
   type MfsProvider,
   MFS_PROVIDERS,
@@ -9,11 +11,70 @@ import {
 import { generateSecureToken } from '../../shared/crypto';
 import { BadRequestError, NotFoundError } from '../../shared/errors';
 import { sanitizePhoneNumber } from '../../shared/parsers/mfs';
+import type { Env } from '../../shared/types';
+import { realtimeHub } from '../realtime/realtime.service';
+import { dispatchWebhook } from '../webhooks/webhook.dispatcher';
 import type { CreateWalletInput, SyncWalletsInput, UpdateWalletInput } from './wallets.schema';
 
 const BANGLADESHI_PHONE_REGEX = /^01[3-9]\d{8,9}$/;
+const DEVICE_ONLINE_WINDOW_MS = 5 * 60 * 1000;
 
+export const DEFAULT_SAFE_VOLUME_LIMIT = 250_000;
+export const DEFAULT_MAX_VOLUME_LIMIT = 300_000;
 export const PLACEHOLDER_WALLET_NUMBERS = new Set(['01700000000', '01800000000']);
+
+export type WalletRotationState =
+  | 'ACTIVE_PRIMARY'
+  | 'HEALTHY_STANDBY'
+  | 'SAFE_LIMIT_OVERFLOW'
+  | 'HARD_LIMIT_REACHED'
+  | 'DEVICE_OFFLINE'
+  | 'DISABLED';
+
+export interface DeviceSimSlotSummary {
+  slotIndex: number;
+  carrierName: string;
+  phoneNumber: string;
+  source: string;
+}
+
+export interface ConnectedDeviceSummary {
+  id: string;
+  deviceName: string;
+  isOnline: boolean;
+  isActive: boolean;
+  lastSeenAt: string | null;
+  batteryLevel: number | null;
+  networkType: string | null;
+  appVersion: string | null;
+  smsPermission: boolean | null;
+  listenerEnabled: boolean | null;
+  simSlots: DeviceSimSlotSummary[];
+}
+
+export interface EnrichedWalletRecord extends MerchantWalletRecord {
+  safeVolumeLimit: number;
+  monthlyVolumeLimit: number;
+  utilizationPct: number;
+  safeUtilizationPct: number;
+  rotationState: WalletRotationState;
+  deviceOnline: boolean | null;
+  deviceName: string | null;
+  isPlaceholder: boolean;
+}
+
+export interface WalletsOverviewResult {
+  wallets: EnrichedWalletRecord[];
+  devices: ConnectedDeviceSummary[];
+  summary: {
+    totalWallets: number;
+    activeWallets: number;
+    onlineDeviceCount: number;
+    totalDeviceCount: number;
+    overflowWarningCount: number;
+    hardLimitReachedCount: number;
+  };
+}
 
 /**
  * Returns true when a wallet number is one of the seeded demo placeholder numbers.
@@ -28,49 +89,247 @@ export function isPlaceholderWalletNumber(walletNumber: string): boolean {
 }
 
 export interface SyncMerchantWalletsResult {
-  wallets: MerchantWalletRecord[];
+  wallets: EnrichedWalletRecord[];
+  devices: ConnectedDeviceSummary[];
   syncedCount: number;
   activeCount: number;
   placeholderCount: number;
   hasPlaceholderWallets: boolean;
 }
 
+function parseDeviceSimSlots(rawJson: string | null | undefined): DeviceSimSlotSummary[] {
+  if (!rawJson) return [];
+  try {
+    const parsed = JSON.parse(rawJson);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((item: Record<string, unknown>, idx: number) => ({
+        slotIndex: typeof item.slotIndex === 'number' ? item.slotIndex : idx + 1,
+        carrierName: String(item.carrierName || `SIM ${idx + 1}`),
+        phoneNumber: sanitizePhoneNumber(String(item.phoneNumber || '')),
+        source: String(item.source || 'HARDWARE'),
+      }))
+      .filter((s) => s.phoneNumber || s.carrierName);
+  } catch {
+    return [];
+  }
+}
+
 /**
- * Retrieves the optimal active SIM wallet for a provider, honoring the monthly quota rotation.
+ * Lists all active connected Android companion devices for a merchant with online status and SIM slot telemetry.
+ */
+export async function listMerchantDevicesSummary(
+  db: AppDb,
+  merchantId: string
+): Promise<ConnectedDeviceSummary[]> {
+  const rows = await db
+    .select()
+    .from(merchantDevices)
+    .where(and(eq(merchantDevices.merchantId, merchantId), eq(merchantDevices.isActive, true)))
+    .orderBy(desc(merchantDevices.lastSeenAt), desc(merchantDevices.createdAt));
+
+  const nowMs = Date.now();
+  return rows.map((d) => {
+    const lastSeenMs = d.lastSeenAt ? d.lastSeenAt.getTime() : 0;
+    const isOnline = lastSeenMs > 0 && nowMs - lastSeenMs < DEVICE_ONLINE_WINDOW_MS;
+    return {
+      id: d.id,
+      deviceName: d.deviceName,
+      isOnline,
+      isActive: d.isActive,
+      lastSeenAt: d.lastSeenAt ? d.lastSeenAt.toISOString() : null,
+      batteryLevel: d.batteryLevel ?? null,
+      networkType: d.networkType ?? null,
+      appVersion: d.appVersion ?? null,
+      smsPermission: d.smsPermission ?? null,
+      listenerEnabled: d.listenerEnabled ?? null,
+      simSlots: parseDeviceSimSlots(d.simSlotsJson),
+    };
+  });
+}
+
+function resolveWalletDevicePresence(
+  wallet: MerchantWalletRecord,
+  devices: ConnectedDeviceSummary[]
+): { deviceOnline: boolean | null; deviceName: string | null } {
+  const normalizedWalletNum = sanitizePhoneNumber(wallet.walletNumber, wallet.provider);
+
+  if (wallet.deviceId) {
+    const linked = devices.find((d) => d.id === wallet.deviceId);
+    if (linked) {
+      return { deviceOnline: linked.isOnline, deviceName: linked.deviceName };
+    }
+    return { deviceOnline: false, deviceName: null };
+  }
+
+  for (const device of devices) {
+    const matchedSim = device.simSlots.find(
+      (slot) => slot.phoneNumber && sanitizePhoneNumber(slot.phoneNumber, wallet.provider) === normalizedWalletNum
+    );
+    if (matchedSim) {
+      return { deviceOnline: device.isOnline, deviceName: device.deviceName };
+    }
+  }
+
+  const onlineCount = devices.filter((d) => d.isOnline).length;
+  if (devices.length === 0) {
+    return { deviceOnline: null, deviceName: null };
+  }
+  // Unpinned SIM without hardware number match can still be served if any merchant device is online
+  return {
+    deviceOnline: onlineCount > 0 ? true : false,
+    deviceName: null,
+  };
+}
+
+export function enrichWalletRecord(
+  wallet: MerchantWalletRecord,
+  devices: ConnectedDeviceSummary[]
+): EnrichedWalletRecord {
+  const hardLimit =
+    wallet.monthlyVolumeLimit > 0 ? wallet.monthlyVolumeLimit : DEFAULT_MAX_VOLUME_LIMIT;
+  const rawSafeLimit =
+    wallet.safeVolumeLimit > 0 ? wallet.safeVolumeLimit : DEFAULT_SAFE_VOLUME_LIMIT;
+  const safeLimit = Math.min(rawSafeLimit, hardLimit);
+  const { deviceOnline, deviceName } = resolveWalletDevicePresence(wallet, devices);
+  const isPlaceholder = isPlaceholderWalletNumber(wallet.walletNumber);
+
+  let rotationState: WalletRotationState = 'HEALTHY_STANDBY';
+  if (!wallet.isActive) {
+    rotationState = 'DISABLED';
+  } else if (wallet.currentMonthVolume >= hardLimit) {
+    rotationState = 'HARD_LIMIT_REACHED';
+  } else if (deviceOnline === false && devices.some((d) => d.isOnline)) {
+    // Only mark DEVICE_OFFLINE when another device is online (failover scenario) or explicitly pinned offline
+    rotationState = 'DEVICE_OFFLINE';
+  } else if (wallet.currentMonthVolume >= safeLimit) {
+    rotationState = 'SAFE_LIMIT_OVERFLOW';
+  } else if (wallet.isPrimary) {
+    rotationState = 'ACTIVE_PRIMARY';
+  }
+
+  const utilizationPct = Math.min(Math.round((wallet.currentMonthVolume / hardLimit) * 100), 100);
+  const safeUtilizationPct = Math.min(Math.round((wallet.currentMonthVolume / safeLimit) * 100), 100);
+
+  return {
+    ...wallet,
+    safeVolumeLimit: safeLimit,
+    monthlyVolumeLimit: hardLimit,
+    utilizationPct,
+    safeUtilizationPct,
+    rotationState,
+    deviceOnline,
+    deviceName,
+    isPlaceholder,
+  };
+}
+
+/**
+ * Intelligent Multi-Device + 250k Safe / 300k Hard Limit SIM Rotation Engine.
  * Priority:
- * 1. Under monthly quota limit (currentMonthVolume < monthlyVolumeLimit)
- * 2. Primary designated SIM first (isPrimary = true)
- * 3. Priority order (priorityOrder ASC)
- * 4. Fallback to any active SIM if all are currently over quota
+ * 1. Under safeVolumeLimit (৳2,50,000) AND device online (or unpinned when devices online/absent)
+ * 2. Under safeVolumeLimit (৳2,50,000) fallback
+ * 3. Graceful Overflow Zone (৳2,50,000 <= volume < ৳3,00,000): lowest volume first, preferring online device
+ * 4. Hard-blocked at >= monthlyVolumeLimit (৳3,00,000)
+ *
+ * Automatically promotes the winning wallet to `isPrimary = true` when rotation triggers.
  */
 export async function getActiveRotatedWallet(
   db: AppDb,
   merchantId: string,
   provider: MfsProvider
-): Promise<MerchantWalletRecord | null> {
-  const activeWallets = await db
-    .select()
-    .from(merchantWallets)
-    .where(
-      and(
-        eq(merchantWallets.merchantId, merchantId),
-        eq(merchantWallets.provider, provider),
-        eq(merchantWallets.isActive, true)
+): Promise<EnrichedWalletRecord | null> {
+  const [activeWallets, devices] = await Promise.all([
+    db
+      .select()
+      .from(merchantWallets)
+      .where(
+        and(
+          eq(merchantWallets.merchantId, merchantId),
+          eq(merchantWallets.provider, provider),
+          eq(merchantWallets.isActive, true)
+        )
       )
-    )
-    .orderBy(desc(merchantWallets.isPrimary), asc(merchantWallets.priorityOrder));
+      .orderBy(desc(merchantWallets.isPrimary), asc(merchantWallets.priorityOrder), asc(merchantWallets.currentMonthVolume)),
+    listMerchantDevicesSummary(db, merchantId),
+  ]);
 
   if (activeWallets.length === 0) {
     return null;
   }
 
-  // Find first SIM strictly under monthly quota
-  const underQuotaWallet = activeWallets.find(
+  const realWallets = activeWallets.filter((w) => !isPlaceholderWalletNumber(w.walletNumber));
+  const pool = realWallets.length > 0 ? realWallets : activeWallets;
+  const enrichedPool = pool.map((w) => enrichWalletRecord(w, devices));
+
+  const underHardLimit = enrichedPool.filter(
     (w) => w.currentMonthVolume < w.monthlyVolumeLimit
   );
 
-  // Return under-quota wallet or gracefully fall back to the primary/first active SIM
-  return underQuotaWallet || activeWallets[0];
+  if (underHardLimit.length === 0) {
+    // All SIMs reached 300k hard limit
+    return null;
+  }
+
+  // Tier 1: Strictly under 250k safe limit AND device online (or unknown/no devices registered)
+  const tier1 = underHardLimit.filter(
+    (w) => w.currentMonthVolume < w.safeVolumeLimit && w.deviceOnline !== false
+  );
+
+  // Tier 2: Strictly under 250k safe limit (any device status)
+  const tier2 = underHardLimit.filter((w) => w.currentMonthVolume < w.safeVolumeLimit);
+
+  // Tier 3: Overflow 250k..300k — choose lowest-volume SIM, preferring online device
+  const tier3 = [...underHardLimit].sort((a, b) => {
+    const aOnlineScore = a.deviceOnline !== false ? 0 : 1;
+    const bOnlineScore = b.deviceOnline !== false ? 0 : 1;
+    if (aOnlineScore !== bOnlineScore) return aOnlineScore - bOnlineScore;
+    return a.currentMonthVolume - b.currentMonthVolume;
+  });
+
+  const winner = tier1[0] || tier2[0] || tier3[0] || null;
+  if (!winner) return null;
+
+  // Auto-promote winner to primary when rotation switches away from an over-limit or offline SIM
+  if (!winner.isPrimary) {
+    const now = new Date();
+    await db
+      .update(merchantWallets)
+      .set({ isPrimary: false })
+      .where(
+        and(
+          eq(merchantWallets.merchantId, merchantId),
+          eq(merchantWallets.provider, provider),
+          eq(merchantWallets.isPrimary, true)
+        )
+      );
+    await db
+      .update(merchantWallets)
+      .set({ isPrimary: true, lastRotatedAt: now })
+      .where(eq(merchantWallets.id, winner.id));
+
+    winner.isPrimary = true;
+    winner.lastRotatedAt = now;
+    if (winner.currentMonthVolume < winner.safeVolumeLimit) {
+      winner.rotationState = 'ACTIVE_PRIMARY';
+    }
+
+    realtimeHub.broadcast(
+      'WALLET_ROTATED',
+      {
+        provider,
+        walletId: winner.id,
+        walletNumber: winner.walletNumber,
+        currentMonthVolume: winner.currentMonthVolume,
+        safeVolumeLimit: winner.safeVolumeLimit,
+        monthlyVolumeLimit: winner.monthlyVolumeLimit,
+        rotationState: winner.rotationState,
+      },
+      merchantId
+    );
+  }
+
+  return winner;
 }
 
 /**
@@ -79,8 +338,8 @@ export async function getActiveRotatedWallet(
 export async function getAllActiveRotatedWallets(
   db: AppDb,
   merchantId: string
-): Promise<MerchantWalletRecord[]> {
-  const results: MerchantWalletRecord[] = [];
+): Promise<EnrichedWalletRecord[]> {
+  const results: EnrichedWalletRecord[] = [];
   for (const provider of MFS_PROVIDERS) {
     const wallet = await getActiveRotatedWallet(db, merchantId, provider);
     if (wallet) {
@@ -91,14 +350,48 @@ export async function getAllActiveRotatedWallets(
 }
 
 /**
- * Lists all registered wallets for a merchant.
+ * Lists all registered wallets for a merchant (enriched with rotation status and device presence).
  */
-export async function listWallets(db: AppDb, merchantId: string): Promise<MerchantWalletRecord[]> {
-  return db
-    .select()
-    .from(merchantWallets)
-    .where(eq(merchantWallets.merchantId, merchantId))
-    .orderBy(desc(merchantWallets.isActive), desc(merchantWallets.isPrimary), asc(merchantWallets.priorityOrder));
+export async function listWallets(
+  db: AppDb,
+  merchantId: string
+): Promise<EnrichedWalletRecord[]> {
+  const [rows, devices] = await Promise.all([
+    db
+      .select()
+      .from(merchantWallets)
+      .where(eq(merchantWallets.merchantId, merchantId))
+      .orderBy(desc(merchantWallets.isActive), desc(merchantWallets.isPrimary), asc(merchantWallets.priorityOrder)),
+    listMerchantDevicesSummary(db, merchantId),
+  ]);
+  return rows.map((w) => enrichWalletRecord(w, devices));
+}
+
+/**
+ * Returns complete wallet rotation pool + connected Android devices overview.
+ */
+export async function getWalletsOverview(
+  db: AppDb,
+  merchantId: string
+): Promise<WalletsOverviewResult> {
+  const [wallets, devices] = await Promise.all([
+    listWallets(db, merchantId),
+    listMerchantDevicesSummary(db, merchantId),
+  ]);
+
+  const activeWallets = wallets.filter((w) => w.isActive && !w.isPlaceholder);
+  return {
+    wallets,
+    devices,
+    summary: {
+      totalWallets: wallets.length,
+      activeWallets: activeWallets.length,
+      onlineDeviceCount: devices.filter((d) => d.isOnline).length,
+      totalDeviceCount: devices.length,
+      overflowWarningCount: activeWallets.filter((w) => w.rotationState === 'SAFE_LIMIT_OVERFLOW').length,
+      hardLimitReachedCount: activeWallets.filter((w) => w.rotationState === 'HARD_LIMIT_REACHED').length,
+    },
+  };
 }
 
 /**
@@ -108,10 +401,12 @@ export async function createWallet(
   db: AppDb,
   merchantId: string,
   input: CreateWalletInput
-): Promise<MerchantWalletRecord> {
+): Promise<EnrichedWalletRecord> {
   const id = `wal_${generateSecureToken(16)}`;
+  const normalizedNumber = sanitizePhoneNumber(input.walletNumber, input.provider);
+  const hardLimit = input.monthlyVolumeLimit || DEFAULT_MAX_VOLUME_LIMIT;
+  const safeLimit = Math.min(input.safeVolumeLimit || DEFAULT_SAFE_VOLUME_LIMIT, hardLimit);
 
-  // If this wallet is marked primary, demote any other primary wallet for the same provider
   if (input.isPrimary) {
     await db
       .update(merchantWallets)
@@ -130,16 +425,23 @@ export async function createWallet(
     merchantId,
     provider: input.provider,
     accountType: input.accountType,
-    walletNumber: input.walletNumber,
-    monthlyVolumeLimit: input.monthlyVolumeLimit,
+    walletNumber: normalizedNumber,
+    label: input.label ?? null,
+    deviceId: input.deviceId ?? null,
+    simSlotIndex: input.simSlotIndex ?? null,
+    safeVolumeLimit: safeLimit,
+    monthlyVolumeLimit: hardLimit,
     currentMonthVolume: 0,
     isPrimary: input.isPrimary,
     isActive: true,
     priorityOrder: input.priorityOrder,
   });
 
-  const created = await db.select().from(merchantWallets).where(eq(merchantWallets.id, id)).limit(1);
-  return created[0];
+  const [created, devices] = await Promise.all([
+    db.select().from(merchantWallets).where(eq(merchantWallets.id, id)).limit(1),
+    listMerchantDevicesSummary(db, merchantId),
+  ]);
+  return enrichWalletRecord(created[0], devices);
 }
 
 /**
@@ -150,7 +452,7 @@ export async function updateWallet(
   merchantId: string,
   walletId: string,
   input: UpdateWalletInput
-): Promise<MerchantWalletRecord> {
+): Promise<EnrichedWalletRecord> {
   const existing = await db
     .select()
     .from(merchantWallets)
@@ -163,7 +465,6 @@ export async function updateWallet(
 
   const current = existing[0];
 
-  // If setting to primary, demote existing primaries for the same provider
   if (input.isPrimary) {
     await db
       .update(merchantWallets)
@@ -177,11 +478,23 @@ export async function updateWallet(
       );
   }
 
+  const nextMax = input.monthlyVolumeLimit ?? current.monthlyVolumeLimit;
+  const nextSafe =
+    input.safeVolumeLimit !== undefined
+      ? Math.min(input.safeVolumeLimit, nextMax)
+      : Math.min(current.safeVolumeLimit || DEFAULT_SAFE_VOLUME_LIMIT, nextMax);
+
   await db
     .update(merchantWallets)
     .set({
-      ...(input.walletNumber !== undefined && { walletNumber: input.walletNumber }),
+      ...(input.walletNumber !== undefined && {
+        walletNumber: sanitizePhoneNumber(input.walletNumber, current.provider),
+      }),
       ...(input.accountType !== undefined && { accountType: input.accountType }),
+      ...(input.label !== undefined && { label: input.label }),
+      ...(input.deviceId !== undefined && { deviceId: input.deviceId }),
+      ...(input.simSlotIndex !== undefined && { simSlotIndex: input.simSlotIndex }),
+      safeVolumeLimit: nextSafe,
       ...(input.monthlyVolumeLimit !== undefined && { monthlyVolumeLimit: input.monthlyVolumeLimit }),
       ...(input.currentMonthVolume !== undefined && { currentMonthVolume: input.currentMonthVolume }),
       ...(input.isPrimary !== undefined && { isPrimary: input.isPrimary }),
@@ -190,8 +503,11 @@ export async function updateWallet(
     })
     .where(eq(merchantWallets.id, walletId));
 
-  const updated = await db.select().from(merchantWallets).where(eq(merchantWallets.id, walletId)).limit(1);
-  return updated[0];
+  const [updated, devices] = await Promise.all([
+    db.select().from(merchantWallets).where(eq(merchantWallets.id, walletId)).limit(1),
+    listMerchantDevicesSummary(db, merchantId),
+  ]);
+  return enrichWalletRecord(updated[0], devices);
 }
 
 /**
@@ -212,18 +528,75 @@ export async function deleteWallet(db: AppDb, merchantId: string, walletId: stri
 }
 
 /**
- * Increments monthly volume for the wallet associated with a verified transaction.
+ * Emits a signed `wallet.synced` or `wallet.rotated` webhook to keep connected storefronts in sync.
+ */
+export async function dispatchWalletSyncWebhook(
+  db: AppDb,
+  merchant: MerchantRecord,
+  event: 'wallet.rotated' | 'wallet.synced',
+  env?: Env,
+  extra?: Record<string, unknown>
+): Promise<void> {
+  if (!merchant.webhookUrl || !merchant.webhookUrl.trim().startsWith('https://')) {
+    return;
+  }
+  const overview = await getWalletsOverview(db, merchant.id);
+  await dispatchWebhook(
+    db,
+    merchant,
+    event,
+    {
+      merchantId: merchant.id,
+      wallets: overview.wallets.map((w) => ({
+        id: w.id,
+        provider: w.provider,
+        walletNumber: w.walletNumber,
+        accountType: w.accountType,
+        label: w.label,
+        isActive: w.isActive,
+        isPrimary: w.isPrimary,
+        isPlaceholder: w.isPlaceholder,
+        safeVolumeLimit: w.safeVolumeLimit,
+        monthlyVolumeLimit: w.monthlyVolumeLimit,
+        currentMonthVolume: w.currentMonthVolume,
+        rotationState: w.rotationState,
+        deviceId: w.deviceId,
+        deviceName: w.deviceName,
+        simSlotIndex: w.simSlotIndex,
+        deviceOnline: w.deviceOnline,
+      })),
+      devices: overview.devices,
+      summary: overview.summary,
+      ...extra,
+    },
+    1,
+    undefined,
+    undefined,
+    env
+  ).catch((err) => {
+    console.warn(`[Wallet Webhook] Failed to dispatch ${event}:`, err);
+  });
+}
+
+/**
+ * Increments monthly volume for the wallet associated with a verified transaction,
+ * checks 250k safe limit & 300k hard limit thresholds, and triggers auto-rotation if needed.
  */
 export async function incrementWalletVolume(
   db: AppDb,
   merchantId: string,
   provider: MfsProvider,
   amount: number,
-  walletNumber?: string
-): Promise<void> {
+  walletNumber?: string,
+  options?: {
+    merchant?: MerchantRecord;
+    env?: Env;
+  }
+): Promise<{ rotated: boolean; activeWallet: EnrichedWalletRecord | null }> {
   let targetWallet: MerchantWalletRecord | null = null;
 
   if (walletNumber) {
+    const normalized = sanitizePhoneNumber(walletNumber, provider);
     const match = await db
       .select()
       .from(merchantWallets)
@@ -231,7 +604,7 @@ export async function incrementWalletVolume(
         and(
           eq(merchantWallets.merchantId, merchantId),
           eq(merchantWallets.provider, provider),
-          eq(merchantWallets.walletNumber, walletNumber)
+          eq(merchantWallets.walletNumber, normalized)
         )
       )
       .limit(1);
@@ -242,20 +615,46 @@ export async function incrementWalletVolume(
     targetWallet = await getActiveRotatedWallet(db, merchantId, provider);
   }
 
-  if (targetWallet) {
-    await db
-      .update(merchantWallets)
-      .set({
-        currentMonthVolume: targetWallet.currentMonthVolume + amount,
-      })
-      .where(eq(merchantWallets.id, targetWallet.id));
+  if (!targetWallet) {
+    return { rotated: false, activeWallet: null };
   }
+
+  const prevVolume = targetWallet.currentMonthVolume;
+  const newVolume = prevVolume + amount;
+  const safeLimit =
+    targetWallet.safeVolumeLimit > 0 ? targetWallet.safeVolumeLimit : DEFAULT_SAFE_VOLUME_LIMIT;
+
+  await db
+    .update(merchantWallets)
+    .set({
+      currentMonthVolume: sql`${merchantWallets.currentMonthVolume} + ${amount}`,
+    })
+    .where(eq(merchantWallets.id, targetWallet.id));
+
+  const nextActive = await getActiveRotatedWallet(db, merchantId, provider);
+  const rotated = Boolean(
+    nextActive && (nextActive.id !== targetWallet.id || (prevVolume < safeLimit && newVolume >= safeLimit))
+  );
+
+  if (rotated && options?.merchant) {
+    await dispatchWalletSyncWebhook(db, options.merchant, 'wallet.rotated', options.env, {
+      provider,
+      previousWalletNumber: targetWallet.walletNumber,
+      newWalletNumber: nextActive?.walletNumber ?? null,
+      reason: newVolume >= (targetWallet.monthlyVolumeLimit || DEFAULT_MAX_VOLUME_LIMIT)
+        ? 'HARD_LIMIT_300K_REACHED'
+        : 'SAFE_LIMIT_250K_REACHED',
+    });
+  }
+
+  return { rotated, activeWallet: nextActive };
 }
 
 /**
  * Synchronizes MFS SIM wallets pushed from a connected storefront or portal.
- * Validates and normalizes numbers, optionally removes seeded placeholder numbers,
- * upserts wallets by (merchantId, provider, walletNumber), and enforces single primary per provider.
+ * Validates and normalizes numbers, supports multiple accounts per provider with
+ * 250k safe limit & 300k hard limit, optionally prunes deleted storefront accounts,
+ * and returns enriched wallets + connected devices.
  */
 export async function syncMerchantWallets(
   db: AppDb,
@@ -270,10 +669,15 @@ export async function syncMerchantWallets(
       );
     }
 
+    const hardLimit = item.monthlyVolumeLimit ?? DEFAULT_MAX_VOLUME_LIMIT;
+    const safeLimit = Math.min(item.safeVolumeLimit ?? DEFAULT_SAFE_VOLUME_LIMIT, hardLimit);
+
     return {
       ...item,
       normalizedNumber,
-      priorityOrder: index + 1,
+      safeLimit,
+      hardLimit,
+      priorityOrder: item.priorityOrder ?? index + 1,
     };
   });
 
@@ -326,10 +730,13 @@ export async function syncMerchantWallets(
         .set({
           accountType: item.accountType,
           isActive: item.isActive,
+          priorityOrder: item.priorityOrder,
+          safeVolumeLimit: item.safeLimit,
+          monthlyVolumeLimit: item.hardLimit,
+          ...(item.label !== undefined && { label: item.label }),
+          ...(item.deviceId !== undefined && { deviceId: item.deviceId }),
+          ...(item.simSlotIndex !== undefined && { simSlotIndex: item.simSlotIndex }),
           ...(item.isPrimary !== undefined && { isPrimary: item.isPrimary }),
-          ...(item.monthlyVolumeLimit !== undefined && {
-            monthlyVolumeLimit: item.monthlyVolumeLimit,
-          }),
         })
         .where(eq(merchantWallets.id, existing[0].id));
     } else {
@@ -339,7 +746,11 @@ export async function syncMerchantWallets(
         provider: item.provider,
         accountType: item.accountType,
         walletNumber: item.normalizedNumber,
-        monthlyVolumeLimit: item.monthlyVolumeLimit ?? 300000,
+        label: item.label ?? null,
+        deviceId: item.deviceId ?? null,
+        simSlotIndex: item.simSlotIndex ?? null,
+        safeVolumeLimit: item.safeLimit,
+        monthlyVolumeLimit: item.hardLimit,
         currentMonthVolume: 0,
         isPrimary: item.isPrimary ?? false,
         isActive: item.isActive,
@@ -350,45 +761,36 @@ export async function syncMerchantWallets(
     syncedCount++;
   }
 
-  // Enforce at most one primary per (merchantId, provider), and ensure any provider
-  // with active wallets has a primary wallet designated.
-  const currentWallets = await listWallets(db, merchantId);
-  let primaryAdjusted = false;
-
-  for (const provider of MFS_PROVIDERS) {
-    const providerWallets = currentWallets.filter((w) => w.provider === provider);
-    if (providerWallets.length === 0) continue;
-
-    const primaries = providerWallets.filter((w) => w.isPrimary);
-    if (primaries.length > 1) {
-      const demoteIds = primaries.slice(1).map((w) => w.id);
-      await db
-        .update(merchantWallets)
-        .set({ isPrimary: false })
-        .where(inArray(merchantWallets.id, demoteIds));
-      primaryAdjusted = true;
-    } else if (primaries.length === 0) {
-      const firstActive = providerWallets.find((w) => w.isActive);
-      if (firstActive) {
-        await db
-          .update(merchantWallets)
-          .set({ isPrimary: true })
-          .where(eq(merchantWallets.id, firstActive.id));
-        primaryAdjusted = true;
-      }
+  if (input.pruneMissing && normalizedItems.length > 0) {
+    const keepKeys = new Set(normalizedItems.map((i) => `${i.provider}:${i.normalizedNumber}`));
+    const existingAll = await db
+      .select()
+      .from(merchantWallets)
+      .where(eq(merchantWallets.merchantId, merchantId));
+    const toRemoveIds = existingAll
+      .filter((w) => !keepKeys.has(`${w.provider}:${sanitizePhoneNumber(w.walletNumber, w.provider)}`))
+      .map((w) => w.id);
+    if (toRemoveIds.length > 0) {
+      await db.delete(merchantWallets).where(inArray(merchantWallets.id, toRemoveIds));
     }
   }
 
-  const allWallets = primaryAdjusted ? await listWallets(db, merchantId) : currentWallets;
-  const placeholderCount = allWallets.filter((w) =>
-    isPlaceholderWalletNumber(w.walletNumber)
-  ).length;
-  const activeCount = allWallets.filter(
-    (w) => w.isActive && !isPlaceholderWalletNumber(w.walletNumber)
-  ).length;
+  // Run intelligent rotation check per provider so active primary always honors 250k/300k & device status
+  for (const provider of MFS_PROVIDERS) {
+    await getActiveRotatedWallet(db, merchantId, provider);
+  }
+
+  const [allWallets, devices] = await Promise.all([
+    listWallets(db, merchantId),
+    listMerchantDevicesSummary(db, merchantId),
+  ]);
+
+  const placeholderCount = allWallets.filter((w) => w.isPlaceholder).length;
+  const activeCount = allWallets.filter((w) => w.isActive && !w.isPlaceholder).length;
 
   return {
     wallets: allWallets,
+    devices,
     syncedCount,
     activeCount,
     placeholderCount,

@@ -277,16 +277,25 @@ export const authDeviceMiddleware: MiddlewareHandler<AppContextEnv> = async (c, 
     if (deviceKey) {
       const pepper = c.env.ENCRYPTION_PEPPER || '';
       const keyHash = await hashDeviceApiKey(deviceKey, pepper);
-      await db
-        .update(merchantDevices)
-        .set({ lastSeenAt: now })
+      const deviceRows = await db
+        .select({ id: merchantDevices.id })
+        .from(merchantDevices)
         .where(
           and(
             eq(merchantDevices.merchantId, merchantId),
             eq(merchantDevices.deviceKeyHash, keyHash),
             eq(merchantDevices.isActive, true)
           )
-        );
+        )
+        .limit(1);
+
+      if (deviceRows[0]) {
+        c.set('deviceId', deviceRows[0].id);
+        await db
+          .update(merchantDevices)
+          .set({ lastSeenAt: now })
+          .where(eq(merchantDevices.id, deviceRows[0].id));
+      }
     }
 
     await next();
@@ -327,6 +336,7 @@ export const authDeviceMiddleware: MiddlewareHandler<AppContextEnv> = async (c, 
 
       c.set('merchant', merchant);
       c.set('merchantId', merchant.id);
+      c.set('deviceId', device.id);
       c.set('authType', 'device');
       if (device.userId) {
         c.set('userId', device.userId);

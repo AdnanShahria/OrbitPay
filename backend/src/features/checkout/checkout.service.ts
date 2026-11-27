@@ -322,6 +322,12 @@ export async function createCheckoutSession(
       walletNumber: w.walletNumber,
       accountType: w.accountType,
       isPrimary: w.isPrimary,
+      label: w.label,
+      safeVolumeLimit: w.safeVolumeLimit,
+      monthlyVolumeLimit: w.monthlyVolumeLimit,
+      currentMonthVolume: w.currentMonthVolume,
+      rotationState: w.rotationState,
+      deviceOnline: w.deviceOnline,
     })),
   };
 }
@@ -400,6 +406,12 @@ export async function getPublicCheckoutSession(
       walletNumber: w.walletNumber,
       accountType: w.accountType,
       isPrimary: w.isPrimary,
+      label: w.label,
+      safeVolumeLimit: w.safeVolumeLimit,
+      monthlyVolumeLimit: w.monthlyVolumeLimit,
+      currentMonthVolume: w.currentMonthVolume,
+      rotationState: w.rotationState,
+      deviceOnline: w.deviceOnline,
     })),
     display: parseDisplayMetadata(
       intent?.displayJson ?? session.displayJson,
@@ -1134,7 +1146,14 @@ export async function verifyCheckoutPayment(
       now,
     });
 
-    await incrementWalletVolume(db, merchant.id, matchedSms.provider, matchedSms.amount);
+    await incrementWalletVolume(
+      db,
+      merchant.id,
+      matchedSms.provider,
+      matchedSms.amount,
+      matchedSms.receiverNumber ?? undefined,
+      { merchant, env }
+    );
 
     await db
       .update(verificationQueue)

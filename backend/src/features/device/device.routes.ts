@@ -1,6 +1,11 @@
 import { Hono } from 'hono';
 import type { AppContextEnv } from '../../shared/types';
-import { authDeviceMiddleware, authMerchantOrDeviceMiddleware } from '../../shared/middleware';
+import {
+  authDeviceMiddleware,
+  authMerchantMiddleware,
+  authMerchantOrDeviceMiddleware,
+  requireOwnerRoleMiddleware,
+} from '../../shared/middleware';
 import {
   ingestSmsBatchSchema,
   heartbeatSchema,
@@ -13,6 +18,8 @@ import {
   recordDeviceHeartbeat,
   getSyncPayload,
   getDevicePreflight,
+  listMerchantDevices,
+  deactivateMerchantDevice,
 } from './device.service';
 import { listOrdersQuerySchema, orderActionSchema } from '../orders/orders.schema';
 import { listOrders, performOrderAction } from '../orders/orders.service';
@@ -30,6 +37,7 @@ const router = new Hono<AppContextEnv>();
 router.post('/ingest', authDeviceMiddleware, async (c) => {
   const db = c.get('db');
   const merchant = c.get('merchant')!;
+  const deviceId = c.get('deviceId');
   const body = await c.req.json();
   const input = ingestSmsBatchSchema.parse(body);
 
@@ -38,7 +46,8 @@ router.post('/ingest', authDeviceMiddleware, async (c) => {
     merchant,
     input.messages,
     c.env,
-    c
+    c,
+    deviceId
   );
 
   return c.json({ success: true, data: result });
@@ -63,23 +72,64 @@ router.get('/stats', authMerchantOrDeviceMiddleware, async (c) => {
 router.post('/heartbeat', authDeviceMiddleware, async (c) => {
   const db = c.get('db');
   const merchantId = c.get('merchantId')!;
+  const deviceId = c.get('deviceId');
   const body = await c.req.json().catch(() => ({}));
   const input = heartbeatSchema.parse(body);
 
-  await recordDeviceHeartbeat(db, merchantId, input.fcmToken, c.req.header('x-device-key'), c.env.ENCRYPTION_PEPPER);
+  await recordDeviceHeartbeat(
+    db,
+    merchantId,
+    input.fcmToken,
+    c.req.header('x-device-key'),
+    c.env.ENCRYPTION_PEPPER,
+    {
+      deviceId,
+      batteryLevel: input.batteryLevel,
+      networkType: input.networkType,
+      appVersion: input.appVersion,
+      smsPermission: input.smsPermission,
+      listenerEnabled: input.listenerEnabled,
+      simSlots: input.simSlots,
+    }
+  );
   realtimeHub.broadcast(
     'DEVICE_HEARTBEAT',
     {
       merchantId,
+      deviceId: deviceId ?? null,
       isOnline: true,
       lastSeenAt: new Date().toISOString(),
       fcmEnabled: input.fcmEnabled,
       smsPermission: input.smsPermission,
       listenerEnabled: input.listenerEnabled,
+      simSlots: input.simSlots ?? [],
     },
     merchantId
   );
   return c.json({ success: true, message: 'Heartbeat acknowledged' });
+});
+
+/**
+ * GET /api/v1/device/devices
+ * Lists all paired companion Android devices with live online status and SIM slots.
+ */
+router.get('/devices', authMerchantOrDeviceMiddleware, async (c) => {
+  const db = c.get('db');
+  const merchantId = c.get('merchantId')!;
+  const devices = await listMerchantDevices(db, merchantId);
+  return c.json({ success: true, data: devices });
+});
+
+/**
+ * DELETE /api/v1/device/devices/:id
+ * Deactivates (revokes) a companion device (merchant owner only).
+ */
+router.delete('/devices/:id', authMerchantMiddleware, requireOwnerRoleMiddleware, async (c) => {
+  const db = c.get('db');
+  const merchantId = c.get('merchantId')!;
+  const deviceId = c.req.param('id');
+  const result = await deactivateMerchantDevice(db, merchantId, deviceId);
+  return c.json({ success: true, data: result });
 });
 
 /**

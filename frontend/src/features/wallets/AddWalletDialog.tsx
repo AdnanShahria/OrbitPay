@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { useAddWalletMutation, AccountType } from './useWallets';
+import { useAddWalletMutation, useWalletsOverview, AccountType } from './useWallets';
 import { Modal, ModalHeader, ModalBody, ModalFooter } from '@/components/base/modal/modal';
 import { Button } from '@/components/base/buttons/button';
 import { Input } from '@/components/base/input/input';
 import { Select, SelectItem } from '@/components/base/select/select';
+import { StatusDot } from '@/components/base/badges/status-dot';
 import { Switch } from '@/components/base/switch/switch';
 import { toast } from '@/components/base/toast/toast';
 import { MfsProvider, MFS_METADATA } from '@/shared/utils/format';
@@ -19,15 +20,22 @@ export interface AddWalletDialogProps {
   onClose: () => void;
 }
 
+const AUTO_DEVICE_KEY = 'AUTO';
+
 export function AddWalletDialog({ isOpen, onClose }: AddWalletDialogProps) {
   const [provider, setProvider] = useState<MfsProvider>('BKASH');
   const [walletNumber, setWalletNumber] = useState('');
+  const [label, setLabel] = useState('');
   const [accountType, setAccountType] = useState<AccountType>('PERSONAL');
+  const [deviceId, setDeviceId] = useState<string>(AUTO_DEVICE_KEY);
+  const [safeVolumeLimit, setSafeVolumeLimit] = useState('250000');
   const [monthlyLimit, setMonthlyLimit] = useState('300000');
   const [isPrimary, setIsPrimary] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
 
   const addWalletMutation = useAddWalletMutation();
+  const { data: overview } = useWalletsOverview();
+  const devices = overview?.devices ?? [];
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -48,12 +56,28 @@ export function AddWalletDialog({ isOpen, onClose }: AddWalletDialogProps) {
       }
     }
 
+    const parsedSafeLimit = Number(safeVolumeLimit) || 250000;
+    const parsedMonthlyLimit = Number(monthlyLimit) || 300000;
+
+    if (parsedSafeLimit <= 0 || parsedMonthlyLimit <= 0) {
+      setValidationError('Volume limits must be positive amounts.');
+      return;
+    }
+
+    if (parsedSafeLimit > parsedMonthlyLimit) {
+      setValidationError('Safe rotation threshold cannot exceed the monthly hard ceiling.');
+      return;
+    }
+
     try {
       await addWalletMutation.mutateAsync({
         provider,
         accountType,
         walletNumber: cleanNumber,
-        monthlyVolumeLimit: Number(monthlyLimit) || 300000,
+        label: label.trim() || undefined,
+        deviceId: deviceId !== AUTO_DEVICE_KEY ? deviceId : undefined,
+        safeVolumeLimit: parsedSafeLimit,
+        monthlyVolumeLimit: parsedMonthlyLimit,
         isPrimary,
       });
 
@@ -63,6 +87,11 @@ export function AddWalletDialog({ isOpen, onClose }: AddWalletDialogProps) {
 
       // Reset and close
       setWalletNumber('');
+      setLabel('');
+      setDeviceId(AUTO_DEVICE_KEY);
+      setSafeVolumeLimit('250000');
+      setMonthlyLimit('300000');
+      setIsPrimary(false);
       onClose();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Failed to register SIM';
@@ -124,23 +153,34 @@ export function AddWalletDialog({ isOpen, onClose }: AddWalletDialogProps) {
             </div>
           </div>
 
-          {/* Wallet Number */}
-          <Input
-            label="Wallet mobile number"
-            placeholder="e.g. 017XXXXXXXX"
-            value={walletNumber}
-            onChange={setWalletNumber}
-            leadingIcon={RiSmartphoneLine}
-            inputClassName="font-mono tabular-nums"
-            hint={
-              provider === 'ROCKET'
-                ? 'Enter 11-digit or 12-digit (with check digit) Rocket account number.'
-                : 'Enter 11-digit personal or PRA mobile number.'
-            }
-            isRequired
-          />
+          {/* Wallet Number & Optional Label */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Input
+              label="Wallet mobile number"
+              placeholder="e.g. 017XXXXXXXX"
+              value={walletNumber}
+              onChange={setWalletNumber}
+              leadingIcon={RiSmartphoneLine}
+              inputClassName="font-mono tabular-nums"
+              hint={
+                provider === 'ROCKET'
+                  ? '11 or 12-digit Rocket number.'
+                  : '11-digit personal or PRA number.'
+              }
+              isRequired
+            />
 
-          {/* Account Type and Monthly Limit */}
+            <Input
+              label="SIM label (optional)"
+              placeholder="e.g. SIM A - Primary"
+              value={label}
+              onChange={setLabel}
+              maxLength={60}
+              hint="Friendly name for device or slot tracking."
+            />
+          </div>
+
+          {/* Account Type and Linked Verifier Device */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Select
               label="Account type"
@@ -161,13 +201,57 @@ export function AddWalletDialog({ isOpen, onClose }: AddWalletDialogProps) {
               </SelectItem>
             </Select>
 
+            <Select
+              label="Verifier device"
+              selectedKey={deviceId}
+              onSelectionChange={(key) => {
+                if (key != null) setDeviceId(String(key));
+              }}
+              className="w-full"
+            >
+              <SelectItem
+                key={AUTO_DEVICE_KEY}
+                id={AUTO_DEVICE_KEY}
+                textValue="Auto (Any online device)"
+              >
+                Auto (Any online device)
+              </SelectItem>
+              {devices.map((device) => (
+                <SelectItem
+                  key={device.id}
+                  id={device.id}
+                  textValue={device.deviceName}
+                >
+                  <span className="flex items-center gap-2">
+                    <StatusDot color={device.isOnline ? 'green' : 'yellow'} />
+                    <span className="truncate">{device.deviceName}</span>
+                    <span className="text-caption-2-medium text-text-tertiary">
+                      {device.isOnline ? 'Online' : 'Offline'}
+                    </span>
+                  </span>
+                </SelectItem>
+              ))}
+            </Select>
+          </div>
+
+          {/* Safe Threshold and Hard Monthly Ceiling */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Input
-              label="Monthly limit ceiling (৳)"
+              label="Safe rotation threshold (৳)"
+              type="number"
+              value={safeVolumeLimit}
+              onChange={setSafeVolumeLimit}
+              inputClassName="font-mono tabular-nums"
+              hint="Default ৳250,000 auto-rotation trigger."
+            />
+
+            <Input
+              label="Monthly hard ceiling (৳)"
               type="number"
               value={monthlyLimit}
               onChange={setMonthlyLimit}
               inputClassName="font-mono tabular-nums"
-              hint="Default ৳300,000 threshold."
+              hint="Default ৳300,000 hard exclusion cap."
             />
           </div>
 

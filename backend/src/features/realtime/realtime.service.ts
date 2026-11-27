@@ -8,7 +8,9 @@ export type RealtimeEventType =
   | 'DEVICE_HEARTBEAT'
   | 'STATS_UPDATED'
   | 'ORDER_CREATED'
-  | 'ORDER_UPDATED';
+  | 'ORDER_UPDATED'
+  | 'WALLET_ROTATED'
+  | 'WALLET_SYNCED';
 
 export interface RealtimeEvent {
   type: RealtimeEventType;

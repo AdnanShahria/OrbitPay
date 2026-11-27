@@ -87,6 +87,7 @@ export interface AppVariables {
   merchant?: MerchantRecord;
   merchantId?: string;
   userId?: string;
+  deviceId?: string;
   sessionId?: string;
   userRole?: string;
   authType?: AuthType;

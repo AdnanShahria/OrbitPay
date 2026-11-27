@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.BatteryManager
 import android.util.Log
 import androidx.core.app.NotificationManagerCompat
@@ -23,6 +25,7 @@ import com.orbitsaas.payment.data.remote.OrbitApiClient
 import com.orbitsaas.payment.data.remote.UnauthorizedException
 import com.orbitsaas.payment.interceptors.InboxScanner
 import com.orbitsaas.payment.update.AppUpdateManager
+import com.orbitsaas.payment.util.SimSlotReader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -62,7 +65,9 @@ class SyncWorker(
                         rawSms = entity.rawSms,
                         receivedAt = entity.receivedAt,
                         smsSender = entity.smsSender.ifBlank { null },
-                        source = entity.source
+                        source = entity.source,
+                        simSlotIndex = entity.simSlotIndex,
+                        receiverNumber = entity.receiverNumber
                     )
                 }
 
@@ -145,14 +150,34 @@ class SyncWorker(
         val listenerEnabled = NotificationManagerCompat
             .getEnabledListenerPackages(applicationContext)
             .contains(applicationContext.packageName)
+        val networkType = detectNetworkType()
+        val simSlots = runCatching {
+            SimSlotReader.toPreflightSimSlots(
+                SimSlotReader.readSimSlots(applicationContext, preferencesManager)
+            )
+        }.getOrNull()
 
         apiClient.sendHeartbeat(
             batteryLevel = batteryPct,
             isCharging = isCharging,
             fcmEnabled = fcmEnabled,
             smsPermission = smsPermission,
-            listenerEnabled = listenerEnabled
+            listenerEnabled = listenerEnabled,
+            networkType = networkType,
+            simSlots = simSlots
         )
+    }
+
+    private fun detectNetworkType(): String? {
+        val cm = applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return null
+        val activeNetwork = cm.activeNetwork ?: return null
+        val caps = cm.getNetworkCapabilities(activeNetwork) ?: return null
+        return when {
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "WIFI"
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "CELLULAR"
+            else -> null
+        }
     }
 
     companion object {

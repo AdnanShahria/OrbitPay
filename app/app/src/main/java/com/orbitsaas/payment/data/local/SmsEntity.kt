@@ -54,7 +54,13 @@ data class SmsEntity(
     val smsSender: String = "",
 
     @ColumnInfo(name = "source", defaultValue = "SMS")
-    val source: String = SOURCE_SMS
+    val source: String = SOURCE_SMS,
+
+    @ColumnInfo(name = "simSlotIndex")
+    val simSlotIndex: Int? = null,
+
+    @ColumnInfo(name = "receiverNumber")
+    val receiverNumber: String? = null
 ) {
     companion object {
         const val STATUS_PENDING_UPLOAD = "PENDING_UPLOAD"

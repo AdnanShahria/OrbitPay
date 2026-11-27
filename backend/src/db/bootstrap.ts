@@ -334,7 +334,23 @@ const ALTER_COLUMN_STATEMENTS: readonly string[] = [
   `ALTER TABLE \`verification_queue\` ADD COLUMN \`escalated_at\` integer`,
   `ALTER TABLE \`verification_queue\` ADD COLUMN \`resolved_at\` integer`,
   `ALTER TABLE \`sms_ledger\` ADD COLUMN \`payment_intent_id\` text`,
+  `ALTER TABLE \`sms_ledger\` ADD COLUMN \`device_id\` text`,
+  `ALTER TABLE \`sms_ledger\` ADD COLUMN \`sim_slot_index\` integer`,
+  `ALTER TABLE \`sms_ledger\` ADD COLUMN \`receiver_number\` text`,
   `ALTER TABLE \`merchant_orders\` ADD COLUMN \`payment_intent_id\` text`,
+
+  // 0008_multi_device_sim_rotation
+  `ALTER TABLE \`merchant_wallets\` ADD COLUMN \`label\` text`,
+  `ALTER TABLE \`merchant_wallets\` ADD COLUMN \`device_id\` text`,
+  `ALTER TABLE \`merchant_wallets\` ADD COLUMN \`sim_slot_index\` integer`,
+  `ALTER TABLE \`merchant_wallets\` ADD COLUMN \`safe_volume_limit\` real DEFAULT 250000 NOT NULL`,
+  `ALTER TABLE \`merchant_wallets\` ADD COLUMN \`last_rotated_at\` integer`,
+  `ALTER TABLE \`merchant_devices\` ADD COLUMN \`sim_slots_json\` text`,
+  `ALTER TABLE \`merchant_devices\` ADD COLUMN \`battery_level\` integer`,
+  `ALTER TABLE \`merchant_devices\` ADD COLUMN \`network_type\` text`,
+  `ALTER TABLE \`merchant_devices\` ADD COLUMN \`app_version\` text`,
+  `ALTER TABLE \`merchant_devices\` ADD COLUMN \`sms_permission\` integer`,
+  `ALTER TABLE \`merchant_devices\` ADD COLUMN \`listener_enabled\` integer`,
 ];
 
 const POST_ALTER_INDEX_STATEMENTS: readonly string[] = [

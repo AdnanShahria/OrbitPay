@@ -429,7 +429,9 @@ class OrbitApiClient(
         isCharging: Boolean,
         fcmEnabled: Boolean = false,
         smsPermission: Boolean = false,
-        listenerEnabled: Boolean = false
+        listenerEnabled: Boolean = false,
+        networkType: String? = null,
+        simSlots: List<PreflightSimSlotDto>? = null
     ): Result<HeartbeatResponse> {
         return runCatching {
             val url = "$baseUrl/api/v1/device/heartbeat"
@@ -438,9 +440,12 @@ class OrbitApiClient(
                 batteryLevel = batteryLevel,
                 isCharging = isCharging,
                 fcmToken = preferencesManager.fcmToken.ifBlank { null },
+                appVersion = BuildConfig.VERSION_NAME,
+                networkType = networkType,
                 fcmEnabled = fcmEnabled,
                 smsPermission = smsPermission,
-                listenerEnabled = listenerEnabled
+                listenerEnabled = listenerEnabled,
+                simSlots = simSlots
             )
 
             val response: HttpResponse = client.post(url) {

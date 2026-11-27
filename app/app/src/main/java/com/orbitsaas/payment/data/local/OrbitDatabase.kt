@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [SmsEntity::class, BlockedMessageEntity::class],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class OrbitDatabase : RoomDatabase() {
@@ -45,6 +45,13 @@ abstract class OrbitDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `local_sms` ADD COLUMN `simSlotIndex` INTEGER")
+                db.execSQL("ALTER TABLE `local_sms` ADD COLUMN `receiverNumber` TEXT")
+            }
+        }
+
         fun getDatabase(context: Context): OrbitDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -52,7 +59,7 @@ abstract class OrbitDatabase : RoomDatabase() {
                     OrbitDatabase::class.java,
                     DATABASE_NAME
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .fallbackToDestructiveMigrationOnDowngrade()
                     .addCallback(object : Callback() {
                         override fun onCreate(db: SupportSQLiteDatabase) {

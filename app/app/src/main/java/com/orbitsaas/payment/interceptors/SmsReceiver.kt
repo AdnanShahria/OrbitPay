@@ -12,6 +12,7 @@ import com.orbitsaas.payment.data.local.SmsEntity
 import com.orbitsaas.payment.interceptors.parsers.MfsParser
 import com.orbitsaas.payment.interceptors.parsers.ParseOutcome
 import com.orbitsaas.payment.service.SyncWorker
+import com.orbitsaas.payment.util.SimSlotReader
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -39,6 +40,7 @@ class SmsReceiver : BroadcastReceiver() {
                 }
                 val database = OrbitDatabase.getDatabase(context)
                 val extraSenders = prefs.extraTrustedSenders
+                val (resolvedSimSlotIndex, resolvedReceiverNumber) = resolveSimTelemetry(context, intent, prefs)
 
                 // Group multi-part SMS messages by originating address
                 val messagesBySender = messages.groupBy {
@@ -53,7 +55,7 @@ class SmsReceiver : BroadcastReceiver() {
                     when (val outcome = MfsParser.parse(fullBody, sender, SmsEntity.SOURCE_SMS, extraSenders)) {
                         is ParseOutcome.Accepted -> {
                             val parsed = outcome.transaction
-                            Log.i(TAG, "MFS Payment Detected! Provider=${parsed.provider}, TrxID=${parsed.trxId}, Amount=${parsed.amount}")
+                            Log.i(TAG, "MFS Payment Detected! Provider=${parsed.provider}, TrxID=${parsed.trxId}, Amount=${parsed.amount}, SIM=$resolvedSimSlotIndex")
 
                             val entity = SmsEntity(
                                 merchantId = prefs.merchantId,
@@ -65,7 +67,9 @@ class SmsReceiver : BroadcastReceiver() {
                                 status = SmsEntity.STATUS_PENDING_UPLOAD,
                                 receivedAt = System.currentTimeMillis(),
                                 smsSender = parsed.smsSender,
-                                source = parsed.source
+                                source = parsed.source,
+                                simSlotIndex = resolvedSimSlotIndex,
+                                receiverNumber = resolvedReceiverNumber
                             )
 
                             val rowId = database.smsDao().insertSms(entity)
@@ -99,6 +103,57 @@ class SmsReceiver : BroadcastReceiver() {
                 pendingResult.finish()
             }
         }
+    }
+
+    private fun resolveSimTelemetry(
+        context: Context,
+        intent: Intent,
+        prefs: PreferencesManager
+    ): Pair<Int?, String?> {
+        val extras = intent.extras
+        val subId = listOf(
+            "subscription",
+            "android.telephony.extra.SUBSCRIPTION_INDEX"
+        ).firstNotNullOfOrNull { key ->
+            val raw = extras?.get(key)
+            when (raw) {
+                is Int -> raw.takeIf { it >= 0 }
+                is Long -> raw.toInt().takeIf { it >= 0 }
+                else -> null
+            }
+        }
+
+        val rawSlot = listOf(
+            "android.telephony.extra.SLOT_INDEX",
+            "simSlot",
+            "slot"
+        ).firstNotNullOfOrNull { key ->
+            val raw = extras?.get(key)
+            when (raw) {
+                is Int -> raw.takeIf { it >= 0 }
+                is Long -> raw.toInt().takeIf { it >= 0 }
+                else -> null
+            }
+        }
+
+        val simSlots = runCatching { SimSlotReader.readSimSlots(context, prefs) }.getOrDefault(emptyList())
+        val matchedBySub = subId?.let { id -> simSlots.firstOrNull { it.subscriptionId == id } }
+        if (matchedBySub != null) {
+            return matchedBySub.slotIndex to matchedBySub.phoneNumber
+        }
+
+        if (rawSlot != null) {
+            val oneBasedSlot = rawSlot + 1
+            val matchedBySlot = simSlots.firstOrNull { it.slotIndex == oneBasedSlot }
+            if (matchedBySlot != null) {
+                return matchedBySlot.slotIndex to matchedBySlot.phoneNumber
+            }
+            if (oneBasedSlot in 1..4) {
+                return oneBasedSlot to null
+            }
+        }
+
+        return null to null
     }
 
     companion object {

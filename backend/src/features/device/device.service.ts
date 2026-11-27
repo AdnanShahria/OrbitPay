@@ -31,9 +31,13 @@ import {
   syncVerifiedOrderAndSession,
 } from '../payments/verification.engine';
 import {
+  getWalletsOverview,
   incrementWalletVolume,
   isPlaceholderWalletNumber,
+  listMerchantDevicesSummary,
   listWallets,
+  type ConnectedDeviceSummary,
+  type EnrichedWalletRecord,
 } from '../wallets/wallets.service';
 import {
   dispatchWebhook,
@@ -74,24 +78,29 @@ export interface DeviceStatsResult {
   isOnline: boolean;
   lastSeenAt: Date | null;
   activeSockets: number;
+  onlineDeviceCount: number;
+  totalDeviceCount: number;
   totalVerifiedVolume: number;
   verifiedCount: number;
   unclaimedCount: number;
   pendingQueueCount: number;
   recentTransactions: SmsLedgerRecord[];
+  devices: ConnectedDeviceSummary[];
+  wallets: EnrichedWalletRecord[];
 }
 
 /**
- * Ingests a batch of incoming MFS SMS messages from the Android companion app.
- * Enforces anti-spoofing trust, reconciles late SMS on manually approved intents silently,
- * and runs 6-factor validation + atomic CAS on waiting payments.
+ * Ingests a batch of incoming MFS SMS messages from any connected Android companion device.
+ * Enforces anti-spoofing trust, attributes device & SIM slot telemetry, reconciles late SMS
+ * on manually approved intents silently, and runs 6-factor validation + atomic CAS on waiting payments.
  */
 export async function ingestDeviceSmsBatch(
   db: AppDb,
   merchant: MerchantRecord,
   messages: IngestMessageDTO[],
   fcmServerKeyOrEnv?: string | Env,
-  ctx?: Context<AppContextEnv>
+  ctx?: Context<AppContextEnv>,
+  deviceId?: string
 ): Promise<IngestBatchResult> {
   const env = typeof fcmServerKeyOrEnv === 'string' ? undefined : fcmServerKeyOrEnv;
   let ingestedCount = 0;
@@ -104,6 +113,10 @@ export async function ingestDeviceSmsBatch(
     const receivedAtDate = msg.receivedAt ? new Date(msg.receivedAt) : new Date();
     const source = msg.source ?? 'SMS';
     const smsSender = msg.smsSender?.trim() || null;
+
+    const normalizedReceiver = msg.receiverNumber
+      ? sanitizePhoneNumber(msg.receiverNumber, msg.provider)
+      : null;
 
     const existing = await db
       .select()
@@ -157,6 +170,9 @@ export async function ingestDeviceSmsBatch(
         matchType: 'MANUAL_VERIFIED',
         externalOrderId: linkedIntent?.externalRefId ?? consumedRows[0].externalRefId ?? null,
         paymentIntentId: linkedIntent?.id ?? consumedRows[0].paymentIntentId ?? null,
+        deviceId: deviceId ?? null,
+        simSlotIndex: msg.simSlotIndex ?? null,
+        receiverNumber: normalizedReceiver,
         smsReceivedAt: receivedAtDate,
         verifiedAt: linkedIntent?.verifiedAt ?? new Date(),
         smsSender,
@@ -188,6 +204,9 @@ export async function ingestDeviceSmsBatch(
       senderNumber: normalizedSender,
       rawSms: msg.rawSms,
       status: 'UNCLAIMED',
+      deviceId: deviceId ?? null,
+      simSlotIndex: msg.simSlotIndex ?? null,
+      receiverNumber: normalizedReceiver,
       smsReceivedAt: receivedAtDate,
       smsSender,
       source,
@@ -474,7 +493,14 @@ export async function ingestDeviceSmsBatch(
         customerPhone: pendingQueueRecord.submittedSender,
       });
 
-      await incrementWalletVolume(db, merchant.id, msg.provider, msg.amount);
+      await incrementWalletVolume(
+        db,
+        merchant.id,
+        msg.provider,
+        msg.amount,
+        normalizedReceiver ?? undefined,
+        { merchant, env }
+      );
 
       const resolvedCustomer = await resolveCustomerEmailForOrder(db, {
         merchantId: merchant.id,
@@ -614,42 +640,43 @@ export async function getDeviceStats(
   const now = new Date();
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-  const recentTransactions = await db
-    .select()
-    .from(smsLedger)
-    .where(eq(smsLedger.merchantId, merchantId))
-    .orderBy(desc(smsLedger.smsReceivedAt))
-    .limit(50);
-
-  const volumeResult = await db
-    .select({
-      sumAmount: sql<number>`COALESCE(SUM(${smsLedger.amount}), 0)`,
-      verifiedCount: sql<number>`COALESCE(COUNT(CASE WHEN ${smsLedger.status} IN ('VERIFIED', 'MANUAL_VERIFIED') THEN 1 END), 0)`,
-      unclaimedCount: sql<number>`COALESCE(COUNT(CASE WHEN ${smsLedger.status} = 'UNCLAIMED' THEN 1 END), 0)`,
-    })
-    .from(smsLedger)
-    .where(
-      and(
-        eq(smsLedger.merchantId, merchantId),
-        sql`${smsLedger.smsReceivedAt} >= ${Math.floor(startOfMonth.getTime() / 1000)}`
-      )
-    );
-
-  const pendingQueueResult = await db
-    .select({
-      count: sql<number>`COALESCE(COUNT(*), 0)`,
-    })
-    .from(verificationQueue)
-    .where(
-      and(
-        eq(verificationQueue.merchantId, merchantId),
-        inArray(verificationQueue.status, ['WAITING_FOR_SMS', 'MANUAL_REVIEW_REQUIRED'])
-      )
-    );
-
-  const onlineStatus = merchant
-    ? await computeDeviceOnlineStatus(db, env, merchant)
-    : { online: false, lastSeenAt: null, activeSockets: 0 };
+  const [recentTransactions, volumeResult, pendingQueueResult, onlineStatus, walletsOverview] =
+    await Promise.all([
+      db
+        .select()
+        .from(smsLedger)
+        .where(eq(smsLedger.merchantId, merchantId))
+        .orderBy(desc(smsLedger.smsReceivedAt))
+        .limit(50),
+      db
+        .select({
+          sumAmount: sql<number>`COALESCE(SUM(${smsLedger.amount}), 0)`,
+          verifiedCount: sql<number>`COALESCE(COUNT(CASE WHEN ${smsLedger.status} IN ('VERIFIED', 'MANUAL_VERIFIED') THEN 1 END), 0)`,
+          unclaimedCount: sql<number>`COALESCE(COUNT(CASE WHEN ${smsLedger.status} = 'UNCLAIMED' THEN 1 END), 0)`,
+        })
+        .from(smsLedger)
+        .where(
+          and(
+            eq(smsLedger.merchantId, merchantId),
+            sql`${smsLedger.smsReceivedAt} >= ${Math.floor(startOfMonth.getTime() / 1000)}`
+          )
+        ),
+      db
+        .select({
+          count: sql<number>`COALESCE(COUNT(*), 0)`,
+        })
+        .from(verificationQueue)
+        .where(
+          and(
+            eq(verificationQueue.merchantId, merchantId),
+            inArray(verificationQueue.status, ['WAITING_FOR_SMS', 'MANUAL_REVIEW_REQUIRED'])
+          )
+        ),
+      merchant
+        ? computeDeviceOnlineStatus(db, env, merchant)
+        : Promise.resolve({ online: false, lastSeenAt: null, activeSockets: 0 }),
+      getWalletsOverview(db, merchantId),
+    ]);
 
   return {
     merchantId,
@@ -657,23 +684,36 @@ export async function getDeviceStats(
     isOnline: onlineStatus.online,
     lastSeenAt: onlineStatus.lastSeenAt,
     activeSockets: onlineStatus.activeSockets,
+    onlineDeviceCount: walletsOverview.summary.onlineDeviceCount,
+    totalDeviceCount: walletsOverview.summary.totalDeviceCount,
     totalVerifiedVolume: Number(volumeResult[0]?.sumAmount || 0),
     verifiedCount: Number(volumeResult[0]?.verifiedCount || 0),
     unclaimedCount: Number(volumeResult[0]?.unclaimedCount || 0),
     pendingQueueCount: Number(pendingQueueResult[0]?.count || 0),
     recentTransactions,
+    devices: walletsOverview.devices,
+    wallets: walletsOverview.wallets,
   };
 }
 
 /**
- * Updates device heartbeat and companion app FCM push registration token.
+ * Updates per-device heartbeat, SIM slot telemetry, battery/network stats, and FCM push token.
  */
 export async function recordDeviceHeartbeat(
   db: AppDb,
   merchantId: string,
   fcmToken?: string,
   rawDeviceKey?: string,
-  pepper = ''
+  pepper = '',
+  telemetry?: {
+    deviceId?: string;
+    batteryLevel?: number;
+    networkType?: string;
+    appVersion?: string;
+    smsPermission?: boolean;
+    listenerEnabled?: boolean;
+    simSlots?: Array<{ slotIndex?: number; carrierName?: string; phoneNumber?: string; source?: string }>;
+  }
 ): Promise<void> {
   const now = new Date();
   const updateData: { lastSeenAt: Date; fcmToken?: string } = {
@@ -686,11 +726,33 @@ export async function recordDeviceHeartbeat(
 
   await db.update(merchants).set(updateData).where(eq(merchants.id, merchantId));
 
-  if (rawDeviceKey) {
+  const devicePatch: Partial<typeof merchantDevices.$inferInsert> = {
+    lastSeenAt: now,
+    ...(fcmToken ? { fcmToken } : {}),
+    ...(telemetry?.batteryLevel !== undefined ? { batteryLevel: Math.round(telemetry.batteryLevel) } : {}),
+    ...(telemetry?.networkType !== undefined ? { networkType: telemetry.networkType } : {}),
+    ...(telemetry?.appVersion !== undefined ? { appVersion: telemetry.appVersion } : {}),
+    ...(telemetry?.smsPermission !== undefined ? { smsPermission: telemetry.smsPermission } : {}),
+    ...(telemetry?.listenerEnabled !== undefined ? { listenerEnabled: telemetry.listenerEnabled } : {}),
+    ...(telemetry?.simSlots !== undefined ? { simSlotsJson: JSON.stringify(telemetry.simSlots) } : {}),
+  };
+
+  if (telemetry?.deviceId) {
+    await db
+      .update(merchantDevices)
+      .set(devicePatch)
+      .where(
+        and(
+          eq(merchantDevices.id, telemetry.deviceId),
+          eq(merchantDevices.merchantId, merchantId),
+          eq(merchantDevices.isActive, true)
+        )
+      );
+  } else if (rawDeviceKey) {
     const keyHash = await hashDeviceApiKey(rawDeviceKey.trim(), pepper);
     await db
       .update(merchantDevices)
-      .set(fcmToken ? { lastSeenAt: now, fcmToken } : { lastSeenAt: now })
+      .set(devicePatch)
       .where(
         and(
           eq(merchantDevices.merchantId, merchantId),
@@ -699,6 +761,30 @@ export async function recordDeviceHeartbeat(
         )
       );
   }
+}
+
+/**
+ * Lists all active companion devices for a merchant.
+ */
+export async function listMerchantDevices(db: AppDb, merchantId: string): Promise<ConnectedDeviceSummary[]> {
+  return listMerchantDevicesSummary(db, merchantId);
+}
+
+/**
+ * Deactivates (revokes) a paired companion device for a merchant.
+ */
+export async function deactivateMerchantDevice(
+  db: AppDb,
+  merchantId: string,
+  deviceId: string
+): Promise<{ deactivated: boolean }> {
+  const updated = await db
+    .update(merchantDevices)
+    .set({ isActive: false })
+    .where(and(eq(merchantDevices.id, deviceId), eq(merchantDevices.merchantId, merchantId)))
+    .returning({ id: merchantDevices.id });
+
+  return { deactivated: Boolean(updated[0]) };
 }
 
 /**

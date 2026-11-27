@@ -10,10 +10,22 @@ export const ingestMessageSchema = z.object({
   receivedAt: z.number().optional(), // epoch ms timestamp from phone
   smsSender: z.string().trim().optional().nullable(),
   source: z.enum(SMS_SOURCES).optional().default('SMS'),
+  simSlotIndex: z.number().int().min(1).max(4).optional().nullable(),
+  receiverNumber: z.string().trim().optional().nullable(),
 });
 
 export const ingestSmsBatchSchema = z.object({
   messages: z.array(ingestMessageSchema).min(1, 'At least one transaction message is required'),
+});
+
+export const preflightSimSlotSchema = z.object({
+  slotIndex: z.number().int().min(0).max(3).optional(),
+  carrierName: z.string().trim().max(80).optional(),
+  phoneNumber: z.string().trim().optional().default(''),
+  source: z
+    .enum(['HARDWARE', 'CONFIRMED', 'SIM_SUBSCRIPTION', 'MANUAL_CONFIRM', 'HIDDEN'])
+    .optional()
+    .default('HARDWARE'),
 });
 
 export const heartbeatSchema = z.object({
@@ -24,6 +36,7 @@ export const heartbeatSchema = z.object({
   fcmEnabled: z.boolean().optional(),
   smsPermission: z.boolean().optional(),
   listenerEnabled: z.boolean().optional(),
+  simSlots: z.array(preflightSimSlotSchema).optional(),
 });
 
 export const deviceSyncQuerySchema = z.object({
@@ -31,16 +44,6 @@ export const deviceSyncQuerySchema = z.object({
     (val) => (val === '' || val === undefined || val === null ? undefined : val),
     z.coerce.number().int().nonnegative().optional()
   ),
-});
-
-export const preflightSimSlotSchema = z.object({
-  slotIndex: z.number().int().min(0).max(3).optional(),
-  carrierName: z.string().trim().max(80).optional(),
-  phoneNumber: z.string().trim().optional().default(''),
-  source: z
-    .enum(['HARDWARE', 'CONFIRMED', 'SIM_SUBSCRIPTION', 'MANUAL_CONFIRM'])
-    .optional()
-    .default('HARDWARE'),
 });
 
 export const preflightCheckSchema = z.object({

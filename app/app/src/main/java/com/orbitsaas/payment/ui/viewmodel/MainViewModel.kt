@@ -15,12 +15,14 @@ import com.orbitsaas.payment.data.local.LocalStats
 import com.orbitsaas.payment.data.local.OrbitDatabase
 import com.orbitsaas.payment.data.local.PreferencesManager
 import com.orbitsaas.payment.data.local.SmsEntity
+import com.orbitsaas.payment.data.remote.ConnectedDeviceDto
 import com.orbitsaas.payment.data.remote.DevicePreflightData
 import com.orbitsaas.payment.data.remote.IngestSmsItem
 import com.orbitsaas.payment.data.remote.MerchantOrderDto
 import com.orbitsaas.payment.data.remote.OrbitApiClient
 import com.orbitsaas.payment.data.remote.PaymentIntentDto
 import com.orbitsaas.payment.data.remote.UnauthorizedException
+import com.orbitsaas.payment.data.remote.WalletRotationDto
 import com.orbitsaas.payment.interceptors.InboxScanner
 import com.orbitsaas.payment.service.DynamicPushDispatcher
 import com.orbitsaas.payment.service.FcmTokenRegistrar
@@ -64,7 +66,18 @@ data class DashboardUiState(
     val isOnboardingCompleted: Boolean = false,
     val feedbackMessage: String? = null,
     val preflightState: DevicePreflightData? = null,
-    val isCheckingPreflight: Boolean = false
+    val isCheckingPreflight: Boolean = false,
+    val onlineDeviceCount: Int = 0,
+    val totalDeviceCount: Int = 0,
+    val connectedDevices: List<ConnectedDeviceDto> = emptyList(),
+    val wallets: List<WalletRotationDto> = emptyList()
+)
+
+private data class DeviceTelemetryBundle(
+    val onlineDeviceCount: Int,
+    val totalDeviceCount: Int,
+    val connectedDevices: List<ConnectedDeviceDto>,
+    val wallets: List<WalletRotationDto>
 )
 
 private data class CoreStatusBundle(
@@ -128,6 +141,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _preflightState = MutableStateFlow<DevicePreflightData?>(null)
     private val _isCheckingPreflight = MutableStateFlow(false)
+
+    private val _onlineDeviceCount = MutableStateFlow(0)
+    private val _totalDeviceCount = MutableStateFlow(0)
+    private val _connectedDevices = MutableStateFlow<List<ConnectedDeviceDto>>(emptyList())
+    private val _wallets = MutableStateFlow<List<WalletRotationDto>>(emptyList())
 
     // Flow of recent 50 transactions
     val recentTransactions: StateFlow<List<SmsEntity>> = database.smsDao()
@@ -195,6 +213,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         ::Pair
     )
 
+    private val deviceTelemetryBundleFlow = combine(
+        _onlineDeviceCount,
+        _totalDeviceCount,
+        _connectedDevices,
+        _wallets
+    ) { onlineCount, totalCount, devices, wallets ->
+        DeviceTelemetryBundle(onlineCount, totalCount, devices, wallets)
+    }
+
     // Combined UI State
     val uiState: StateFlow<DashboardUiState> = combine(
         combine(coreBundleFlow, ordersBundleFlow, intentsBundleFlow) { core, orders, intents ->
@@ -205,8 +232,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         },
         recentTransactions,
         statsFlow,
-        preflightBundleFlow
-    ) { (core, ordersBundle, intentsBundle), (auth, loginProg), transactions, stats, preflightBundle ->
+        combine(preflightBundleFlow, deviceTelemetryBundleFlow, ::Pair)
+    ) { (core, ordersBundle, intentsBundle), (auth, loginProg), transactions, stats, (preflightBundle, telemetry) ->
         val loggedIn = auth.authToken.isNotBlank() || (auth.merchantId.isNotBlank() && auth.deviceKey.isNotBlank())
 
         DashboardUiState(
@@ -238,7 +265,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             isOnboardingCompleted = preferences.isOnboardingCompleted,
             feedbackMessage = core.feedbackMessage,
             preflightState = preflightBundle.first,
-            isCheckingPreflight = preflightBundle.second
+            isCheckingPreflight = preflightBundle.second,
+            onlineDeviceCount = telemetry.onlineDeviceCount,
+            totalDeviceCount = telemetry.totalDeviceCount,
+            connectedDevices = telemetry.connectedDevices,
+            wallets = telemetry.wallets
         )
     }.stateIn(
         viewModelScope,
@@ -388,6 +419,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _focusedPaymentIntentId.value = null
         _preflightState.value = null
         _isCheckingPreflight.value = false
+        _onlineDeviceCount.value = 0
+        _totalDeviceCount.value = 0
+        _connectedDevices.value = emptyList()
+        _wallets.value = emptyList()
         _loginError.value = null
         _feedbackMessage.value = "Signed out of ORBIT Hub."
         onComplete()
@@ -410,6 +445,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _focusedPaymentIntentId.value = null
         _preflightState.value = null
         _isCheckingPreflight.value = false
+        _onlineDeviceCount.value = 0
+        _totalDeviceCount.value = 0
+        _connectedDevices.value = emptyList()
+        _wallets.value = emptyList()
         _loginError.value = message?.takeIf { it.isNotBlank() }
             ?: "Session expired or revoked. Please sign in again."
     }
@@ -617,7 +656,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 rawSms = it.rawSms,
                                 receivedAt = it.receivedAt,
                                 smsSender = it.smsSender.ifBlank { null },
-                                source = it.source
+                                source = it.source,
+                                simSlotIndex = it.simSlotIndex,
+                                receiverNumber = it.receiverNumber
                             )
                         }
 
@@ -647,6 +688,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             if (stats.storeName.isNotBlank() && preferences.storeName.isBlank()) {
                                 preferences.storeName = stats.storeName
                             }
+                            _onlineDeviceCount.value = stats.onlineDeviceCount
+                            _totalDeviceCount.value = stats.totalDeviceCount
+                            _connectedDevices.value = stats.devices
+                            _wallets.value = stats.wallets
                             Log.d(TAG, "Backend stats refreshed: verified=${stats.verifiedCount}, vol=${stats.totalVerifiedVolume}")
                         }.onFailure { err ->
                             if (err is UnauthorizedException) {
@@ -694,6 +739,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (stats.storeName.isNotBlank() && preferences.storeName.isBlank()) {
                     preferences.storeName = stats.storeName
                 }
+                _onlineDeviceCount.value = stats.onlineDeviceCount
+                _totalDeviceCount.value = stats.totalDeviceCount
+                _connectedDevices.value = stats.devices
+                _wallets.value = stats.wallets
             }.onFailure { err ->
                 if (err is UnauthorizedException) {
                     handleUnauthorized(err.message)

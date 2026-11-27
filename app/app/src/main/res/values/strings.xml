@@ -286,4 +286,45 @@
     <string name="dashboard_preflight_action_fallback">%1$d active wallet(s) · Tap to inspect &amp; fix</string>
     <string name="dashboard_preflight_tap_fix">Inspect</string>
     <string name="dashboard_preflight_tap_view">Details</string>
+
+    <!-- Multi-Device, SIM Rotation & Redesigned Console -->
+    <string name="dashboard_devices_online">%1$d/%2$d devices online</string>
+    <string name="dashboard_single_device_online">1 device online</string>
+    <string name="dashboard_status_online_simple">Online</string>
+    <string name="dashboard_status_offline_simple">Offline</string>
+    <string name="dashboard_queued_count">%1$d queued</string>
+    <string name="dashboard_verified_this_month">Verified this month</string>
+    <string name="dashboard_verified_count_label">%1$d verified</string>
+    <string name="dashboard_unclaimed_count_label">%1$d unclaimed</string>
+    <string name="dashboard_sim_rotation_title">Active SIM rotation</string>
+    <string name="dashboard_sim_rotation_limits_hint">৳2.5L safe · ৳3.0L max</string>
+    <string name="dashboard_sim_rotation_empty">No active MFS SIMs synced yet</string>
+    <string name="dashboard_sim_slot_short">SIM %1$d</string>
+    <string name="dashboard_sim_limit_meter">%1$s safe / %2$s max</string>
+    <string name="dashboard_rotation_active">Active</string>
+    <string name="dashboard_rotation_standby">Standby</string>
+    <string name="dashboard_rotation_overflow">250k Overflow</string>
+    <string name="dashboard_rotation_capped">300k Cap</string>
+    <string name="dashboard_rotation_offline">Offline</string>
+    <string name="dashboard_rotation_disabled">Paused</string>
+    <string name="dashboard_preflight_attention_short">Setup check needed · Tap to inspect</string>
+    <string name="dashboard_tab_pending">Pending (%1$d)</string>
+    <string name="dashboard_tab_orders_clean">Orders (%1$d)</string>
+    <string name="dashboard_tab_sms_clean">SMS (%1$d)</string>
+    <string name="dashboard_tap_to_review">Tap to review</string>
+    <string name="dashboard_sms_sim_tag">SIM %1$d</string>
+    <string name="dashboard_detail_customer">Customer</string>
+    <string name="dashboard_detail_items">Items</string>
+    <string name="dashboard_detail_address">Address</string>
+    <string name="dashboard_detail_sim_slot">SIM slot</string>
+    <string name="dashboard_detail_receiver">Receiver SIM</string>
+
+    <string name="settings_devices_diagnostics_title">Devices &amp; diagnostics</string>
+    <string name="settings_devices_online_ratio">%1$d / %2$d online</string>
+    <string name="settings_devices_none">No companion devices synced yet</string>
+    <string name="settings_device_battery">%1$d%%</string>
+    <string name="settings_diagnostics_row_title">System diagnostics &amp; SIM health</string>
+    <string name="settings_diagnostics_row_desc_default">Check SIM numbers, permissions &amp; push</string>
+    <string name="settings_diagnostics_row_desc_ready">Ready · %1$d active wallets</string>
+    <string name="settings_diagnostics_row_desc_attention">Action required · Tap to inspect</string>
 </resources>
