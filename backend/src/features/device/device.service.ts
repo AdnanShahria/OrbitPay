@@ -50,6 +50,10 @@ import {
   resolveCustomerEmailForOrder,
 } from '../notifications/payment-email.service';
 import { emitMerchantRealtimeEvent } from '../realtime/realtime.service';
+import {
+  isReceiverAllowedForProject,
+  resolveProjectDispatchContext,
+} from '../projects/projects.service';
 import type { IngestMessageDTO, PreflightCheckDTO } from './device.schema';
 
 export interface IngestBatchResult {
@@ -273,7 +277,12 @@ export async function ingestDeviceSmsBatch(
               stateVersion: sql`${paymentIntents.stateVersion} + 1`,
               updatedAt: now,
             })
-            .where(eq(paymentIntents.id, waitingQ.paymentIntentId));
+            .where(
+              and(
+                eq(paymentIntents.id, waitingQ.paymentIntentId),
+                inArray(paymentIntents.status, ['OPEN', 'WAITING_FOR_SMS', 'MANUAL_REVIEW_REQUIRED'])
+              )
+            );
         }
 
         await db
@@ -364,12 +373,28 @@ export async function ingestDeviceSmsBatch(
       now: verifiedTime,
     });
 
-    if (!sixFactor.ok) {
+    const targetProjectId = intent?.projectId ?? pendingQueueRecord.projectId ?? null;
+    const receiverAllowed = sixFactor.ok
+      ? await isReceiverAllowedForProject(
+          db,
+          merchant.id,
+          targetProjectId,
+          msg.provider,
+          normalizedReceiver
+        )
+      : true;
+
+    if (!sixFactor.ok || !receiverAllowed) {
+      const escalationReason = !sixFactor.ok ? sixFactor.escalationReason : 'TRUST_FLAG_ANOMALY';
+      const escalationDetail = !sixFactor.ok
+        ? sixFactor.reason
+        : 'SMS arrived on a SIM wallet not assigned to this project';
+
       await db
         .update(verificationQueue)
         .set({
           status: 'MANUAL_REVIEW_REQUIRED',
-          escalationReason: sixFactor.escalationReason,
+          escalationReason,
           escalatedAt: verifiedTime,
         })
         .where(eq(verificationQueue.id, pendingQueueRecord.id));
@@ -379,13 +404,19 @@ export async function ingestDeviceSmsBatch(
           .update(paymentIntents)
           .set({
             status: 'MANUAL_REVIEW_REQUIRED',
-            escalationReason: sixFactor.escalationReason,
+            escalationReason,
             smsLedgerId: ledgerId,
             trustFlag: ledgerRow.trustFlag,
             stateVersion: intent.stateVersion + 1,
             updatedAt: verifiedTime,
           })
-          .where(eq(paymentIntents.id, intent.id));
+          .where(
+            and(
+              eq(paymentIntents.id, intent.id),
+              eq(paymentIntents.stateVersion, intent.stateVersion),
+              inArray(paymentIntents.status, ['WAITING_FOR_SMS', 'MANUAL_REVIEW_REQUIRED'])
+            )
+          );
       }
 
       await db
@@ -399,9 +430,15 @@ export async function ingestDeviceSmsBatch(
           )
         );
 
+      const dispatchCtx = await resolveProjectDispatchContext(
+        db,
+        merchant,
+        targetProjectId,
+        intent?.callbackUrl
+      );
       const display = parseDisplayMetadata(
         intent?.displayJson,
-        merchant.storeName,
+        dispatchCtx.effective.appName,
         pendingQueueRecord.externalOrderId
       );
       const actions = parseActionsList(intent?.actionsJson);
@@ -416,6 +453,7 @@ export async function ingestDeviceSmsBatch(
             {
               paymentIntentId: intent?.id ?? pendingQueueRecord.paymentIntentId,
               merchantId: merchant.id,
+              projectId: targetProjectId,
               externalRefId: pendingQueueRecord.externalOrderId,
               externalOrderId: pendingQueueRecord.externalOrderId,
               provider: msg.provider,
@@ -423,27 +461,29 @@ export async function ingestDeviceSmsBatch(
               baseAmount: effectiveBaseAmount,
               uniqueAmount: effectiveUniqueAmount,
               paidAmount: msg.amount,
-              escalationReason: sixFactor.escalationReason,
-              reason: sixFactor.reason,
+              escalationReason,
+              reason: escalationDetail,
               status: 'MANUAL_REVIEW_REQUIRED',
               callbackUrl: intent?.callbackUrl,
               escalatedAt: verifiedTime.getTime(),
             },
             1,
             undefined,
-            intent?.callbackUrl || undefined,
-            env
+            dispatchCtx.targetUrlOverride,
+            env,
+            undefined,
+            dispatchCtx.webhookOptions
           ),
           sendDynamicPushToMerchantDevices(db, env, merchant, {
             event: 'payment.escalated_manual',
             paymentIntentId: intent?.id,
             externalRefId: pendingQueueRecord.externalOrderId,
-            appName: display.appName || merchant.storeName,
+            appName: display.appName || dispatchCtx.effective.appName,
             appDomain: display.appDomain,
             category: display.category || intent?.vertical,
             referenceLabel: display.referenceLabel,
-            title: `Manual Review (${sixFactor.escalationReason})`,
-            subtitle: sixFactor.reason,
+            title: `Manual Review (${escalationReason})`,
+            subtitle: escalationDetail,
             amountFormatted: `৳${msg.amount}`,
             provider: msg.provider,
             paymentStatus: 'MANUAL_REVIEW_REQUIRED',
@@ -452,7 +492,8 @@ export async function ingestDeviceSmsBatch(
           }),
           sendTelegramOfficeAlert(
             merchant,
-            `⚠️ Payment Escalated [${display.appName || merchant.storeName}]\nRef: ${pendingQueueRecord.externalOrderId}\nReason: ${sixFactor.escalationReason}\n${sixFactor.reason}`
+            `⚠️ Payment Escalated [${display.appName || dispatchCtx.effective.appName}]\nRef: ${pendingQueueRecord.externalOrderId}\nReason: ${escalationReason}\n${escalationDetail}`,
+            dispatchCtx.project
           ),
         ])
       );
@@ -485,6 +526,7 @@ export async function ingestDeviceSmsBatch(
 
       await syncVerifiedOrderAndSession(db, {
         merchantId: merchant.id,
+        projectId: targetProjectId,
         externalOrderId: pendingQueueRecord.externalOrderId,
         paymentIntentId: intent?.id ?? pendingQueueRecord.paymentIntentId,
         baseAmount: effectiveBaseAmount,
@@ -513,9 +555,15 @@ export async function ingestDeviceSmsBatch(
         customerJson: intent?.customerJson,
       });
 
+      const dispatchCtx = await resolveProjectDispatchContext(
+        db,
+        merchant,
+        targetProjectId,
+        intent?.callbackUrl
+      );
       const display = parseDisplayMetadata(
         intent?.displayJson,
-        merchant.storeName,
+        dispatchCtx.effective.appName,
         pendingQueueRecord.externalOrderId
       );
       const actions = parseActionsList(intent?.actionsJson);
@@ -523,6 +571,7 @@ export async function ingestDeviceSmsBatch(
       const webhookPayload = {
         paymentIntentId: intent?.id ?? pendingQueueRecord.paymentIntentId,
         merchantId: merchant.id,
+        projectId: targetProjectId,
         externalRefId: pendingQueueRecord.externalOrderId,
         externalOrderId: pendingQueueRecord.externalOrderId,
         vertical: intent?.vertical ?? 'ecommerce',
@@ -551,14 +600,16 @@ export async function ingestDeviceSmsBatch(
             webhookPayload,
             1,
             undefined,
-            intent?.callbackUrl || undefined,
-            env
+            dispatchCtx.targetUrlOverride,
+            env,
+            undefined,
+            dispatchCtx.webhookOptions
           ),
           sendDynamicPushToMerchantDevices(db, env, merchant, {
             event: 'payment.verified',
             paymentIntentId: intent?.id,
             externalRefId: pendingQueueRecord.externalOrderId,
-            appName: display.appName || merchant.storeName,
+            appName: display.appName || dispatchCtx.effective.appName,
             appDomain: display.appDomain,
             category: display.category || intent?.vertical,
             referenceLabel: display.referenceLabel,
@@ -572,13 +623,14 @@ export async function ingestDeviceSmsBatch(
           }),
           sendTelegramOfficeAlert(
             merchant,
-            `✅ Reconciled [${display.appName || merchant.storeName}]\nRef: ${pendingQueueRecord.externalOrderId}\nAmount: ৳${msg.amount} (${msg.provider})\nTrxID: ${normalizedTrxId}`
+            `✅ Reconciled [${display.appName || dispatchCtx.effective.appName}]\nRef: ${pendingQueueRecord.externalOrderId}\nAmount: ৳${msg.amount} (${msg.provider})\nTrxID: ${normalizedTrxId}`,
+            dispatchCtx.project
           ),
           ...(resolvedCustomer.email && env
             ? [
                 notifyPaymentVerifiedInvoiceEmail(db, env, {
                   merchantId: merchant.id,
-                  storeName: display.appName || merchant.storeName,
+                  storeName: display.appName || dispatchCtx.effective.appName,
                   externalRefId: pendingQueueRecord.externalOrderId,
                   paymentIntentId: intent?.id ?? pendingQueueRecord.paymentIntentId,
                   customerEmail: resolvedCustomer.email,

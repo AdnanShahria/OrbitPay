@@ -3,6 +3,7 @@ import { MFS_PROVIDERS } from '../../db/schema';
 
 export const createSessionSchema = z.object({
   merchantId: z.string().min(1, 'Merchant ID is required'),
+  projectId: z.string().trim().min(1).max(80).optional(),
   orderId: z.string().min(1, 'Order ID is required'),
   amount: z.number().positive('Payment amount must be greater than 0'),
   customerEmail: z

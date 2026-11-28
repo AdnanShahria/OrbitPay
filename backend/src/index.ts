@@ -16,6 +16,7 @@ import ordersRoutes from './features/orders/orders.routes';
 import otpRoutes from './features/otp/otp.routes';
 import { paymentIntentsRoutes, paymentsRoutes } from './features/payments/payments.routes';
 import paymentLinksRoutes from './features/payment-links/payment-links.routes';
+import projectsRoutes from './features/projects/projects.routes';
 import { getPlatformSettings } from './features/admin/platform-settings.service';
 import { routerRoutes } from './router';
 import { processWebhookRetries } from './features/webhooks/webhook.dispatcher';
@@ -32,6 +33,7 @@ const corsMiddleware = cors({
     'X-Merchant-Api-Key',
     'X-Merchant-Secret',
     'X-Merchant-Id',
+    'X-Project-Id',
     'X-Device-Key',
     'X-Admin-Key',
     'X-Session-Token',
@@ -104,6 +106,7 @@ app.route('/api/v1/orders', ordersRoutes);
 app.route('/api/v1/payment-intents', paymentIntentsRoutes);
 app.route('/api/v1/payments', paymentsRoutes);
 app.route('/api/v1/payment-links', paymentLinksRoutes);
+app.route('/api/v1/projects', projectsRoutes);
 app.route('/api/v1/checkout', checkoutRoutes);
 app.route('/api/v1/device', deviceRoutes);
 app.route('/api/v1/wallets', walletsRoutes);

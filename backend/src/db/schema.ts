@@ -70,6 +70,9 @@ export type AccountMode = (typeof ACCOUNT_MODES)[number];
 export const WALLET_SOURCES = ['PERSONAL', 'STOREFRONT_SYNC'] as const;
 export type WalletSource = (typeof WALLET_SOURCES)[number];
 
+export const WALLET_SELECTION_MODES = ['COMMON', 'SPECIFIC'] as const;
+export type WalletSelectionMode = (typeof WALLET_SELECTION_MODES)[number];
+
 export const VERTICAL_PROFILES = [
   'ecommerce',
   'saas_subscription',
@@ -211,6 +214,7 @@ export const smsLedger = sqliteTable('sms_ledger', {
 export const verificationQueue = sqliteTable('verification_queue', {
   id: text('id').primaryKey(),
   merchantId: text('merchant_id').notNull().references(() => merchants.id),
+  projectId: text('project_id'),
   paymentIntentId: text('payment_intent_id'),
   provider: text('provider', { enum: ['BKASH', 'NAGAD', 'ROCKET', 'UPAY', 'CELLFIN'] }).notNull(),
   externalOrderId: text('external_order_id').notNull(),
@@ -238,6 +242,7 @@ export const verificationQueue = sqliteTable('verification_queue', {
 export const webhookDeliveries = sqliteTable('webhook_deliveries', {
   id: text('id').primaryKey(),
   merchantId: text('merchant_id').notNull().references(() => merchants.id),
+  projectId: text('project_id'),
   eventType: text('event_type').default('payment.verified').notNull(),
   externalOrderId: text('external_order_id').notNull(),
   payloadJson: text('payload_json').notNull(),
@@ -317,6 +322,7 @@ export type RouterProviderLogRecord = typeof routerProviderLogs.$inferSelect;
 export const checkoutSessions = sqliteTable('checkout_sessions', {
   id: text('id').primaryKey(), // chk_xxxx
   merchantId: text('merchant_id').notNull().references(() => merchants.id),
+  projectId: text('project_id'),
   paymentIntentId: text('payment_intent_id'),
   vertical: text('vertical', { enum: VERTICAL_PROFILES }).default('ecommerce').notNull(),
   externalOrderId: text('external_order_id').notNull(),
@@ -394,6 +400,7 @@ export const merchantDevices = sqliteTable('merchant_devices', {
 export const merchantOrders = sqliteTable('merchant_orders', {
   id: text('id').primaryKey(), // ord_xxxx
   merchantId: text('merchant_id').notNull().references(() => merchants.id),
+  projectId: text('project_id'),
   paymentIntentId: text('payment_intent_id'),
   externalOrderId: text('external_order_id').notNull(),
   customerName: text('customer_name'),
@@ -485,6 +492,7 @@ export type NewAppRelease = typeof appReleases.$inferInsert;
 export const paymentIntents = sqliteTable('payment_intents', {
   id: text('id').primaryKey(), // pay_xxxx
   merchantId: text('merchant_id').notNull().references(() => merchants.id),
+  projectId: text('project_id'),
   vertical: text('vertical', { enum: VERTICAL_PROFILES }).notNull().default('ecommerce'),
   externalRefId: text('external_ref_id').notNull(),
   verificationMode: text('verification_mode', { enum: VERIFICATION_MODES }).notNull().default('AUTO'),
@@ -535,6 +543,7 @@ export type NewPaymentIntent = typeof paymentIntents.$inferInsert;
 export const paymentLinks = sqliteTable('payment_links', {
   id: text('id').primaryKey(), // lnk_xxxx
   merchantId: text('merchant_id').notNull().references(() => merchants.id),
+  projectId: text('project_id'),
   slug: text('slug').notNull(),
   title: text('title').notNull(),
   description: text('description'),
@@ -651,3 +660,47 @@ export const platformSettings = sqliteTable('platform_settings', {
 });
 
 export type PlatformSettingRecord = typeof platformSettings.$inferSelect;
+
+// 21. Merchant Sub-Projects (Admin-Provisioned Projects under 1 Merchant ID)
+export const merchantProjects = sqliteTable('merchant_projects', {
+  id: text('id').primaryKey(), // prj_xxxx
+  merchantId: text('merchant_id').notNull().references(() => merchants.id),
+  name: text('name').notNull(),
+  slug: text('slug').notNull(),
+  description: text('description'),
+  accountMode: text('account_mode', { enum: ACCOUNT_MODES }).notNull().default('WEBHOOK_CONNECTED'),
+  verificationMode: text('verification_mode', { enum: VERIFICATION_MODES }).notNull().default('AUTO'),
+  walletSelectionMode: text('wallet_selection_mode', { enum: WALLET_SELECTION_MODES })
+    .notNull()
+    .default('COMMON'),
+  ignoreStorefrontSync: integer('ignore_storefront_sync', { mode: 'boolean' }).notNull().default(false),
+  webhookUrl: text('webhook_url').notNull().default(''),
+  webhookSecret: text('webhook_secret').notNull(),
+  apiKeyHash: text('api_key_hash'),
+  apiKeyPrefix: text('api_key_prefix'),
+  publishableKey: text('publishable_key'),
+  allowedCallbackOriginsJson: text('allowed_callback_origins_json').notNull().default('[]'),
+  telegramBotToken: text('telegram_bot_token'),
+  telegramChatId: text('telegram_chat_id'),
+  isDefault: integer('is_default', { mode: 'boolean' }).notNull().default(false),
+  isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
+  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).$defaultFn(() => new Date()).notNull(),
+}, (table) => ({
+  merchantIdx: index('idx_merchant_projects_merchant').on(table.merchantId, table.isActive),
+  uniqueSlug: uniqueIndex('uq_merchant_projects_slug').on(table.merchantId, table.slug),
+  apiKeyIdx: index('idx_merchant_projects_api_key').on(table.apiKeyHash),
+}));
+
+// 22. Sub-Project Wallet Assignments (Specific SIM numbers bound to a sub-project)
+export const merchantProjectWallets = sqliteTable('merchant_project_wallets', {
+  projectId: text('project_id').notNull().references(() => merchantProjects.id),
+  walletId: text('wallet_id').notNull().references(() => merchantWallets.id),
+  createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()).notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.projectId, table.walletId] }),
+}));
+
+export type MerchantProjectRecord = typeof merchantProjects.$inferSelect;
+export type NewMerchantProject = typeof merchantProjects.$inferInsert;
+export type MerchantProjectWalletRecord = typeof merchantProjectWallets.$inferSelect;

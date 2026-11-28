@@ -159,6 +159,13 @@ export function generateMerchantApiKey(): string {
 }
 
 /**
+ * Generates a server-to-server project-scoped API key (e.g., sk_proj_...).
+ */
+export function generateProjectApiKey(): string {
+  return `sk_proj_${generateSecureToken(24)}`;
+}
+
+/**
  * Generates a publishable merchant key (e.g., pk_live_...).
  */
 export function generatePublishableKey(): string {

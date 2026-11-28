@@ -3,6 +3,13 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { extractApiErrorMessage, unwrapApiResponse } from '@/shared/utils/api';
 import type { MfsProvider } from '@/shared/utils/format';
 import type { PlatformPublicConfig } from '@/features/platform/usePlatformConfig';
+import type {
+  MerchantSubProject,
+  ProjectAccountMode,
+  ProjectVerificationMode,
+  ProjectWalletSelectionMode,
+  RotateProjectKeysResponse,
+} from '@/features/projects/useProjects';
 
 export type AdminAccountMode = 'STANDALONE' | 'WEBHOOK_CONNECTED';
 export type AdminVerificationMode = 'AUTO' | 'PURE_MANUAL';
@@ -183,6 +190,9 @@ export interface AdminProjectInspectOrderItem {
 export interface AdminInspectPaymentLink {
   id: string;
   merchantId?: string;
+  projectId?: string | null;
+  projectName?: string | null;
+  projectSlug?: string | null;
   merchantSlug?: string;
   slug: string;
   sharePath?: string;
@@ -224,6 +234,7 @@ export interface AdminInspectPendingIntent {
 
 export interface AdminProjectInspectData {
   project: AdminProjectSummary;
+  subProjects?: MerchantSubProject[];
   wallets: AdminProjectInspectWallet[];
   recentSms: AdminProjectInspectLedgerItem[];
   recentOrders: AdminProjectInspectOrderItem[];
@@ -1048,6 +1059,7 @@ export function useAdminCreatePaymentLinkMutation(projectId: string | null) {
 
   return useMutation({
     mutationFn: async (payload: {
+      projectId?: string;
       title: string;
       slug?: string;
       description?: string;
@@ -1071,6 +1083,131 @@ export function useAdminCreatePaymentLinkMutation(projectId: string | null) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'project-inspect', projectId] });
       queryClient.invalidateQueries({ queryKey: ['admin', 'projects'] });
+    },
+  });
+}
+
+export function useAdminCreateSubProjectMutation(merchantId: string | null) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (payload: {
+      name: string;
+      slug?: string;
+      description?: string;
+      accountMode: ProjectAccountMode;
+      verificationMode: ProjectVerificationMode;
+      walletSelectionMode: ProjectWalletSelectionMode;
+      walletIds?: string[];
+      webhookUrl?: string;
+    }) => {
+      if (!merchantId) throw new Error('Missing merchant ID');
+      const res = await adminFetch(
+        `/api/v1/admin/projects/${encodeURIComponent(merchantId)}/sub-projects`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        },
+      );
+      return unwrapApiResponse<{
+        project: MerchantSubProject;
+        credentials: { apiKey: string; webhookSecret: string; publishableKey: string };
+      }>(res, 'Failed to create sub-project');
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'project-inspect', merchantId] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'projects'] });
+    },
+  });
+}
+
+export function useAdminUpdateSubProjectMutation(merchantId: string | null) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      subProjectId,
+      updates,
+    }: {
+      subProjectId: string;
+      updates: {
+        name?: string;
+        accountMode?: ProjectAccountMode;
+        verificationMode?: ProjectVerificationMode;
+        walletSelectionMode?: ProjectWalletSelectionMode;
+        walletIds?: string[];
+        webhookUrl?: string;
+        isActive?: boolean;
+      };
+    }) => {
+      if (!merchantId) throw new Error('Missing merchant ID');
+      const res = await adminFetch(
+        `/api/v1/admin/projects/${encodeURIComponent(merchantId)}/sub-projects/${encodeURIComponent(subProjectId)}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updates),
+        },
+      );
+      return unwrapApiResponse<MerchantSubProject>(res, 'Failed to update sub-project');
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'project-inspect', merchantId] });
+    },
+  });
+}
+
+export function useAdminRotateSubProjectKeysMutation(merchantId: string | null) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      subProjectId,
+      target = 'all',
+    }: {
+      subProjectId: string;
+      target?: 'webhook' | 'api' | 'all';
+    }) => {
+      if (!merchantId) throw new Error('Missing merchant ID');
+      const res = await adminFetch(
+        `/api/v1/admin/projects/${encodeURIComponent(merchantId)}/sub-projects/${encodeURIComponent(subProjectId)}/rotate-keys`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ target }),
+        },
+      );
+      return unwrapApiResponse<RotateProjectKeysResponse>(
+        res,
+        'Failed to rotate sub-project keys',
+      );
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'project-inspect', merchantId] });
+    },
+  });
+}
+
+export function useAdminDeleteSubProjectMutation(merchantId: string | null) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (subProjectId: string) => {
+      if (!merchantId) throw new Error('Missing merchant ID');
+      const res = await adminFetch(
+        `/api/v1/admin/projects/${encodeURIComponent(merchantId)}/sub-projects/${encodeURIComponent(subProjectId)}`,
+        {
+          method: 'DELETE',
+        },
+      );
+      return unwrapApiResponse<{ deleted: boolean; id: string }>(
+        res,
+        'Failed to delete sub-project',
+      );
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'project-inspect', merchantId] });
     },
   });
 }

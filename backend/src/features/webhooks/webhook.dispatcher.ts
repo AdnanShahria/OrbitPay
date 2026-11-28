@@ -4,6 +4,7 @@ import {
   webhookDeliveries,
   merchants,
   merchantDevices,
+  merchantProjects,
   type MerchantRecord,
 } from '../../db/schema';
 import { pushToMerchantWebSockets } from '../../router/push-hub';
@@ -72,6 +73,12 @@ function sanitizeResponseBody(raw: string): string {
  * Enforces SSRF protection, disables HTTP redirects, emits v1+v2 HMAC signatures,
  * preserves eventId & payloadJson on retries, and records audit logs in webhook_deliveries.
  */
+export interface DispatchWebhookOptions {
+  projectId?: string | null;
+  webhookSecretOverride?: string | null;
+  allowedOriginsOverride?: string[];
+}
+
 export async function dispatchWebhook(
   db: AppDb,
   merchant: MerchantRecord,
@@ -81,7 +88,8 @@ export async function dispatchWebhook(
   existingDeliveryId?: string,
   targetUrlOverride?: string | null,
   env?: Env,
-  prebuiltPayloadJson?: string
+  prebuiltPayloadJson?: string,
+  options?: DispatchWebhookOptions
 ): Promise<DispatchResult> {
   const deliveryId = existingDeliveryId || `whd_${generateSecureToken(16)}`;
   const externalOrderId = String(
@@ -115,6 +123,7 @@ export async function dispatchWebhook(
   }
 
   const targetUrl = (targetUrlOverride || merchant.webhookUrl || '').trim();
+  const effectiveSecret = options?.webhookSecretOverride?.trim() || merchant.webhookSecret;
 
   if (!targetUrl && !existingDeliveryId) {
     return {
@@ -129,8 +138,8 @@ export async function dispatchWebhook(
   let signatureV2 = '';
   try {
     [signature, signatureV2] = await Promise.all([
-      generateHmacSignature(payloadJson, merchant.webhookSecret),
-      generateHmacSignatureV2(timestamp, payloadJson, merchant.webhookSecret),
+      generateHmacSignature(payloadJson, effectiveSecret),
+      generateHmacSignatureV2(timestamp, payloadJson, effectiveSecret),
     ]);
   } catch (err) {
     console.error(`[Webhook] HMAC generation failed for merchant ${merchant.id}:`, err);
@@ -141,7 +150,7 @@ export async function dispatchWebhook(
   let isSuccess = false;
 
   const allowedOrigins = targetUrlOverride
-    ? parseAllowedOrigins(merchant.allowedCallbackOriginsJson)
+    ? options?.allowedOriginsOverride ?? parseAllowedOrigins(merchant.allowedCallbackOriginsJson)
     : undefined;
   const ssrfCheck = checkSafeWebhookUrl(targetUrl, env, allowedOrigins);
 
@@ -216,6 +225,7 @@ export async function dispatchWebhook(
     await db.insert(webhookDeliveries).values({
       id: deliveryId,
       merchantId: merchant.id,
+      projectId: options?.projectId ?? (typeof data.projectId === 'string' ? data.projectId : null),
       eventType: event,
       externalOrderId,
       payloadJson,
@@ -277,12 +287,32 @@ export async function processWebhookRetries(
     try {
       const parsedData = JSON.parse(delivery.payloadJson);
       const innerData = parsedData.data || parsedData;
+      const resolvedProjectId =
+        delivery.projectId ??
+        (typeof innerData?.projectId === 'string' ? innerData.projectId : undefined);
+      const projectRow = resolvedProjectId
+        ? (
+            await db
+              .select()
+              .from(merchantProjects)
+              .where(
+                and(
+                  eq(merchantProjects.id, resolvedProjectId),
+                  eq(merchantProjects.merchantId, merchant.id)
+                )
+              )
+              .limit(1)
+          )[0]
+        : undefined;
+
       const candidateOverride =
         typeof innerData?.callbackUrl === 'string' && innerData.callbackUrl
           ? innerData.callbackUrl
           : typeof innerData?.storeCallbackUrl === 'string' && innerData.storeCallbackUrl
             ? innerData.storeCallbackUrl
-            : undefined;
+            : projectRow?.webhookUrl?.trim()
+              ? projectRow.webhookUrl.trim()
+              : undefined;
 
       const res = await dispatchWebhook(
         db,
@@ -293,7 +323,14 @@ export async function processWebhookRetries(
         delivery.id,
         candidateOverride,
         env,
-        delivery.payloadJson
+        delivery.payloadJson,
+        projectRow
+          ? {
+              projectId: projectRow.id,
+              webhookSecretOverride: projectRow.webhookSecret,
+              allowedOriginsOverride: parseAllowedOrigins(projectRow.allowedCallbackOriginsJson),
+            }
+          : undefined
       );
 
       if (res.success) {
@@ -555,10 +592,11 @@ export async function sendDynamicPushToMerchantDevices(
  */
 export async function sendTelegramOfficeAlert(
   merchant: MerchantRecord,
-  message: string
+  message: string,
+  projectOverride?: { telegramBotToken?: string | null; telegramChatId?: string | null } | null
 ): Promise<boolean> {
-  const botToken = merchant.telegramBotToken?.trim();
-  const chatId = merchant.telegramChatId?.trim();
+  const botToken = projectOverride?.telegramBotToken?.trim() || merchant.telegramBotToken?.trim();
+  const chatId = projectOverride?.telegramChatId?.trim() || merchant.telegramChatId?.trim();
   if (!botToken || !chatId) {
     return false;
   }

@@ -15,6 +15,7 @@ export const ORDER_ACTIONS = [
 export type OrderAction = (typeof ORDER_ACTIONS)[number];
 
 export const notifyOrderSchema = z.object({
+  projectId: z.string().trim().min(1).max(80).optional(),
   externalOrderId: z.string().trim().min(1, 'External order ID is required'),
   customerName: z.string().trim().max(200).optional(),
   customerPhone: z.string().trim().max(40).optional(),
@@ -33,6 +34,7 @@ export const notifyOrderSchema = z.object({
 });
 
 export const listOrdersQuerySchema = z.object({
+  projectId: z.string().trim().min(1).max(80).optional(),
   orderStatus: z.string().optional(),
   paymentMethod: z.string().optional(),
   search: z.string().optional(),

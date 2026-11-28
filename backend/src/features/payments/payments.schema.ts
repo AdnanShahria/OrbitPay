@@ -40,6 +40,7 @@ const isHttpOrHttpsUrl = (value: string): boolean => {
 };
 
 export const createPaymentIntentSchema = z.object({
+  projectId: z.string().trim().min(1).max(80).optional(),
   externalRefId: z.string().trim().min(1, 'externalRefId is required').max(128),
   vertical: z.enum(VERTICAL_PROFILES).optional().default('ecommerce'),
   amount: z.number().positive('Payment amount must be greater than 0'),
@@ -78,6 +79,7 @@ export const createPaymentIntentSchema = z.object({
 });
 
 export const listPaymentIntentsQuerySchema = z.object({
+  projectId: z.string().trim().min(1).max(80).optional(),
   status: z.enum([...PAYMENT_INTENT_STATUSES, 'ALL']).optional().default('ALL'),
   vertical: z.enum(VERTICAL_PROFILES).optional(),
   search: z.string().trim().optional(),
@@ -138,6 +140,7 @@ export const paymentActionTriggerSchema = z.object({
 });
 
 export const backfillPaymentIntentSchema = z.object({
+  projectId: z.string().trim().min(1).max(80).optional(),
   externalRefId: z.string().trim().min(1).max(128),
   vertical: z.enum(VERTICAL_PROFILES).optional().default('ecommerce'),
   baseAmount: z.number().positive(),

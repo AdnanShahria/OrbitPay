@@ -9,6 +9,7 @@ import {
 } from './usePaymentLinks';
 import { useAuth } from '@/features/auth/useAuth';
 import { useMerchant } from '@/features/merchants/useMerchant';
+import { useMerchantProjects } from '@/features/projects/useProjects';
 import type { VerticalProfile } from '@/features/payments/usePaymentIntents';
 import type { VerificationMode } from '@/features/checkout/useCheckout';
 import { Card, CardContent } from '@/components/base/card/card';
@@ -64,7 +65,9 @@ function toClientMerchantSlug(storeName?: string): string {
 export function PaymentLinksManager() {
   const { merchant: authMerchant } = useAuth();
   const { data: merchantProfile } = useMerchant(authMerchant?.id);
-  const { data: links = [], isLoading } = usePaymentLinks();
+  const { data: subProjects = [] } = useMerchantProjects();
+  const [filterProjectId, setFilterProjectId] = useState<string>('ALL');
+  const { data: links = [], isLoading } = usePaymentLinks(filterProjectId);
   const createMutation = useCreatePaymentLink();
   const updateMutation = useUpdatePaymentLink();
   const deleteMutation = useDeletePaymentLink();
@@ -74,6 +77,7 @@ export function PaymentLinksManager() {
   const [deletingLink, setDeletingLink] = useState<PaymentLinkView | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
+  const [selectedProjectId, setSelectedProjectId] = useState<string>('__MERCHANT_DEFAULT__');
   const [title, setTitle] = useState('');
   const [slug, setSlug] = useState('');
   const [description, setDescription] = useState('');
@@ -111,6 +115,7 @@ export function PaymentLinksManager() {
 
   const resetForm = () => {
     setEditingLink(null);
+    setSelectedProjectId('__MERCHANT_DEFAULT__');
     setTitle('');
     setSlug('');
     setDescription('');
@@ -127,11 +132,15 @@ export function PaymentLinksManager() {
 
   const openCreateModal = () => {
     resetForm();
+    if (filterProjectId !== 'ALL') {
+      setSelectedProjectId(filterProjectId);
+    }
     setIsModalOpen(true);
   };
 
   const openEditModal = (link: PaymentLinkView) => {
     setEditingLink(link);
+    setSelectedProjectId(link.projectId || '__MERCHANT_DEFAULT__');
     setTitle(link.title);
     setSlug(link.slug);
     setDescription(link.description || '');
@@ -161,10 +170,13 @@ export function PaymentLinksManager() {
     }
 
     try {
+      const resolvedProjectId =
+        selectedProjectId !== '__MERCHANT_DEFAULT__' ? selectedProjectId : null;
       if (editingLink) {
         const updated = await updateMutation.mutateAsync({
           id: editingLink.id,
           patch: {
+            projectId: resolvedProjectId,
             title: title.trim(),
             slug: slug.trim() || undefined,
             description: description.trim() || undefined,
@@ -183,6 +195,7 @@ export function PaymentLinksManager() {
         });
       } else {
         const created = await createMutation.mutateAsync({
+          projectId: resolvedProjectId || undefined,
           title: title.trim(),
           slug: slug.trim() || undefined,
           description: description.trim() || undefined,
@@ -244,15 +257,36 @@ export function PaymentLinksManager() {
             </div>
           </div>
 
-          <Button
-            variant="primary"
-            size="small"
-            leadingIcon={RiAddLine}
-            onClick={openCreateModal}
-            className="min-h-11 sm:min-h-10 shrink-0"
-          >
-            Create Payment Link
-          </Button>
+          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+            {subProjects.length > 0 && (
+              <Select
+                aria-label="Filter payment links by project"
+                selectedKey={filterProjectId}
+                onSelectionChange={(key) => {
+                  if (key != null) setFilterProjectId(String(key));
+                }}
+                className="w-48"
+              >
+                <SelectItem id="ALL" textValue="All Projects">
+                  All Projects
+                </SelectItem>
+                {subProjects.map((sp) => (
+                  <SelectItem key={sp.id} id={sp.id} textValue={sp.name}>
+                    {sp.name}
+                  </SelectItem>
+                ))}
+              </Select>
+            )}
+            <Button
+              variant="primary"
+              size="small"
+              leadingIcon={RiAddLine}
+              onClick={openCreateModal}
+              className="min-h-11 sm:min-h-10 shrink-0"
+            >
+              Create Payment Link
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
@@ -305,11 +339,18 @@ export function PaymentLinksManager() {
                   <TableRow key={link.id} id={link.id}>
                     <TableCell>
                       <div className="space-y-1 min-w-0">
-                        <div
-                          title={link.title}
-                          className="text-body-medium text-text-primary truncate max-w-[260px]"
-                        >
-                          {link.title}
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span
+                            title={link.title}
+                            className="text-body-medium text-text-primary truncate max-w-[240px]"
+                          >
+                            {link.title}
+                          </span>
+                          {link.projectName && (
+                            <Chip variant="caption" color="purple">
+                              {link.projectName}
+                            </Chip>
+                          )}
                         </div>
                         <div className="flex items-center gap-2 text-caption-2-medium text-text-tertiary">
                           <span
@@ -437,6 +478,28 @@ export function PaymentLinksManager() {
                 {origin}/{merchantSlug}/{previewSlug}
               </span>
             </div>
+
+            {subProjects.length > 0 && (
+              <Select
+                label="Receive Payment Under Project"
+                selectedKey={selectedProjectId}
+                onSelectionChange={(key) => {
+                  if (key != null) setSelectedProjectId(String(key));
+                }}
+              >
+                <SelectItem id="__MERCHANT_DEFAULT__" textValue="Merchant Default (Common SIM Pool)">
+                  Merchant Default (Common SIM Pool)
+                </SelectItem>
+                {subProjects.map((sp) => (
+                  <SelectItem key={sp.id} id={sp.id} textValue={sp.name}>
+                    {sp.name} ·{' '}
+                    {sp.walletSelectionMode === 'SPECIFIC'
+                      ? `${sp.walletIds.length} Specific SIMs`
+                      : 'Common SIMs'}
+                  </SelectItem>
+                ))}
+              </Select>
+            )}
 
             <Input
               label="Title"

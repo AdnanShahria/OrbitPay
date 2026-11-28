@@ -5,15 +5,17 @@ import {
   checkoutSessions,
   consumedTrxIds,
   merchantOrders,
+  merchantProjects,
   paymentIntents,
   smsLedger,
   verificationQueue,
+  type MerchantProjectRecord,
   type MerchantRecord,
   type PaymentIntentRecord,
   type ResolutionSource,
 } from '../../db/schema';
 import { createSignedSessionToken, generateSecureToken } from '../../shared/crypto';
-import { BadRequestError, ConflictError, NotFoundError } from '../../shared/errors';
+import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from '../../shared/errors';
 import { safeWaitUntil } from '../../shared/middleware';
 import { sanitizePhoneNumber } from '../../shared/parsers/mfs';
 import { parseAllowedOrigins, validateSafeWebhookUrl } from '../../shared/ssrf';
@@ -24,6 +26,11 @@ import {
   getAllActiveRotatedWallets,
   incrementWalletVolume,
 } from '../wallets/wallets.service';
+import {
+  resolveEffectiveProjectConfig,
+  resolveProjectDispatchContext,
+  resolveProjectRotatedWallets,
+} from '../projects/projects.service';
 import {
   dispatchWebhook,
   sendDynamicPushToMerchantDevices,
@@ -70,6 +77,7 @@ export async function reserveUniqueCheckoutSession(
   db: AppDb,
   params: {
     merchantId: string;
+    projectId?: string | null;
     paymentIntentId?: string | null;
     vertical?: typeof checkoutSessions.$inferInsert.vertical;
     externalOrderId: string;
@@ -109,6 +117,7 @@ export async function reserveUniqueCheckoutSession(
   await db.insert(checkoutSessions).values({
     id: sessionId,
     merchantId: params.merchantId,
+    projectId: params.projectId ?? null,
     paymentIntentId: params.paymentIntentId ?? null,
     vertical: params.vertical ?? 'ecommerce',
     externalOrderId: params.externalOrderId,
@@ -135,7 +144,11 @@ export async function reserveUniqueCheckoutSession(
 /**
  * Formats a PaymentIntent DB row into a clean API representation.
  */
-export function formatPaymentIntentView(intent: PaymentIntentRecord, storeName?: string) {
+export function formatPaymentIntentView(
+  intent: PaymentIntentRecord,
+  storeName?: string,
+  projectName?: string | null
+) {
   let customer: Record<string, unknown> | null = null;
   let metadata: Record<string, unknown> | null = null;
   let resolvedBy: Record<string, unknown> | null = null;
@@ -159,6 +172,8 @@ export function formatPaymentIntentView(intent: PaymentIntentRecord, storeName?:
   return {
     id: intent.id,
     merchantId: intent.merchantId,
+    projectId: intent.projectId ?? null,
+    projectName: projectName ?? null,
     vertical: intent.vertical,
     externalRefId: intent.externalRefId,
     verificationMode: intent.verificationMode,
@@ -206,30 +221,27 @@ export async function createPaymentIntent(
   env: Env,
   merchant: MerchantRecord,
   input: CreatePaymentIntentInput,
-  origin: string
+  origin: string,
+  project?: MerchantProjectRecord | null
 ) {
   const baseAmount = Math.round(input.amount * 100) / 100;
   if (baseAmount <= 0) {
     throw new BadRequestError('Amount must be greater than zero');
   }
 
-  const allowedOrigins = parseAllowedOrigins(merchant.allowedCallbackOriginsJson);
+  const effective = resolveEffectiveProjectConfig(merchant, project);
   const callbackUrl = input.callbackUrl?.trim() || null;
   if (callbackUrl) {
-    validateSafeWebhookUrl(callbackUrl, env, allowedOrigins);
+    validateSafeWebhookUrl(callbackUrl, env, effective.allowedCallbackOrigins);
   }
 
-  let wallets = await getAllActiveRotatedWallets(db, merchant.id, env);
-  if (input.provider) {
-    const specific = await getActiveRotatedWallet(db, merchant.id, input.provider, env);
-    if (specific) {
-      wallets = [specific];
-    }
-  }
+  const wallets = await resolveProjectRotatedWallets(db, merchant.id, project, input.provider, env);
 
   if (wallets.length === 0) {
     throw new BadRequestError(
-      'Merchant has not configured an active MFS receiving number yet. Please add a number in SIM Pool.'
+      project && project.walletSelectionMode === 'SPECIFIC'
+        ? `Project '${project.name}' has no active SIM wallets assigned yet.`
+        : 'Merchant has not configured an active MFS receiving number yet. Please add a number in SIM Pool.'
     );
   }
 
@@ -250,6 +262,12 @@ export async function createPaymentIntent(
 
   const existingIntent = existingIntentRows[0];
   if (existingIntent) {
+    if (project && existingIntent.projectId !== project.id) {
+      throw new ForbiddenError(
+        `External reference '${input.externalRefId}' belongs to a different sub-project`
+      );
+    }
+
     const existingSessionRows = await db
       .select()
       .from(checkoutSessions)
@@ -266,6 +284,7 @@ export async function createPaymentIntent(
     if (!session && existingIntent.status === 'OPEN') {
       const reserved = await reserveUniqueCheckoutSession(db, {
         merchantId: merchant.id,
+        projectId: existingIntent.projectId ?? null,
         paymentIntentId: existingIntent.id,
         vertical: existingIntent.vertical,
         externalOrderId: existingIntent.externalRefId,
@@ -293,6 +312,7 @@ export async function createPaymentIntent(
         sessionId,
         paymentIntentId: existingIntent.id,
         merchantId: merchant.id,
+        projectId: existingIntent.projectId ?? null,
         orderId: existingIntent.externalRefId,
         externalRefId: existingIntent.externalRefId,
         baseAmount: existingIntent.baseAmount,
@@ -308,6 +328,7 @@ export async function createPaymentIntent(
     return {
       created: false,
       paymentIntentId: existingIntent.id,
+      projectId: existingIntent.projectId ?? null,
       sessionId,
       sessionToken,
       checkoutUrl: `${origin}/checkout/${sessionId}?token=${encodeURIComponent(sessionToken)}`,
@@ -335,12 +356,12 @@ export async function createPaymentIntent(
       receiptPolicy: merchant.receiptPolicy,
       deviceStatus,
       expiresAt,
-      display: parseDisplayMetadata(existingIntent.displayJson, merchant.storeName, existingIntent.externalRefId),
+      display: parseDisplayMetadata(existingIntent.displayJson, effective.appName, existingIntent.externalRefId),
       actions: parseActionsList(existingIntent.actionsJson),
     };
   }
 
-  const verificationMode = input.verificationMode ?? merchant.verificationMode;
+  const verificationMode = input.verificationMode ?? effective.verificationMode;
   const ttlMinutes = input.expiresInMinutes || OPEN_INTENT_DEFAULT_TTL_MINUTES;
   const expiresAt = new Date(now.getTime() + ttlMinutes * 60 * 1000);
   const paymentIntentId = `pay_${generateSecureToken(16)}`;
@@ -352,6 +373,7 @@ export async function createPaymentIntent(
 
   const reserved = await reserveUniqueCheckoutSession(db, {
     merchantId: merchant.id,
+    projectId: project?.id ?? null,
     paymentIntentId,
     vertical: input.vertical,
     externalOrderId: input.externalRefId,
@@ -367,6 +389,7 @@ export async function createPaymentIntent(
     await db.insert(paymentIntents).values({
       id: paymentIntentId,
       merchantId: merchant.id,
+      projectId: project?.id ?? null,
       vertical: input.vertical,
       externalRefId: input.externalRefId,
       verificationMode,
@@ -398,6 +421,7 @@ export async function createPaymentIntent(
       sessionId: reserved.sessionId,
       paymentIntentId,
       merchantId: merchant.id,
+      projectId: project?.id ?? null,
       orderId: input.externalRefId,
       externalRefId: input.externalRefId,
       baseAmount,
@@ -413,6 +437,7 @@ export async function createPaymentIntent(
   return {
     created: true,
     paymentIntentId,
+    projectId: project?.id ?? null,
     sessionId: reserved.sessionId,
     sessionToken,
     checkoutUrl: `${origin}/checkout/${reserved.sessionId}?token=${encodeURIComponent(sessionToken)}`,
@@ -438,7 +463,7 @@ export async function createPaymentIntent(
     receiptPolicy: merchant.receiptPolicy,
     deviceStatus,
     expiresAt,
-    display: parseDisplayMetadata(displayJson, merchant.storeName, input.externalRefId),
+    display: parseDisplayMetadata(displayJson, effective.appName, input.externalRefId),
     actions: parseActionsList(actionsJson),
   };
 }
@@ -453,6 +478,9 @@ export async function listPaymentIntents(
 ) {
   const conditions: SQL[] = [eq(paymentIntents.merchantId, merchant.id)];
 
+  if (query.projectId) {
+    conditions.push(eq(paymentIntents.projectId, query.projectId));
+  }
   if (query.status && query.status !== 'ALL') {
     conditions.push(eq(paymentIntents.status, query.status));
   }
@@ -475,7 +503,7 @@ export async function listPaymentIntents(
 
   const whereClause = and(...conditions);
 
-  const [countRes, rows] = await Promise.all([
+  const [countRes, rows, projects] = await Promise.all([
     db.select({ count: sql<number>`COUNT(*)` }).from(paymentIntents).where(whereClause),
     db
       .select()
@@ -484,10 +512,22 @@ export async function listPaymentIntents(
       .orderBy(desc(paymentIntents.createdAt))
       .limit(query.limit)
       .offset(query.offset),
+    db
+      .select({ id: merchantProjects.id, name: merchantProjects.name })
+      .from(merchantProjects)
+      .where(eq(merchantProjects.merchantId, merchant.id)),
   ]);
 
+  const projectNameMap = new Map(projects.map((p) => [p.id, p.name]));
+
   return {
-    items: rows.map((r) => formatPaymentIntentView(r, merchant.storeName)),
+    items: rows.map((r) =>
+      formatPaymentIntentView(
+        r,
+        merchant.storeName,
+        r.projectId ? projectNameMap.get(r.projectId) ?? null : null
+      )
+    ),
     total: Number(countRes[0]?.count || 0),
     limit: query.limit,
     offset: query.offset,
@@ -668,6 +708,22 @@ export async function resolvePaymentIntent(
       }
     }
 
+    if (normalizedTrxId && needsConsumedInsert) {
+      try {
+        await db.insert(consumedTrxIds).values({
+          merchantId: merchant.id,
+          trxId: normalizedTrxId,
+          provider: intent.provider ?? 'BKASH',
+          paymentIntentId: intent.id,
+          externalRefId: intent.externalRefId,
+          resolutionSource,
+          consumedAt: now,
+        });
+      } catch {
+        throw new ConflictError(`Transaction ID '${normalizedTrxId}' was concurrently consumed`);
+      }
+    }
+
     const casConditions = [
       eq(paymentIntents.id, intent.id),
       eq(paymentIntents.merchantId, merchant.id),
@@ -696,6 +752,18 @@ export async function resolvePaymentIntent(
 
     const updatedIntent = updatedRows[0];
     if (!updatedIntent) {
+      if (normalizedTrxId && needsConsumedInsert) {
+        await db
+          .delete(consumedTrxIds)
+          .where(
+            and(
+              eq(consumedTrxIds.merchantId, merchant.id),
+              eq(consumedTrxIds.trxId, normalizedTrxId),
+              eq(consumedTrxIds.paymentIntentId, intent.id)
+            )
+          )
+          .catch(() => {});
+      }
       throw new ConflictError('Payment intent was updated concurrently');
     }
 
@@ -710,21 +778,6 @@ export async function resolvePaymentIntent(
           verifiedAt: now,
         })
         .where(eq(smsLedger.id, matchedLedgerId));
-    }
-
-    if (normalizedTrxId && needsConsumedInsert) {
-      await db
-        .insert(consumedTrxIds)
-        .values({
-          merchantId: merchant.id,
-          trxId: normalizedTrxId,
-          provider: intent.provider ?? 'BKASH',
-          paymentIntentId: intent.id,
-          externalRefId: intent.externalRefId,
-          resolutionSource,
-          consumedAt: now,
-        })
-        .onConflictDoNothing();
     }
 
     await db
@@ -746,6 +799,7 @@ export async function resolvePaymentIntent(
 
     await syncVerifiedOrderAndSession(db, {
       merchantId: merchant.id,
+      projectId: updatedIntent.projectId,
       externalOrderId: intent.externalRefId,
       paymentIntentId: intent.id,
       baseAmount: intent.baseAmount,
@@ -765,15 +819,20 @@ export async function resolvePaymentIntent(
       );
     }
 
+    const dispatchCtx = await resolveProjectDispatchContext(
+      db,
+      merchant,
+      updatedIntent.projectId,
+      updatedIntent.callbackUrl
+    );
     const display = parseDisplayMetadata(
       updatedIntent.displayJson,
-      merchant.storeName,
+      dispatchCtx.effective.appName,
       updatedIntent.externalRefId
     );
     const actions = parseActionsList(updatedIntent.actionsJson);
 
     if (!input.suppressWebhookEcho) {
-      const targetUrlOverride = updatedIntent.callbackUrl || undefined;
       safeWaitUntil(
         authContext?.ctx,
         dispatchWebhook(
@@ -783,6 +842,7 @@ export async function resolvePaymentIntent(
           {
             paymentIntentId: updatedIntent.id,
             merchantId: merchant.id,
+            projectId: updatedIntent.projectId,
             externalRefId: updatedIntent.externalRefId,
             externalOrderId: updatedIntent.externalRefId,
             vertical: updatedIntent.vertical,
@@ -800,8 +860,10 @@ export async function resolvePaymentIntent(
           },
           1,
           undefined,
-          targetUrlOverride,
-          env
+          dispatchCtx.targetUrlOverride,
+          env,
+          undefined,
+          dispatchCtx.webhookOptions
         )
       );
     }
@@ -811,6 +873,7 @@ export async function resolvePaymentIntent(
       'PAYMENT_VERIFIED',
       {
         paymentIntentId: updatedIntent.id,
+        projectId: updatedIntent.projectId,
         orderId: updatedIntent.externalRefId,
         trxId: updatedIntent.trxId,
         amount: updatedIntent.paidAmount,
@@ -836,7 +899,7 @@ export async function resolvePaymentIntent(
           event: 'payment.verified',
           paymentIntentId: updatedIntent.id,
           externalRefId: updatedIntent.externalRefId,
-          appName: display.appName || merchant.storeName,
+          appName: display.appName || dispatchCtx.effective.appName,
           appDomain: display.appDomain,
           category: display.category || updatedIntent.vertical,
           referenceLabel: display.referenceLabel,
@@ -850,13 +913,14 @@ export async function resolvePaymentIntent(
         }),
         sendTelegramOfficeAlert(
           merchant,
-          `✅ Payment Verified [${display.appName || merchant.storeName}]\nRef: ${updatedIntent.externalRefId}\nAmount: ৳${updatedIntent.paidAmount ?? updatedIntent.uniqueAmount}\nTrxID: ${updatedIntent.trxId || 'Manual'}\nSource: ${resolutionSource}`
+          `✅ Payment Verified [${display.appName || dispatchCtx.effective.appName}]\nRef: ${updatedIntent.externalRefId}\nAmount: ৳${updatedIntent.paidAmount ?? updatedIntent.uniqueAmount}\nTrxID: ${updatedIntent.trxId || 'Manual'}\nSource: ${resolutionSource}`,
+          dispatchCtx.project
         ),
         ...(resolvedCustomer.email && env
           ? [
               notifyPaymentVerifiedInvoiceEmail(db, env, {
                 merchantId: merchant.id,
-                storeName: display.appName || merchant.storeName,
+                storeName: display.appName || dispatchCtx.effective.appName,
                 externalRefId: updatedIntent.externalRefId,
                 paymentIntentId: updatedIntent.id,
                 customerEmail: resolvedCustomer.email,
@@ -964,9 +1028,15 @@ export async function resolvePaymentIntent(
       ),
   ]);
 
+  const dispatchCtx = await resolveProjectDispatchContext(
+    db,
+    merchant,
+    updatedIntent.projectId,
+    updatedIntent.callbackUrl
+  );
   const display = parseDisplayMetadata(
     updatedIntent.displayJson,
-    merchant.storeName,
+    dispatchCtx.effective.appName,
     updatedIntent.externalRefId
   );
 
@@ -980,6 +1050,7 @@ export async function resolvePaymentIntent(
         {
           paymentIntentId: updatedIntent.id,
           merchantId: merchant.id,
+          projectId: updatedIntent.projectId,
           externalRefId: updatedIntent.externalRefId,
           externalOrderId: updatedIntent.externalRefId,
           vertical: updatedIntent.vertical,
@@ -994,8 +1065,10 @@ export async function resolvePaymentIntent(
         },
         1,
         undefined,
-        updatedIntent.callbackUrl || undefined,
-        env
+        dispatchCtx.targetUrlOverride,
+        env,
+        undefined,
+        dispatchCtx.webhookOptions
       )
     );
   }
@@ -1005,6 +1078,7 @@ export async function resolvePaymentIntent(
     'ORDER_UPDATED',
     {
       paymentIntentId: updatedIntent.id,
+      projectId: updatedIntent.projectId,
       orderId: updatedIntent.externalRefId,
       status: 'REJECTED',
       reason: updatedIntent.rejectionReason,
@@ -1017,7 +1091,8 @@ export async function resolvePaymentIntent(
     authContext?.ctx,
     sendTelegramOfficeAlert(
       merchant,
-      `❌ Payment Rejected [${display.appName || merchant.storeName}]\nRef: ${updatedIntent.externalRefId}\nReason: ${updatedIntent.rejectionReason}`
+      `❌ Payment Rejected [${display.appName || dispatchCtx.effective.appName}]\nRef: ${updatedIntent.externalRefId}\nReason: ${updatedIntent.rejectionReason}`,
+      dispatchCtx.project
     )
   );
 
@@ -1064,6 +1139,12 @@ export async function triggerPaymentAction(
 
   const eventName = matchedAction.webhookEvent || `action.${matchedAction.id}`;
   const now = new Date();
+  const dispatchCtx = await resolveProjectDispatchContext(
+    db,
+    merchant,
+    intent.projectId,
+    intent.callbackUrl
+  );
 
   const webhookResult = await dispatchWebhook(
     db,
@@ -1072,6 +1153,7 @@ export async function triggerPaymentAction(
     {
       paymentIntentId: intent.id,
       merchantId: merchant.id,
+      projectId: intent.projectId,
       externalRefId: intent.externalRefId,
       externalOrderId: intent.externalRefId,
       vertical: intent.vertical,
@@ -1087,8 +1169,10 @@ export async function triggerPaymentAction(
     },
     1,
     undefined,
-    intent.callbackUrl || undefined,
-    env
+    dispatchCtx.targetUrlOverride,
+    env,
+    undefined,
+    dispatchCtx.webhookOptions
   );
 
   return {
@@ -1109,7 +1193,8 @@ export async function backfillPaymentIntent(
   db: AppDb,
   env: Env,
   merchant: MerchantRecord,
-  input: BackfillPaymentIntentInput
+  input: BackfillPaymentIntentInput,
+  project?: MerchantProjectRecord | null
 ) {
   const existingRows = await db
     .select()
@@ -1123,19 +1208,21 @@ export async function backfillPaymentIntent(
     .limit(1);
 
   if (existingRows[0]) {
+    if (project && existingRows[0].projectId !== project.id) {
+      throw new ForbiddenError(
+        `External reference '${input.externalRefId}' belongs to a different sub-project`
+      );
+    }
     return {
       created: false,
       paymentIntent: formatPaymentIntentView(existingRows[0], merchant.storeName),
     };
   }
 
+  const effective = resolveEffectiveProjectConfig(merchant, project);
   const callbackUrl = input.callbackUrl?.trim() || null;
   if (callbackUrl) {
-    validateSafeWebhookUrl(
-      callbackUrl,
-      env,
-      parseAllowedOrigins(merchant.allowedCallbackOriginsJson)
-    );
+    validateSafeWebhookUrl(callbackUrl, env, effective.allowedCallbackOrigins);
   }
 
   const now = new Date();
@@ -1153,9 +1240,10 @@ export async function backfillPaymentIntent(
   await db.insert(paymentIntents).values({
     id: paymentIntentId,
     merchantId: merchant.id,
+    projectId: project?.id ?? null,
     vertical: input.vertical,
     externalRefId: input.externalRefId,
-    verificationMode: input.verificationMode ?? merchant.verificationMode,
+    verificationMode: input.verificationMode ?? effective.verificationMode,
     status: input.status,
     baseAmount,
     uniqueAmount,
@@ -1183,6 +1271,7 @@ export async function backfillPaymentIntent(
     await db.insert(verificationQueue).values({
       id: `que_${generateSecureToken(16)}`,
       merchantId: merchant.id,
+      projectId: project?.id ?? null,
       paymentIntentId,
       provider: input.provider,
       externalOrderId: input.externalRefId,

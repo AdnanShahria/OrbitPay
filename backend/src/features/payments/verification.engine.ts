@@ -355,12 +355,28 @@ export async function executeAtomicVerificationCas(
     .where(
       and(
         eq(paymentIntents.id, params.paymentIntent.id),
-        eq(paymentIntents.stateVersion, params.paymentIntent.stateVersion)
+        eq(paymentIntents.stateVersion, params.paymentIntent.stateVersion),
+        inArray(paymentIntents.status, ['OPEN', 'WAITING_FOR_SMS', 'MANUAL_REVIEW_REQUIRED'])
       )
     )
     .returning();
 
   if (!updatedIntents[0]) {
+    await db
+      .delete(consumedTrxIds)
+      .where(and(eq(consumedTrxIds.merchantId, params.merchantId), eq(consumedTrxIds.trxId, normalizedTrxId)))
+      .catch(() => {});
+    await db
+      .update(smsLedger)
+      .set({
+        status: 'UNCLAIMED',
+        matchType: null,
+        externalOrderId: null,
+        paymentIntentId: null,
+        verifiedAt: null,
+      })
+      .where(eq(smsLedger.id, params.smsId))
+      .catch(() => {});
     throw new ConflictError('Payment intent state changed concurrently during verification');
   }
 
@@ -374,6 +390,7 @@ export async function syncVerifiedOrderAndSession(
   db: AppDb,
   params: {
     merchantId: string;
+    projectId?: string | null;
     externalOrderId: string;
     paymentIntentId?: string | null;
     baseAmount: number;
@@ -414,6 +431,7 @@ export async function syncVerifiedOrderAndSession(
       .update(merchantOrders)
       .set({
         ...(params.paymentIntentId ? { paymentIntentId: params.paymentIntentId } : {}),
+        ...(params.projectId && !existingOrder[0].projectId ? { projectId: params.projectId } : {}),
         paymentStatus: 'PAID',
         paidAmount: params.paidAmount,
         uniqueAmount: params.uniqueAmount,
@@ -426,6 +444,7 @@ export async function syncVerifiedOrderAndSession(
     await db.insert(merchantOrders).values({
       id: `ord_${generateSecureToken(12)}`,
       merchantId: params.merchantId,
+      projectId: params.projectId ?? null,
       paymentIntentId: params.paymentIntentId ?? null,
       externalOrderId: params.externalOrderId,
       customerEmail: params.customerEmail || null,

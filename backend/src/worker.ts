@@ -14,6 +14,7 @@ import {
   verificationQueue,
 } from './db/schema';
 import { parseActionsList, parseDisplayMetadata } from './features/payments/verification.engine';
+import { resolveProjectDispatchContext } from './features/projects/projects.service';
 import { emitMerchantRealtimeEvent } from './features/realtime/realtime.service';
 import {
   dispatchWebhook,
@@ -100,9 +101,15 @@ async function escalateExpiredGraceIntents(db: AppDb, env: Env, now: Date): Prom
     const merchant = merchantRes[0];
     if (!merchant || !merchant.isActive) continue;
 
+    const dispatchCtx = await resolveProjectDispatchContext(
+      db,
+      merchant,
+      updated.projectId,
+      updated.callbackUrl
+    );
     const display = parseDisplayMetadata(
       updated.displayJson,
-      merchant.storeName,
+      dispatchCtx.effective.appName,
       updated.externalRefId
     );
     const actions = parseActionsList(updated.actionsJson);
@@ -115,6 +122,7 @@ async function escalateExpiredGraceIntents(db: AppDb, env: Env, now: Date): Prom
         {
           paymentIntentId: updated.id,
           merchantId: merchant.id,
+          projectId: updated.projectId,
           externalRefId: updated.externalRefId,
           externalOrderId: updated.externalRefId,
           vertical: updated.vertical,
@@ -133,14 +141,16 @@ async function escalateExpiredGraceIntents(db: AppDb, env: Env, now: Date): Prom
         },
         1,
         undefined,
-        updated.callbackUrl || undefined,
-        env
+        dispatchCtx.targetUrlOverride,
+        env,
+        undefined,
+        dispatchCtx.webhookOptions
       ),
       sendDynamicPushToMerchantDevices(db, env, merchant, {
         event: 'payment.escalated_manual',
         paymentIntentId: updated.id,
         externalRefId: updated.externalRefId,
-        appName: display.appName || merchant.storeName,
+        appName: display.appName || dispatchCtx.effective.appName,
         appDomain: display.appDomain,
         category: display.category || updated.vertical,
         referenceLabel: display.referenceLabel,
@@ -154,7 +164,8 @@ async function escalateExpiredGraceIntents(db: AppDb, env: Env, now: Date): Prom
       }),
       sendTelegramOfficeAlert(
         merchant,
-        `⏱️ Grace Period Exceeded [${display.appName || merchant.storeName}]\nRef: ${updated.externalRefId}\nAmount: ৳${updated.paidAmount ?? updated.uniqueAmount}\nTrxID: ${updated.trxId || 'N/A'}\nRouted to Manual Review.`
+        `⏱️ Grace Period Exceeded [${display.appName || dispatchCtx.effective.appName}]\nRef: ${updated.externalRefId}\nAmount: ৳${updated.paidAmount ?? updated.uniqueAmount}\nTrxID: ${updated.trxId || 'N/A'}\nRouted to Manual Review.`,
+        dispatchCtx.project
       ),
     ]);
 
@@ -240,6 +251,13 @@ async function expireUnsubmittedOpenSessions(db: AppDb, env: Env, now: Date): Pr
     const merchant = merchantRes[0];
     if (!merchant || !merchant.isActive) continue;
 
+    const dispatchCtx = await resolveProjectDispatchContext(
+      db,
+      merchant,
+      intent.projectId,
+      intent.callbackUrl
+    );
+
     await dispatchWebhook(
       db,
       merchant,
@@ -247,6 +265,7 @@ async function expireUnsubmittedOpenSessions(db: AppDb, env: Env, now: Date): Pr
       {
         paymentIntentId: intent.id,
         merchantId: merchant.id,
+        projectId: intent.projectId,
         externalRefId: intent.externalRefId,
         externalOrderId: intent.externalRefId,
         vertical: intent.vertical,
@@ -259,8 +278,10 @@ async function expireUnsubmittedOpenSessions(db: AppDb, env: Env, now: Date): Pr
       },
       1,
       undefined,
-      intent.callbackUrl || undefined,
-      env
+      dispatchCtx.targetUrlOverride,
+      env,
+      undefined,
+      dispatchCtx.webhookOptions
     ).catch((err) => {
       console.warn('[Cron payment.expired Webhook Error]:', err);
     });

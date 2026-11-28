@@ -6,6 +6,7 @@ import {
   authDeviceMiddleware,
   authMerchantMiddleware,
   authMerchantOrDeviceMiddleware,
+  requireMerchantWideScopeMiddleware,
   requireOwnerRoleMiddleware,
   safeWaitUntil,
 } from '../../shared/middleware';
@@ -129,7 +130,7 @@ router.get('/devices', authMerchantOrDeviceMiddleware, async (c) => {
  * DELETE /api/v1/device/devices/:id
  * Deactivates (revokes) a companion device (merchant owner only).
  */
-router.delete('/devices/:id', authMerchantMiddleware, requireOwnerRoleMiddleware, async (c) => {
+router.delete('/devices/:id', authMerchantMiddleware, requireOwnerRoleMiddleware, requireMerchantWideScopeMiddleware, async (c) => {
   const db = c.get('db');
   const merchantId = c.get('merchantId')!;
   const deviceId = c.req.param('id');

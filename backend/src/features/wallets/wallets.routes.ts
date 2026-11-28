@@ -1,9 +1,15 @@
 import { Hono } from 'hono';
 import type { AppContextEnv } from '../../shared/types';
-import { authMerchantMiddleware, requireOwnerRoleMiddleware, safeWaitUntil } from '../../shared/middleware';
+import {
+  authMerchantMiddleware,
+  requireMerchantWideScopeMiddleware,
+  requireOwnerRoleMiddleware,
+  safeWaitUntil,
+} from '../../shared/middleware';
 import { emitMerchantRealtimeEvent } from '../realtime/realtime.service';
 import { createWalletSchema, syncWalletsSchema, updateWalletSchema } from './wallets.schema';
 import {
+  getAllActiveRotatedWallets,
   listWallets,
   getWalletsOverview,
   createWallet,
@@ -12,6 +18,7 @@ import {
   syncMerchantWallets,
   dispatchWalletSyncWebhook,
 } from './wallets.service';
+import { resolveAuthorizedProject, resolveProjectRotatedWallets } from '../projects/projects.service';
 
 const router = new Hono<AppContextEnv>();
 
@@ -25,6 +32,16 @@ router.use('*', authMerchantMiddleware);
 router.get('/', async (c) => {
   const db = c.get('db');
   const merchantId = c.get('merchantId')!;
+  const project = await resolveAuthorizedProject(db, merchantId, {
+    requestedProjectId: c.req.query('projectId'),
+    authProject: c.get('project'),
+    projectAuthScoped: c.get('projectAuthScoped'),
+    requireActive: false,
+  });
+  if (project && project.walletSelectionMode === 'SPECIFIC') {
+    const scoped = await resolveProjectRotatedWallets(db, merchantId, project, undefined, c.env);
+    return c.json({ success: true, data: scoped });
+  }
   const wallets = await listWallets(db, merchantId);
   return c.json({ success: true, data: wallets });
 });
@@ -36,7 +53,30 @@ router.get('/', async (c) => {
 router.get('/overview', async (c) => {
   const db = c.get('db');
   const merchantId = c.get('merchantId')!;
+  const project = await resolveAuthorizedProject(db, merchantId, {
+    requestedProjectId: c.req.query('projectId'),
+    authProject: c.get('project'),
+    projectAuthScoped: c.get('projectAuthScoped'),
+    requireActive: false,
+  });
   const overview = await getWalletsOverview(db, merchantId, c.env);
+  if (project && project.walletSelectionMode === 'SPECIFIC') {
+    const allowed = await resolveProjectRotatedWallets(db, merchantId, project, undefined, c.env);
+    const allowedSet = new Set(allowed.map((w) => w.id));
+    const filtered = overview.wallets.filter((w) => allowedSet.has(w.id));
+    return c.json({
+      success: true,
+      data: {
+        ...overview,
+        wallets: filtered,
+        summary: {
+          ...overview.summary,
+          totalWallets: filtered.length,
+          activeWallets: filtered.filter((w) => w.isActive && !w.isPlaceholder).length,
+        },
+      },
+    });
+  }
   return c.json({ success: true, data: overview });
 });
 
@@ -44,7 +84,7 @@ router.get('/overview', async (c) => {
  * POST /api/v1/wallets
  * Registers a new SIM wallet with 250k safe / 300k hard rotation limits (owner-only).
  */
-router.post('/', requireOwnerRoleMiddleware, async (c) => {
+router.post('/', requireOwnerRoleMiddleware, requireMerchantWideScopeMiddleware, async (c) => {
   const db = c.get('db');
   const merchant = c.get('merchant')!;
   const body = await c.req.json();
@@ -65,7 +105,7 @@ router.post('/', requireOwnerRoleMiddleware, async (c) => {
  * POST /api/v1/wallets/sync
  * Bulk-syncs storefront MFS numbers and optionally clears seeded placeholder wallets (owner-only).
  */
-router.post('/sync', requireOwnerRoleMiddleware, async (c) => {
+router.post('/sync', requireOwnerRoleMiddleware, requireMerchantWideScopeMiddleware, async (c) => {
   const db = c.get('db');
   const merchant = c.get('merchant')!;
   const body = await c.req.json();
@@ -87,7 +127,7 @@ router.post('/sync', requireOwnerRoleMiddleware, async (c) => {
  * PATCH /api/v1/wallets/:id
  * Updates an existing SIM wallet's parameters or status (owner-only).
  */
-router.patch('/:id', requireOwnerRoleMiddleware, async (c) => {
+router.patch('/:id', requireOwnerRoleMiddleware, requireMerchantWideScopeMiddleware, async (c) => {
   const db = c.get('db');
   const merchant = c.get('merchant')!;
   const walletId = c.req.param('id');
@@ -109,7 +149,7 @@ router.patch('/:id', requireOwnerRoleMiddleware, async (c) => {
  * DELETE /api/v1/wallets/:id
  * Deletes a registered wallet (owner-only).
  */
-router.delete('/:id', requireOwnerRoleMiddleware, async (c) => {
+router.delete('/:id', requireOwnerRoleMiddleware, requireMerchantWideScopeMiddleware, async (c) => {
   const db = c.get('db');
   const merchant = c.get('merchant')!;
   const walletId = c.req.param('id');

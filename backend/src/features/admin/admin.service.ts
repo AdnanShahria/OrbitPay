@@ -3,6 +3,8 @@ import { ensureRuntimeSchema } from '../../db/bootstrap';
 import type { AppDb } from '../../db/client';
 import {
   merchants,
+  merchantProjects,
+  merchantProjectWallets,
   merchantWallets,
   merchantUsers,
   merchantDevices,
@@ -32,6 +34,7 @@ import {
 } from '../../shared/crypto';
 import { BadRequestError, ConflictError, NotFoundError } from '../../shared/errors';
 import { sanitizePhoneNumber } from '../../shared/parsers/mfs';
+import { validateSafeWebhookUrl } from '../../shared/ssrf';
 import {
   ensureUniqueMerchantSlug,
   resolveAndPersistMerchantSlug,
@@ -40,6 +43,7 @@ import {
 import { getMerchantPushHubStatus } from '../../router/push-hub';
 import type { Env } from '../../shared/types';
 import { formatPaymentIntentView } from '../payments/payments.service';
+import { listMerchantProjects } from '../projects/projects.service';
 import { recordAdminAudit, type AdminActor } from './admin-auth.service';
 import type {
   CreateProjectDTO,
@@ -491,12 +495,17 @@ export async function createAdminProject(
 export async function updateAdminProject(
   db: AppDb,
   id: string,
-  input: UpdateProjectDTO
+  input: UpdateProjectDTO,
+  env?: Env
 ) {
   const existingRows = await db.select().from(merchants).where(eq(merchants.id, id)).limit(1);
   const existing = existingRows[0];
   if (!existing) {
     throw new NotFoundError(`Project '${id}' not found`);
+  }
+
+  if (input.webhookUrl !== undefined && input.webhookUrl.trim() !== '') {
+    validateSafeWebhookUrl(input.webhookUrl.trim(), env);
   }
 
   const updateData: Partial<MerchantRecord> = {
@@ -507,7 +516,7 @@ export async function updateAdminProject(
   if (input.slug !== undefined) {
     updateData.slug = await ensureUniqueMerchantSlug(db, toSafeMerchantSlug(input.slug), id);
   }
-  if (input.webhookUrl !== undefined) updateData.webhookUrl = input.webhookUrl;
+  if (input.webhookUrl !== undefined) updateData.webhookUrl = input.webhookUrl.trim();
   if (input.gracePeriodMinutes !== undefined) updateData.gracePeriodMinutes = input.gracePeriodMinutes;
   if (input.isActive !== undefined) updateData.isActive = input.isActive;
   if (input.accountMode !== undefined) updateData.accountMode = input.accountMode;
@@ -805,7 +814,7 @@ export async function inspectAdminProject(db: AppDb, projectId: string) {
   const { deviceApiKeyHash: _deviceHash, apiKeyHash: _apiKeyHash, ...safeProject } = merchant;
   const merchantSlug = await resolveAndPersistMerchantSlug(db, merchant);
 
-  const [wallets, links, pendingIntentRows, recentTransactions, recentOrders, recentQueue] =
+  const [wallets, links, pendingIntentRows, recentTransactions, recentOrders, recentQueue, subProjects] =
     await Promise.all([
       db
         .select()
@@ -847,19 +856,28 @@ export async function inspectAdminProject(db: AppDb, projectId: string) {
         .where(eq(verificationQueue.merchantId, projectId))
         .orderBy(desc(verificationQueue.createdAt))
         .limit(15),
+      listMerchantProjects(db, projectId),
     ]);
+
+  const projectById = new Map(subProjects.map((sp) => [sp.id, sp]));
 
   return {
     project: {
       ...safeProject,
       slug: merchantSlug,
     },
+    subProjects,
     wallets,
-    paymentLinks: links.map((link) => ({
-      ...link,
-      merchantSlug,
-      sharePath: `/${merchantSlug}/${link.slug}`,
-    })),
+    paymentLinks: links.map((link) => {
+      const sp = link.projectId ? projectById.get(link.projectId) : undefined;
+      return {
+        ...link,
+        projectName: sp?.name ?? null,
+        projectSlug: sp?.slug ?? null,
+        merchantSlug,
+        sharePath: `/${merchantSlug}/${link.slug}`,
+      };
+    }),
     pendingIntents: pendingIntentRows.map((intent) =>
       formatPaymentIntentView(intent, merchant.storeName)
     ),
@@ -889,6 +907,16 @@ export async function deleteAdminProject(
     throw new NotFoundError(`Project '${projectId}' not found`);
   }
 
+  const subProjectsRows = await db
+    .select({ id: merchantProjects.id })
+    .from(merchantProjects)
+    .where(eq(merchantProjects.merchantId, projectId));
+  const subProjectIds = subProjectsRows.map((r) => r.id);
+
+  if (subProjectIds.length > 0) {
+    await db.delete(merchantProjectWallets).where(inArray(merchantProjectWallets.projectId, subProjectIds));
+  }
+
   await db.batch([
     db.delete(consumedTrxIds).where(eq(consumedTrxIds.merchantId, projectId)),
     db.delete(webhookDeliveries).where(eq(webhookDeliveries.merchantId, projectId)),
@@ -898,6 +926,7 @@ export async function deleteAdminProject(
     db.delete(paymentLinks).where(eq(paymentLinks.merchantId, projectId)),
     db.delete(merchantOrders).where(eq(merchantOrders.merchantId, projectId)),
     db.delete(smsLedger).where(eq(smsLedger.merchantId, projectId)),
+    db.delete(merchantProjects).where(eq(merchantProjects.merchantId, projectId)),
     db.delete(merchantWallets).where(eq(merchantWallets.merchantId, projectId)),
     db.delete(merchantDevices).where(eq(merchantDevices.merchantId, projectId)),
     db.delete(authSessions).where(eq(authSessions.merchantId, projectId)),

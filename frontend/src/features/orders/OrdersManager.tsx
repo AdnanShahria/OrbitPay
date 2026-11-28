@@ -7,6 +7,7 @@ import {
   type OrderPaymentMethod,
   type OrderStatus,
 } from './useOrders';
+import { useMerchantProjects } from '@/features/projects/useProjects';
 import { Card, CardContent } from '@/components/base/card/card';
 import { Button } from '@/components/base/buttons/button';
 import { SearchField } from '@/components/base/search-field/search-field';
@@ -106,12 +107,15 @@ function getPaymentMethodChip(method: OrderPaymentMethod): { label: string; colo
 }
 
 export function OrdersManager() {
+  const { data: subProjects = [] } = useMerchantProjects();
+  const [selectedProjectId, setSelectedProjectId] = useState<string>('ALL');
   const [selectedStatus, setSelectedStatus] = useState<OrderStatus | 'ALL'>('ALL');
   const [selectedMethod, setSelectedMethod] = useState<OrderPaymentMethod | 'ALL'>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [activeActionKey, setActiveActionKey] = useState<string | null>(null);
 
   const { data, isLoading, refetch, isFetching } = useOrders({
+    projectId: selectedProjectId,
     orderStatus: selectedStatus,
     paymentMethod: selectedMethod,
     search: searchQuery,
@@ -197,8 +201,28 @@ export function OrdersManager() {
               className="w-full lg:w-80"
             />
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <RiFilter3Line className="size-4 shrink-0 text-foreground-icon-tertiary" aria-hidden />
+              {subProjects.length > 0 && (
+                <Select
+                  aria-label="Filter orders by project"
+                  size="md"
+                  selectedKey={selectedProjectId}
+                  onSelectionChange={(key) => {
+                    if (key != null) setSelectedProjectId(String(key));
+                  }}
+                  className="min-w-[168px]"
+                >
+                  <SelectItem id="ALL" textValue="All projects">
+                    All projects
+                  </SelectItem>
+                  {subProjects.map((sp) => (
+                    <SelectItem key={sp.id} id={sp.id} textValue={sp.name}>
+                      {sp.name}
+                    </SelectItem>
+                  ))}
+                </Select>
+              )}
               <Select
                 aria-label="Filter by payment method"
                 size="md"
@@ -273,13 +297,18 @@ export function OrdersManager() {
                     {/* Order & Customer */}
                     <TableCell>
                       <div className="space-y-0.5 min-w-0">
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           <span
                             title={order.externalOrderId}
                             className="font-mono text-body-medium text-text-primary truncate max-w-[160px]"
                           >
                             {order.externalOrderId}
                           </span>
+                          {order.projectName && (
+                            <Chip variant="caption" color="purple">
+                              {order.projectName}
+                            </Chip>
+                          )}
                           <span className="text-caption-2-regular text-text-tertiary whitespace-nowrap tabular-nums tnum">
                             {formatDate(order.createdAt)}
                           </span>

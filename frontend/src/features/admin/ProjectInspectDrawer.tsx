@@ -5,13 +5,16 @@ import {
   RiCheckLine,
   RiCloseLine,
   RiDeleteBinLine,
+  RiEditLine,
   RiErrorWarningLine,
   RiExternalLinkLine,
   RiFileCopyLine,
   RiFileList3Line,
+  RiFolder3Line,
   RiGlobalLine,
   RiLinksLine,
   RiPulseLine,
+  RiRefreshLine,
   RiShieldCheckLine,
   RiShoppingCart2Line,
   RiSmartphoneLine,
@@ -33,17 +36,28 @@ import { Select, SelectItem } from '@/components/base/select/select';
 import { Skeleton } from '@/components/base/skeleton/skeleton';
 import { Switch } from '@/components/base/switch/switch';
 import { toast } from '@/components/base/toast/toast';
+import { cx } from '@/utils/cx';
 import { formatBDT, formatDate, MFS_METADATA, type MfsProvider } from '@/shared/utils/format';
+import type {
+  MerchantSubProject,
+  ProjectAccountMode,
+  ProjectVerificationMode,
+  ProjectWalletSelectionMode,
+} from '@/features/projects/useProjects';
 import {
   type AdminInspectPaymentLink,
   type AdminInspectPendingIntent,
   type AdminProjectSummary,
   type AdminWalletAccountType,
   useAdminCreatePaymentLinkMutation,
+  useAdminCreateSubProjectMutation,
   useAdminCreateWalletMutation,
+  useAdminDeleteSubProjectMutation,
   useAdminDeleteWalletMutation,
   useAdminProjectInspect,
   useAdminResolvePaymentMutation,
+  useAdminRotateSubProjectKeysMutation,
+  useAdminUpdateSubProjectMutation,
   useAdminUpdateWalletMutation,
 } from './useAdmin';
 
@@ -96,6 +110,31 @@ export function ProjectInspectDrawer({ project, onClose }: ProjectInspectDrawerP
   const deleteWalletMutation = useAdminDeleteWalletMutation(projectId);
   const createLinkMutation = useAdminCreatePaymentLinkMutation(projectId);
   const resolvePaymentMutation = useAdminResolvePaymentMutation(projectId);
+  const createSubProjectMutation = useAdminCreateSubProjectMutation(projectId);
+  const updateSubProjectMutation = useAdminUpdateSubProjectMutation(projectId);
+  const rotateSubProjectKeysMutation = useAdminRotateSubProjectKeysMutation(projectId);
+  const deleteSubProjectMutation = useAdminDeleteSubProjectMutation(projectId);
+
+  // Add/Edit Sub-Project inline state
+  const [showAddSubProject, setShowAddSubProject] = useState(false);
+  const [editingSubProjectId, setEditingSubProjectId] = useState<string | null>(null);
+  const [subProjectName, setSubProjectName] = useState('');
+  const [subProjectSlug, setSubProjectSlug] = useState('');
+  const [subProjectAccountMode, setSubProjectAccountMode] =
+    useState<ProjectAccountMode>('WEBHOOK_CONNECTED');
+  const [subProjectVerificationMode, setSubProjectVerificationMode] =
+    useState<ProjectVerificationMode>('AUTO');
+  const [subProjectWalletMode, setSubProjectWalletMode] =
+    useState<ProjectWalletSelectionMode>('COMMON');
+  const [subProjectWalletIds, setSubProjectWalletIds] = useState<string[]>([]);
+  const [subProjectWebhookUrl, setSubProjectWebhookUrl] = useState('');
+  const [subProjectError, setSubProjectError] = useState<string | null>(null);
+  const [newSubProjectCreds, setNewSubProjectCreds] = useState<{
+    label: string;
+    apiKey?: string;
+    webhookSecret?: string;
+  } | null>(null);
+  const [confirmDeleteSubProjectId, setConfirmDeleteSubProjectId] = useState<string | null>(null);
 
   // Add MFS Wallet inline form state
   const [showAddWallet, setShowAddWallet] = useState(false);
@@ -110,6 +149,7 @@ export function ProjectInspectDrawer({ project, onClose }: ProjectInspectDrawerP
   // Add Payment Link inline form state
   const [showAddLink, setShowAddLink] = useState(false);
   const [linkTitle, setLinkTitle] = useState('');
+  const [linkTargetSubProjectId, setLinkTargetSubProjectId] = useState<string>('__MERCHANT_DEFAULT__');
   const [linkAmountType, setLinkAmountType] = useState<'FIXED' | 'OPEN'>('OPEN');
   const [linkFixedAmount, setLinkFixedAmount] = useState('');
   const [linkSlug, setLinkSlug] = useState('');
@@ -119,11 +159,94 @@ export function ProjectInspectDrawer({ project, onClose }: ProjectInspectDrawerP
   const [resolvingKey, setResolvingKey] = useState<string | null>(null);
 
   const summary = data?.project ?? project;
+  const subProjects = data?.subProjects ?? [];
   const wallets = data?.wallets ?? [];
   const paymentLinks = data?.paymentLinks ?? [];
   const pendingIntents = data?.pendingIntents ?? [];
   const recentSms = data?.recentSms ?? [];
   const recentOrders = data?.recentOrders ?? [];
+
+  const resetSubProjectForm = () => {
+    setEditingSubProjectId(null);
+    setSubProjectName('');
+    setSubProjectSlug('');
+    setSubProjectAccountMode('WEBHOOK_CONNECTED');
+    setSubProjectVerificationMode('AUTO');
+    setSubProjectWalletMode('COMMON');
+    setSubProjectWalletIds([]);
+    setSubProjectWebhookUrl('');
+    setSubProjectError(null);
+  };
+
+  const openEditSubProject = (sp: MerchantSubProject) => {
+    setShowAddSubProject(true);
+    setEditingSubProjectId(sp.id);
+    setSubProjectName(sp.name);
+    setSubProjectSlug(sp.slug);
+    setSubProjectAccountMode(sp.accountMode);
+    setSubProjectVerificationMode(sp.verificationMode);
+    setSubProjectWalletMode(sp.walletSelectionMode);
+    setSubProjectWalletIds(sp.walletIds || []);
+    setSubProjectWebhookUrl(sp.webhookUrl || '');
+    setSubProjectError(null);
+  };
+
+  const toggleSubProjectWalletId = (walletId: string) => {
+    setSubProjectWalletIds((prev) =>
+      prev.includes(walletId) ? prev.filter((id) => id !== walletId) : [...prev, walletId],
+    );
+  };
+
+  const handleSaveSubProject = async (e: FormEvent) => {
+    e.preventDefault();
+    setSubProjectError(null);
+    const trimmedName = subProjectName.trim();
+    if (trimmedName.length < 2) {
+      setSubProjectError('Project name must be at least 2 characters.');
+      return;
+    }
+    if (subProjectWalletMode === 'SPECIFIC' && subProjectWalletIds.length === 0) {
+      setSubProjectError('Select at least one SIM wallet or choose Common Pool.');
+      return;
+    }
+
+    try {
+      if (editingSubProjectId) {
+        await updateSubProjectMutation.mutateAsync({
+          subProjectId: editingSubProjectId,
+          updates: {
+            name: trimmedName,
+            accountMode: subProjectAccountMode,
+            verificationMode: subProjectVerificationMode,
+            walletSelectionMode: subProjectWalletMode,
+            walletIds: subProjectWalletMode === 'SPECIFIC' ? subProjectWalletIds : [],
+            webhookUrl: subProjectWebhookUrl.trim(),
+          },
+        });
+        toast.success(`Project '${trimmedName}' updated`);
+      } else {
+        const res = await createSubProjectMutation.mutateAsync({
+          name: trimmedName,
+          slug: subProjectSlug.trim() || undefined,
+          accountMode: subProjectAccountMode,
+          verificationMode: subProjectVerificationMode,
+          walletSelectionMode: subProjectWalletMode,
+          walletIds: subProjectWalletMode === 'SPECIFIC' ? subProjectWalletIds : [],
+          webhookUrl: subProjectWebhookUrl.trim(),
+        });
+        setNewSubProjectCreds({
+          label: res.project.name,
+          apiKey: res.credentials.apiKey,
+          webhookSecret: res.credentials.webhookSecret,
+        });
+        toast.success(`Project '${res.project.name}' added under ${project?.id}`);
+      }
+      resetSubProjectForm();
+      setShowAddSubProject(false);
+    } catch (err: unknown) {
+      setSubProjectError(err instanceof Error ? err.message : 'Failed to save sub-project');
+    }
+  };
 
   const origin =
     typeof window !== 'undefined' ? window.location.origin : 'https://payment.orbitsaas.cloud';
@@ -232,6 +355,8 @@ export function ProjectInspectDrawer({ project, onClose }: ProjectInspectDrawerP
 
     try {
       const created = await createLinkMutation.mutateAsync({
+        projectId:
+          linkTargetSubProjectId !== '__MERCHANT_DEFAULT__' ? linkTargetSubProjectId : undefined,
         title: trimmedTitle,
         slug: linkSlug.trim() || undefined,
         amountType: linkAmountType,
@@ -239,6 +364,7 @@ export function ProjectInspectDrawer({ project, onClose }: ProjectInspectDrawerP
       });
       toast.success('Payment link created', { description: getShareUrl(created) });
       setLinkTitle('');
+      setLinkTargetSubProjectId('__MERCHANT_DEFAULT__');
       setLinkFixedAmount('');
       setLinkSlug('');
       setShowAddLink(false);
@@ -465,6 +591,372 @@ export function ProjectInspectDrawer({ project, onClose }: ProjectInspectDrawerP
                             >
                               Approve
                             </Button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+
+            {/* Merchant Sub-Projects (Under 1 Merchant ID) */}
+            <section className="space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <h4 className="text-body-medium text-text-primary flex items-center gap-2">
+                  <RiFolder3Line className="size-4 text-foreground-icon-secondary" aria-hidden />
+                  <span>Merchant Sub-Projects ({subProjects.length})</span>
+                </h4>
+                <Button
+                  variant="secondary"
+                  size="xs"
+                  leadingIcon={RiAddLine}
+                  onClick={() => {
+                    if (showAddSubProject) {
+                      resetSubProjectForm();
+                      setShowAddSubProject(false);
+                    } else {
+                      resetSubProjectForm();
+                      setShowAddSubProject(true);
+                    }
+                  }}
+                >
+                  {showAddSubProject ? 'Close form' : 'Add Project'}
+                </Button>
+              </div>
+
+              {newSubProjectCreds && (
+                <div className="rounded-xl border border-separator-border bg-notification-success-background p-3 space-y-2 text-notification-success-foreground">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-caption-1-semibold">
+                      Credentials for {newSubProjectCreds.label} (copy now — shown once)
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="xs"
+                      onClick={() => setNewSubProjectCreds(null)}
+                    >
+                      Dismiss
+                    </Button>
+                  </div>
+                  <div className="space-y-1.5">
+                    {newSubProjectCreds.apiKey && (
+                      <div className="flex items-center justify-between gap-2 rounded-lg bg-background-primary-default px-2.5 py-1.5 text-text-primary">
+                        <span className="font-mono text-caption-2-regular truncate">
+                          API Key: {newSubProjectCreds.apiKey}
+                        </span>
+                        <Button
+                          variant="secondary"
+                          size="xs"
+                          iconOnly
+                          leadingIcon={copiedId === 'sp-api' ? RiCheckLine : RiFileCopyLine}
+                          aria-label="Copy project API key"
+                          onClick={() =>
+                            handleCopyUrl(newSubProjectCreds.apiKey!, 'sp-api', 'Project API key')
+                          }
+                        />
+                      </div>
+                    )}
+                    {newSubProjectCreds.webhookSecret && (
+                      <div className="flex items-center justify-between gap-2 rounded-lg bg-background-primary-default px-2.5 py-1.5 text-text-primary">
+                        <span className="font-mono text-caption-2-regular truncate">
+                          Secret: {newSubProjectCreds.webhookSecret}
+                        </span>
+                        <Button
+                          variant="secondary"
+                          size="xs"
+                          iconOnly
+                          leadingIcon={copiedId === 'sp-wh' ? RiCheckLine : RiFileCopyLine}
+                          aria-label="Copy project webhook secret"
+                          onClick={() =>
+                            handleCopyUrl(
+                              newSubProjectCreds.webhookSecret!,
+                              'sp-wh',
+                              'Project webhook secret',
+                            )
+                          }
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {showAddSubProject && (
+                <form
+                  onSubmit={handleSaveSubProject}
+                  className="rounded-xl border border-separator-border bg-background-secondary-default p-3.5 space-y-3"
+                >
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <Input
+                      label="Project Name"
+                      placeholder="e.g. Course Platform / Brand B"
+                      value={subProjectName}
+                      onChange={setSubProjectName}
+                      isRequired
+                    />
+                    {!editingSubProjectId && (
+                      <Input
+                        label="Project Slug (Optional)"
+                        placeholder="brand-b"
+                        value={subProjectSlug}
+                        onChange={(val) =>
+                          setSubProjectSlug(val.toLowerCase().replace(/[^a-z0-9-]/g, '-'))
+                        }
+                        inputClassName="font-mono"
+                      />
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <Select
+                      label="Account Mode"
+                      selectedKey={subProjectAccountMode}
+                      onSelectionChange={(key) => {
+                        if (key != null) setSubProjectAccountMode(String(key) as ProjectAccountMode);
+                      }}
+                    >
+                      <SelectItem id="WEBHOOK_CONNECTED" textValue="Website / Webhook">
+                        Website / Webhook
+                      </SelectItem>
+                      <SelectItem id="STANDALONE" textValue="Standalone / Links">
+                        Standalone / Links
+                      </SelectItem>
+                    </Select>
+
+                    <Select
+                      label="Verification Mode"
+                      selectedKey={subProjectVerificationMode}
+                      onSelectionChange={(key) => {
+                        if (key != null) {
+                          setSubProjectVerificationMode(String(key) as ProjectVerificationMode);
+                        }
+                      }}
+                    >
+                      <SelectItem id="AUTO" textValue="AUTO">AUTO</SelectItem>
+                      <SelectItem id="PURE_MANUAL" textValue="PURE_MANUAL">PURE_MANUAL</SelectItem>
+                    </Select>
+
+                    <Select
+                      label="Number Assignment"
+                      selectedKey={subProjectWalletMode}
+                      onSelectionChange={(key) => {
+                        if (key != null) {
+                          setSubProjectWalletMode(String(key) as ProjectWalletSelectionMode);
+                        }
+                      }}
+                    >
+                      <SelectItem id="COMMON" textValue="Common (All Merchant SIMs)">
+                        Common (All SIMs)
+                      </SelectItem>
+                      <SelectItem id="SPECIFIC" textValue="Specific SIM Numbers">
+                        Specific SIMs
+                      </SelectItem>
+                    </Select>
+                  </div>
+
+                  <Input
+                    label="Webhook URL (Optional)"
+                    type="url"
+                    placeholder="https://project-site.com/api/webhooks/orbit"
+                    value={subProjectWebhookUrl}
+                    onChange={setSubProjectWebhookUrl}
+                  />
+
+                  {subProjectWalletMode === 'SPECIFIC' && (
+                    <div className="rounded-xl border border-border-button-default bg-background-primary-default p-3 space-y-2">
+                      <span className="text-caption-2-medium text-text-secondary block">
+                        Assign specific SIM wallets to this project
+                      </span>
+                      {wallets.length === 0 ? (
+                        <span className="text-caption-2-regular text-text-tertiary block">
+                          Add SIM numbers in SIM Wallet Pool below first.
+                        </span>
+                      ) : (
+                        <div className="flex flex-wrap gap-1.5">
+                          {wallets.map((w) => {
+                            const selected = subProjectWalletIds.includes(w.id);
+                            return (
+                              <button
+                                key={w.id}
+                                type="button"
+                                onClick={() => toggleSubProjectWalletId(w.id)}
+                                className={cx(
+                                  'min-h-8 px-2.5 py-1 rounded-lg border text-caption-2-medium font-mono inline-flex items-center gap-1 cursor-pointer transition-colors',
+                                  selected
+                                    ? 'border-border-focus-ring bg-background-secondary-default text-text-primary'
+                                    : 'border-border-button-default bg-background-primary-default text-text-secondary',
+                                )}
+                              >
+                                {selected && <RiCheckLine className="size-3" aria-hidden />}
+                                <span>
+                                  {w.provider} {w.walletNumber}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {subProjectError && (
+                    <div
+                      role="alert"
+                      className="rounded-lg bg-notification-error-background px-2.5 py-2 text-caption-2-medium text-notification-error-foreground flex items-center gap-1.5"
+                    >
+                      <RiErrorWarningLine className="size-3.5 shrink-0" aria-hidden />
+                      <span>{subProjectError}</span>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-end gap-1.5">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      onClick={() => {
+                        resetSubProjectForm();
+                        setShowAddSubProject(false);
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      type="submit"
+                      variant="primary"
+                      size="xs"
+                      isLoading={
+                        createSubProjectMutation.isPending || updateSubProjectMutation.isPending
+                      }
+                    >
+                      {editingSubProjectId ? 'Save Project' : 'Create Project'}
+                    </Button>
+                  </div>
+                </form>
+              )}
+
+              {subProjects.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-border-button-default p-3.5 text-center text-caption-1-regular text-text-secondary">
+                  No sub-projects yet. Add projects under this merchant to enable project-scoped links, websites, and Common/Specific SIM selection.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {subProjects.map((sp) => {
+                    const isConfirmingDel = confirmDeleteSubProjectId === sp.id;
+                    return (
+                      <div
+                        key={sp.id}
+                        className="rounded-xl border border-border-button-default bg-background-primary-default p-3 space-y-2"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div className="min-w-0 space-y-0.5">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="text-body-medium text-text-primary">{sp.name}</span>
+                              <Chip variant="caption" color={sp.isActive ? 'lime' : 'neutral'}>
+                                {sp.isActive ? 'Active' : 'Paused'}
+                              </Chip>
+                              <Chip
+                                variant="caption"
+                                color={sp.walletSelectionMode === 'SPECIFIC' ? 'purple' : 'soft'}
+                              >
+                                {sp.walletSelectionMode === 'SPECIFIC'
+                                  ? `${sp.walletIds.length} Specific SIMs`
+                                  : 'Common Pool'}
+                              </Chip>
+                            </div>
+                            <span className="font-mono text-caption-2-regular text-text-tertiary block">
+                              {sp.id} · slug: {sp.slug}
+                              {sp.webhookUrl ? ` · ${sp.webhookUrl}` : ''}
+                            </span>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="xs"
+                              leadingIcon={RiEditLine}
+                              onClick={() => openEditSubProject(sp)}
+                            >
+                              Edit
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="xs"
+                              leadingIcon={RiRefreshLine}
+                              isLoading={rotateSubProjectKeysMutation.isPending}
+                              onClick={async () => {
+                                try {
+                                  const res = await rotateSubProjectKeysMutation.mutateAsync({
+                                    subProjectId: sp.id,
+                                    target: 'all',
+                                  });
+                                  setNewSubProjectCreds({
+                                    label: sp.name,
+                                    apiKey: res.apiKey,
+                                    webhookSecret: res.webhookSecret,
+                                  });
+                                  toast.success(`Rotated keys for ${sp.name}`);
+                                } catch (err: unknown) {
+                                  toast.error(
+                                    err instanceof Error ? err.message : 'Key rotation failed',
+                                  );
+                                }
+                              }}
+                            >
+                              Keys
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="xs"
+                              onClick={() =>
+                                updateSubProjectMutation.mutate({
+                                  subProjectId: sp.id,
+                                  updates: { isActive: !sp.isActive },
+                                })
+                              }
+                            >
+                              {sp.isActive ? 'Pause' : 'Activate'}
+                            </Button>
+                            {isConfirmingDel ? (
+                              <>
+                                <Button
+                                  variant="danger"
+                                  size="xs"
+                                  isLoading={deleteSubProjectMutation.isPending}
+                                  onClick={async () => {
+                                    try {
+                                      await deleteSubProjectMutation.mutateAsync(sp.id);
+                                      setConfirmDeleteSubProjectId(null);
+                                      toast.success(`Deleted ${sp.name}`);
+                                    } catch (err: unknown) {
+                                      toast.error(
+                                        err instanceof Error ? err.message : 'Delete failed',
+                                      );
+                                    }
+                                  }}
+                                >
+                                  Confirm
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="xs"
+                                  onClick={() => setConfirmDeleteSubProjectId(null)}
+                                >
+                                  Cancel
+                                </Button>
+                              </>
+                            ) : (
+                              <Button
+                                variant="ghost"
+                                size="xs"
+                                iconOnly
+                                leadingIcon={RiDeleteBinLine}
+                                aria-label={`Delete ${sp.name}`}
+                                className="text-text-destructive"
+                                onClick={() => setConfirmDeleteSubProjectId(sp.id)}
+                              />
+                            )}
                           </div>
                         </div>
                       </div>
@@ -740,6 +1232,27 @@ export function ProjectInspectDrawer({ project, onClose }: ProjectInspectDrawerP
                     />
                   </div>
 
+                  {subProjects.length > 0 && (
+                    <Select
+                      label="Target Project (Optional)"
+                      selectedKey={linkTargetSubProjectId}
+                      onSelectionChange={(key) => {
+                        if (key != null) setLinkTargetSubProjectId(String(key));
+                      }}
+                    >
+                      <SelectItem id="__MERCHANT_DEFAULT__" textValue="Merchant Default (Common Pool)">
+                        Merchant Default (Common Pool)
+                      </SelectItem>
+                      {subProjects
+                        .filter((sp) => sp.isActive)
+                        .map((sp) => (
+                          <SelectItem key={sp.id} id={sp.id} textValue={sp.name}>
+                            {sp.name} ({sp.walletSelectionMode === 'SPECIFIC' ? `${sp.walletIds.length} SIMs` : 'Common'})
+                          </SelectItem>
+                        ))}
+                    </Select>
+                  )}
+
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <Select
                       label="Amount Mode"
@@ -823,6 +1336,11 @@ export function ProjectInspectDrawer({ project, onClose }: ProjectInspectDrawerP
                             <span className="text-body-medium text-text-primary truncate">
                               {lnk.title}
                             </span>
+                            {lnk.projectName && (
+                              <Chip variant="caption" color="purple">
+                                {lnk.projectName}
+                              </Chip>
+                            )}
                             <Chip variant="caption" color={lnk.isActive ? 'lime' : 'neutral'}>
                               {lnk.isActive ? 'Active' : 'Paused'}
                             </Chip>

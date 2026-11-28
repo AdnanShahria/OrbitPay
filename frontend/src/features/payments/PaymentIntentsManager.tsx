@@ -8,6 +8,7 @@ import {
   type PaymentIntentView,
   type VerticalProfile,
 } from './usePaymentIntents';
+import { useMerchantProjects } from '@/features/projects/useProjects';
 import { Card, CardContent } from '@/components/base/card/card';
 import { Button } from '@/components/base/buttons/button';
 import { Input } from '@/components/base/input/input';
@@ -108,6 +109,8 @@ function isResolvable(status: PaymentIntentStatus): boolean {
 }
 
 export function PaymentIntentsManager() {
+  const { data: subProjects = [] } = useMerchantProjects();
+  const [selectedProjectId, setSelectedProjectId] = useState<string>('ALL');
   const [selectedStatus, setSelectedStatus] = useState<PaymentIntentStatus | 'ALL'>('ALL');
   const [selectedVertical, setSelectedVertical] = useState<VerticalProfile | 'ALL'>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
@@ -125,6 +128,7 @@ export function PaymentIntentsManager() {
   const [createdCheckoutUrl, setCreatedCheckoutUrl] = useState<string | null>(null);
 
   const { data, isLoading, isFetching, refetch } = usePaymentIntents({
+    projectId: selectedProjectId,
     status: selectedStatus,
     vertical: selectedVertical,
     search: searchQuery,
@@ -292,8 +296,28 @@ export function PaymentIntentsManager() {
               className="w-full lg:w-80"
             />
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <RiFilter3Line className="size-4 shrink-0 text-foreground-icon-tertiary" aria-hidden />
+              {subProjects.length > 0 && (
+                <Select
+                  aria-label="Filter by project"
+                  size="md"
+                  selectedKey={selectedProjectId}
+                  onSelectionChange={(key) => {
+                    if (key != null) setSelectedProjectId(String(key));
+                  }}
+                  className="min-w-[170px]"
+                >
+                  <SelectItem id="ALL" textValue="All projects">
+                    All projects
+                  </SelectItem>
+                  {subProjects.map((sp) => (
+                    <SelectItem key={sp.id} id={sp.id} textValue={sp.name}>
+                      {sp.name}
+                    </SelectItem>
+                  ))}
+                </Select>
+              )}
               <Select
                 aria-label="Filter by vertical"
                 size="md"
@@ -372,6 +396,11 @@ export function PaymentIntentsManager() {
                           <Chip variant="caption" color={verticalBadge.color} className="shrink-0">
                             {verticalBadge.label}
                           </Chip>
+                          {intent.projectName && (
+                            <Chip variant="caption" color="purple" className="shrink-0">
+                              {intent.projectName}
+                            </Chip>
+                          )}
                         </div>
                         <span className="text-caption-2-regular text-text-tertiary block whitespace-nowrap tabular-nums tnum">
                           {formatDate(intent.createdAt)} · v{intent.stateVersion}

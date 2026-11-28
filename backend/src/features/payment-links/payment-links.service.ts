@@ -1,8 +1,10 @@
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, isNull, or, sql } from 'drizzle-orm';
 import type { AppDb } from '../../db/client';
 import {
   merchants,
+  merchantProjects,
   paymentLinks,
+  type MerchantProjectRecord,
   type MerchantRecord,
   type PaymentLinkRecord,
 } from '../../db/schema';
@@ -21,7 +23,11 @@ import {
   parseActionsList,
   parseDisplayMetadata,
 } from '../payments/verification.engine';
-import { getAllActiveRotatedWallets } from '../wallets/wallets.service';
+import {
+  loadProjectById,
+  resolveEffectiveProjectConfig,
+  resolveProjectRotatedWallets,
+} from '../projects/projects.service';
 import type {
   CreatePaymentLinkInput,
   PayPaymentLinkInput,
@@ -32,7 +38,8 @@ function formatLinkView(
   link: PaymentLinkRecord,
   storeName: string,
   merchantSlug: string,
-  origin = 'https://payment.orbitsaas.cloud'
+  origin = 'https://payment.orbitsaas.cloud',
+  project?: { id: string; name: string; slug: string } | null
 ) {
   let metadata: Record<string, unknown> | null = null;
   try {
@@ -47,6 +54,9 @@ function formatLinkView(
   return {
     id: link.id,
     merchantId: link.merchantId,
+    projectId: link.projectId ?? null,
+    projectName: project?.name ?? null,
+    projectSlug: project?.slug ?? null,
     merchantSlug,
     slug: link.slug,
     sharePath,
@@ -60,7 +70,11 @@ function formatLinkView(
     maxAmount: link.maxAmount,
     currency: link.currency,
     verificationMode: link.verificationMode,
-    display: parseDisplayMetadata(link.displayJson, storeName || 'ORBIT Merchant', link.slug),
+    display: parseDisplayMetadata(
+      link.displayJson,
+      project?.name || storeName || 'ORBIT Merchant',
+      link.slug
+    ),
     actions: parseActionsList(link.actionsJson),
     metadata,
     returnUrl: link.returnUrl,
@@ -83,19 +97,38 @@ function generateDefaultSlug(title: string): string {
 export async function listPaymentLinks(
   db: AppDb,
   merchant: MerchantRecord,
-  origin?: string
+  origin?: string,
+  projectId?: string
 ) {
-  const [merchantSlug, rows] = await Promise.all([
+  const conditions = [eq(paymentLinks.merchantId, merchant.id)];
+  if (projectId) {
+    conditions.push(eq(paymentLinks.projectId, projectId));
+  }
+
+  const [merchantSlug, rows, projects] = await Promise.all([
     resolveAndPersistMerchantSlug(db, merchant),
     db
       .select()
       .from(paymentLinks)
-      .where(eq(paymentLinks.merchantId, merchant.id))
+      .where(and(...conditions))
       .orderBy(desc(paymentLinks.createdAt))
       .limit(100),
+    db
+      .select({ id: merchantProjects.id, name: merchantProjects.name, slug: merchantProjects.slug })
+      .from(merchantProjects)
+      .where(eq(merchantProjects.merchantId, merchant.id)),
   ]);
 
-  return rows.map((row) => formatLinkView(row, merchant.storeName, merchantSlug, origin));
+  const projectMap = new Map(projects.map((p) => [p.id, p]));
+  return rows.map((row) =>
+    formatLinkView(
+      row,
+      merchant.storeName,
+      merchantSlug,
+      origin,
+      row.projectId ? projectMap.get(row.projectId) ?? null : null
+    )
+  );
 }
 
 export async function getPaymentLinkById(
@@ -117,14 +150,22 @@ export async function getPaymentLinkById(
     throw new NotFoundError(`Payment link '${id}' not found`);
   }
 
-  return formatLinkView(rows[0], merchant.storeName, merchantSlug, origin);
+  const project = await loadProjectById(db, merchant.id, rows[0].projectId);
+  return formatLinkView(
+    rows[0],
+    merchant.storeName,
+    merchantSlug,
+    origin,
+    project ? { id: project.id, name: project.name, slug: project.slug } : null
+  );
 }
 
 export async function createPaymentLink(
   db: AppDb,
   merchant: MerchantRecord,
   input: CreatePaymentLinkInput,
-  origin?: string
+  origin?: string,
+  project?: MerchantProjectRecord | null
 ) {
   const slug = input.slug || generateDefaultSlug(input.title);
 
@@ -140,10 +181,12 @@ export async function createPaymentLink(
 
   const now = new Date();
   const id = `lnk_${generateSecureToken(14)}`;
+  const effectiveAppName = project?.name || merchant.storeName;
 
   await db.insert(paymentLinks).values({
     id,
     merchantId: merchant.id,
+    projectId: project?.id ?? null,
     slug,
     title: input.title,
     description: input.description || null,
@@ -157,7 +200,7 @@ export async function createPaymentLink(
     displayJson: input.display
       ? JSON.stringify(input.display)
       : JSON.stringify({
-          appName: merchant.storeName,
+          appName: effectiveAppName,
           category: input.vertical,
           title: input.title,
           subtitle: input.description,
@@ -209,6 +252,7 @@ export async function updatePaymentLink(
   await db
     .update(paymentLinks)
     .set({
+      ...(input.projectId !== undefined && { projectId: input.projectId || null }),
       ...(input.slug !== undefined && { slug: input.slug }),
       ...(input.title !== undefined && { title: input.title }),
       ...(input.description !== undefined && { description: input.description }),
@@ -341,19 +385,31 @@ export async function getPublicPaymentLink(
     slug,
     merchantSlug
   );
+  const project = await loadProjectById(db, merchant.id, link.projectId);
+  if (link.projectId && (!project || !project.isActive)) {
+    throw new NotFoundError('The project associated with this payment link is inactive');
+  }
+
+  const effective = resolveEffectiveProjectConfig(merchant, project);
   const [wallets, deviceStatus, platformConfig] = await Promise.all([
-    getAllActiveRotatedWallets(db, merchant.id, env),
+    resolveProjectRotatedWallets(db, merchant.id, project, undefined, env),
     computeDeviceOnlineStatus(db, env, merchant),
     getPlatformSettings(db),
   ]);
 
   return {
-    ...formatLinkView(link, merchant.storeName, resolvedMerchantSlug, origin),
-    storeName: merchant.storeName,
+    ...formatLinkView(
+      link,
+      merchant.storeName,
+      resolvedMerchantSlug,
+      origin,
+      project ? { id: project.id, name: project.name, slug: project.slug } : null
+    ),
+    storeName: effective.appName,
     merchantSlug: resolvedMerchantSlug,
-    accountMode: merchant.accountMode,
+    accountMode: effective.accountMode,
     hasActiveWallets: wallets.length > 0,
-    effectiveVerificationMode: link.verificationMode ?? merchant.verificationMode,
+    effectiveVerificationMode: link.verificationMode ?? effective.verificationMode,
     receiptPolicy: merchant.receiptPolicy,
     deviceStatus,
     platformConfig,
@@ -379,6 +435,12 @@ export async function payPublicPaymentLink(
     slug,
     merchantSlug
   );
+  const project = await loadProjectById(db, merchant.id, link.projectId);
+  if (link.projectId && (!project || !project.isActive)) {
+    throw new NotFoundError('The project associated with this payment link is inactive');
+  }
+
+  const effective = resolveEffectiveProjectConfig(merchant, project);
 
   let amount: number;
   if (link.amountType === 'FIXED') {
@@ -396,61 +458,85 @@ export async function payPublicPaymentLink(
     amount = input.amount;
   }
 
-  const externalRefId = `lnk_${link.slug}_${generateSecureToken(6).toUpperCase()}`;
-  const display = parseDisplayMetadata(link.displayJson, merchant.storeName, externalRefId);
-  const actions = parseActionsList(link.actionsJson).map((action) => ({
-    ...action,
-    style: action.style ?? ('secondary' as const),
-  }));
-
-  const intentResult = await createPaymentIntent(
-    db,
-    env,
-    merchant,
-    {
-      externalRefId,
-      vertical: link.vertical,
-      amount,
-      currency: link.currency,
-      provider: input.provider,
-      verificationMode: link.verificationMode ?? merchant.verificationMode,
-      returnUrl: link.returnUrl || undefined,
-      cancelUrl: link.cancelUrl || undefined,
-      expiresInMinutes: 15,
-      customer: {
-        name: input.customerName,
-        email: input.customerEmail || undefined,
-        phone: input.customerPhone || undefined,
-      },
-      display: {
-        appName: display.appName || merchant.storeName,
-        appDomain: display.appDomain,
-        referenceLabel: display.referenceLabel || 'Link',
-        title: link.title,
-        subtitle: input.referenceNote || display.subtitle || link.description || undefined,
-        highlights: display.highlights,
-        adminDeepLink: display.adminDeepLink,
-      },
-      actions,
-      metadata: {
-        paymentLinkId: link.id,
-        paymentLinkSlug: link.slug,
-        paymentLinkTitle: link.title,
-        merchantSlug: resolvedMerchantSlug,
-        sharePath: `/${resolvedMerchantSlug}/${link.slug}`,
-        ...(input.referenceNote ? { referenceNote: input.referenceNote } : {}),
-      },
-    },
-    origin
-  );
-
-  await db
+  // Atomically reserve a usage slot before creating the PaymentIntent to prevent maxUses race
+  const claimedUsage = await db
     .update(paymentLinks)
     .set({
       usedCount: sql`${paymentLinks.usedCount} + 1`,
       updatedAt: new Date(),
     })
-    .where(eq(paymentLinks.id, link.id));
+    .where(
+      and(
+        eq(paymentLinks.id, link.id),
+        or(isNull(paymentLinks.maxUses), sql`${paymentLinks.usedCount} < ${paymentLinks.maxUses}`)
+      )
+    )
+    .returning({ id: paymentLinks.id });
 
-  return intentResult;
+  if (!claimedUsage[0]) {
+    throw new BadRequestError('This payment link has reached its maximum number of uses');
+  }
+
+  const externalRefId = `lnk_${link.slug}_${generateSecureToken(6).toUpperCase()}`;
+  const display = parseDisplayMetadata(link.displayJson, effective.appName, externalRefId);
+  const actions = parseActionsList(link.actionsJson).map((action) => ({
+    ...action,
+    style: action.style ?? ('secondary' as const),
+  }));
+
+  try {
+    const intentResult = await createPaymentIntent(
+      db,
+      env,
+      merchant,
+      {
+        projectId: project?.id ?? undefined,
+        externalRefId,
+        vertical: link.vertical,
+        amount,
+        currency: link.currency,
+        provider: input.provider,
+        verificationMode: link.verificationMode ?? effective.verificationMode,
+        returnUrl: link.returnUrl || undefined,
+        cancelUrl: link.cancelUrl || undefined,
+        expiresInMinutes: 15,
+        customer: {
+          name: input.customerName,
+          email: input.customerEmail || undefined,
+          phone: input.customerPhone || undefined,
+        },
+        display: {
+          appName: display.appName || effective.appName,
+          appDomain: display.appDomain,
+          referenceLabel: display.referenceLabel || 'Link',
+          title: link.title,
+          subtitle: input.referenceNote || display.subtitle || link.description || undefined,
+          highlights: display.highlights,
+          adminDeepLink: display.adminDeepLink,
+        },
+        actions,
+        metadata: {
+          paymentLinkId: link.id,
+          paymentLinkSlug: link.slug,
+          paymentLinkTitle: link.title,
+          merchantSlug: resolvedMerchantSlug,
+          ...(project ? { projectId: project.id, projectName: project.name, projectSlug: project.slug } : {}),
+          sharePath: `/${resolvedMerchantSlug}/${link.slug}`,
+          ...(input.referenceNote ? { referenceNote: input.referenceNote } : {}),
+        },
+      },
+      origin,
+      project
+    );
+
+    return intentResult;
+  } catch (err) {
+    // Best-effort rollback of reserved usage count if intent creation fails
+    await db
+      .update(paymentLinks)
+      .set({ usedCount: sql`CASE WHEN ${paymentLinks.usedCount} > 0 THEN ${paymentLinks.usedCount} - 1 ELSE 0 END` })
+      .where(eq(paymentLinks.id, link.id))
+      .catch(() => {});
+    throw err;
+  }
 }

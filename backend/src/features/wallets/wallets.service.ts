@@ -3,6 +3,8 @@ import type { AppDb } from '../../db/client';
 import {
   merchants,
   merchantDevices,
+  merchantProjects,
+  merchantProjectWallets,
   merchantWallets,
   type MerchantRecord,
   type MerchantWalletRecord,
@@ -245,9 +247,14 @@ export async function getActiveRotatedWallet(
   db: AppDb,
   merchantId: string,
   provider: MfsProvider,
-  env?: Env
+  env?: Env,
+  options?: { allowedWalletIds?: string[] }
 ): Promise<EnrichedWalletRecord | null> {
-  const [activeWallets, devices] = await Promise.all([
+  if (options?.allowedWalletIds && options.allowedWalletIds.length === 0) {
+    return null;
+  }
+
+  const [activeWalletsRaw, devices] = await Promise.all([
     db
       .select()
       .from(merchantWallets)
@@ -261,6 +268,11 @@ export async function getActiveRotatedWallet(
       .orderBy(desc(merchantWallets.isPrimary), asc(merchantWallets.priorityOrder), asc(merchantWallets.currentMonthVolume)),
     listMerchantDevicesSummary(db, merchantId),
   ]);
+
+  const allowedSet = options?.allowedWalletIds ? new Set(options.allowedWalletIds) : null;
+  const activeWallets = allowedSet
+    ? activeWalletsRaw.filter((w) => allowedSet.has(w.id))
+    : activeWalletsRaw;
 
   if (activeWallets.length === 0) {
     return null;
@@ -299,7 +311,8 @@ export async function getActiveRotatedWallet(
   if (!winner) return null;
 
   // Auto-promote winner to primary when rotation switches away from an over-limit or offline SIM
-  if (!winner.isPrimary) {
+  // (Only for unscoped merchant-wide rotation so project subsets do not overwrite global primary)
+  if (!winner.isPrimary && !allowedSet) {
     const now = new Date();
     await db
       .update(merchantWallets)
@@ -347,11 +360,15 @@ export async function getActiveRotatedWallet(
 export async function getAllActiveRotatedWallets(
   db: AppDb,
   merchantId: string,
-  env?: Env
+  env?: Env,
+  options?: { allowedWalletIds?: string[] }
 ): Promise<EnrichedWalletRecord[]> {
+  if (options?.allowedWalletIds && options.allowedWalletIds.length === 0) {
+    return [];
+  }
   const results: EnrichedWalletRecord[] = [];
   for (const provider of MFS_PROVIDERS) {
-    const wallet = await getActiveRotatedWallet(db, merchantId, provider, env);
+    const wallet = await getActiveRotatedWallet(db, merchantId, provider, env, options);
     if (wallet) {
       results.push(wallet);
     }
@@ -551,11 +568,13 @@ export async function deleteWallet(db: AppDb, merchantId: string, walletId: stri
     throw new NotFoundError(`Wallet ${walletId} not found`);
   }
 
+  await db.delete(merchantProjectWallets).where(eq(merchantProjectWallets.walletId, walletId)).catch(() => {});
   await db.delete(merchantWallets).where(eq(merchantWallets.id, walletId));
 }
 
 /**
  * Emits a signed `wallet.synced` or `wallet.rotated` webhook to keep connected storefronts in sync.
+ * Also notifies any active WEBHOOK_CONNECTED sub-projects with their effective wallet subset.
  */
 export async function dispatchWalletSyncWebhook(
   db: AppDb,
@@ -564,50 +583,105 @@ export async function dispatchWalletSyncWebhook(
   env?: Env,
   extra?: Record<string, unknown>
 ): Promise<void> {
+  const overview = await getWalletsOverview(db, merchant.id, env);
+  const serializeWallets = (list: EnrichedWalletRecord[]) =>
+    list.map((w) => ({
+      id: w.id,
+      provider: w.provider,
+      walletNumber: w.walletNumber,
+      accountType: w.accountType,
+      label: w.label,
+      isActive: w.isActive,
+      isPrimary: w.isPrimary,
+      isPlaceholder: w.isPlaceholder,
+      safeVolumeLimit: w.safeVolumeLimit,
+      monthlyVolumeLimit: w.monthlyVolumeLimit,
+      currentMonthVolume: w.currentMonthVolume,
+      rotationState: w.rotationState,
+      deviceId: w.deviceId,
+      deviceName: w.deviceName,
+      simSlotIndex: w.simSlotIndex,
+      deviceOnline: w.deviceOnline,
+    }));
+
   if (
-    merchant.accountMode === 'STANDALONE' ||
-    merchant.ignoreStorefrontSync ||
-    !merchant.webhookUrl ||
-    !merchant.webhookUrl.trim().startsWith('https://')
+    merchant.accountMode !== 'STANDALONE' &&
+    !merchant.ignoreStorefrontSync &&
+    merchant.webhookUrl &&
+    merchant.webhookUrl.trim().startsWith('https://')
   ) {
-    return;
+    await dispatchWebhook(
+      db,
+      merchant,
+      event,
+      {
+        merchantId: merchant.id,
+        wallets: serializeWallets(overview.wallets),
+        devices: overview.devices,
+        summary: overview.summary,
+        ...extra,
+      },
+      1,
+      undefined,
+      undefined,
+      env
+    ).catch((err) => {
+      console.warn(`[Wallet Webhook] Failed to dispatch ${event}:`, err);
+    });
   }
-  const overview = await getWalletsOverview(db, merchant.id);
-  await dispatchWebhook(
-    db,
-    merchant,
-    event,
-    {
-      merchantId: merchant.id,
-      wallets: overview.wallets.map((w) => ({
-        id: w.id,
-        provider: w.provider,
-        walletNumber: w.walletNumber,
-        accountType: w.accountType,
-        label: w.label,
-        isActive: w.isActive,
-        isPrimary: w.isPrimary,
-        isPlaceholder: w.isPlaceholder,
-        safeVolumeLimit: w.safeVolumeLimit,
-        monthlyVolumeLimit: w.monthlyVolumeLimit,
-        currentMonthVolume: w.currentMonthVolume,
-        rotationState: w.rotationState,
-        deviceId: w.deviceId,
-        deviceName: w.deviceName,
-        simSlotIndex: w.simSlotIndex,
-        deviceOnline: w.deviceOnline,
-      })),
-      devices: overview.devices,
-      summary: overview.summary,
-      ...extra,
-    },
-    1,
-    undefined,
-    undefined,
-    env
-  ).catch((err) => {
-    console.warn(`[Wallet Webhook] Failed to dispatch ${event}:`, err);
-  });
+
+  // Fan out to any WEBHOOK_CONNECTED sub-projects under this merchant
+  const subProjects = await db
+    .select()
+    .from(merchantProjects)
+    .where(and(eq(merchantProjects.merchantId, merchant.id), eq(merchantProjects.isActive, true)));
+
+  for (const proj of subProjects) {
+    if (
+      proj.accountMode === 'STANDALONE' ||
+      proj.ignoreStorefrontSync ||
+      !proj.webhookUrl ||
+      !proj.webhookUrl.trim().startsWith('https://')
+    ) {
+      continue;
+    }
+
+    let scopedWallets = overview.wallets;
+    if (proj.walletSelectionMode === 'SPECIFIC') {
+      const assigned = await db
+        .select({ walletId: merchantProjectWallets.walletId })
+        .from(merchantProjectWallets)
+        .where(eq(merchantProjectWallets.projectId, proj.id));
+      const allowedSet = new Set(assigned.map((a) => a.walletId));
+      scopedWallets = overview.wallets.filter((w) => allowedSet.has(w.id));
+    }
+
+    await dispatchWebhook(
+      db,
+      merchant,
+      event,
+      {
+        merchantId: merchant.id,
+        projectId: proj.id,
+        projectSlug: proj.slug,
+        wallets: serializeWallets(scopedWallets),
+        devices: overview.devices,
+        summary: overview.summary,
+        ...extra,
+      },
+      1,
+      undefined,
+      proj.webhookUrl,
+      env,
+      undefined,
+      {
+        projectId: proj.id,
+        webhookSecretOverride: proj.webhookSecret,
+      }
+    ).catch((err) => {
+      console.warn(`[Wallet Webhook] Failed to dispatch ${event} for project ${proj.id}:`, err);
+    });
+  }
 }
 
 /**

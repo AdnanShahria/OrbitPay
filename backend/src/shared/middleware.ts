@@ -5,11 +5,13 @@ import { getDb, type AppDb } from '../db/client';
 import { ensureRuntimeSchema } from '../db/bootstrap';
 import {
   merchants,
+  merchantProjects,
   merchantUsers,
   authSessions,
   merchantDevices,
   adminUsers,
   adminSessions,
+  type MerchantProjectRecord,
 } from '../db/schema';
 import { hashDeviceApiKey, hashSha256, timingSafeEqual, verifyJwt } from './crypto';
 import { AppError, ForbiddenError, UnauthorizedError } from './errors';
@@ -185,12 +187,39 @@ export const dbMiddleware: MiddlewareHandler<AppContextEnv> = async (c, next) =>
   await next();
 };
 
+async function attachOptionalProjectContext(
+  c: Context<AppContextEnv>,
+  db: AppDb,
+  merchantId: string,
+  projectIdHeader?: string
+): Promise<void> {
+  if (!projectIdHeader) return;
+  const rows = await db
+    .select()
+    .from(merchantProjects)
+    .where(
+      and(
+        eq(merchantProjects.id, projectIdHeader),
+        eq(merchantProjects.merchantId, merchantId),
+        eq(merchantProjects.isActive, true)
+      )
+    )
+    .limit(1);
+
+  const project = rows[0];
+  if (!project) {
+    throw new ForbiddenError('Requested project not found or inactive for this merchant');
+  }
+  c.set('project', project);
+  c.set('projectId', project.id);
+}
+
 /**
  * Merchant Authentication Middleware
  * Accepts:
  * - Authorization: Bearer <jwt> (3 dot-separated segments, checked against auth_sessions)
- * - X-Merchant-Api-Key (sk_live_... SHA-256 hashed lookup against merchants.apiKeyHash)
- * - X-Merchant-Secret header (or Authorization: Bearer <webhookSecret>)
+ * - X-Merchant-Api-Key (sk_live_... merchant key or sk_proj_... project-scoped key)
+ * - X-Merchant-Secret header (or Authorization: Bearer <webhookSecret>, merchant or project-scoped)
  */
 export const authMerchantMiddleware: MiddlewareHandler<AppContextEnv> = async (c, next) => {
   const db = c.get('db') || getDb(c.env.DB);
@@ -198,17 +227,22 @@ export const authMerchantMiddleware: MiddlewareHandler<AppContextEnv> = async (c
   const secretHeader = c.req.header('x-merchant-secret')?.trim();
   const bearerToken = extractBearerToken(c.req.header('authorization'));
   const merchantIdHeader = c.req.header('x-merchant-id')?.trim();
+  const projectIdHeader = c.req.header('x-project-id')?.trim();
 
   // 1. Bearer JWT when no API key or webhook secret header is given
   if (!apiKeyHeader && !secretHeader && bearerToken && bearerToken.split('.').length === 3) {
     await authenticateJwtSession(c, db, bearerToken, merchantIdHeader);
+    await attachOptionalProjectContext(c, db, c.get('merchantId')!, projectIdHeader);
     await next();
     return;
   }
 
-  // 2. X-Merchant-Api-Key (or Bearer sk_live_...)
+  // 2. X-Merchant-Api-Key (or Bearer sk_live_... / sk_proj_...)
   const candidateApiKey =
-    apiKeyHeader || (bearerToken && bearerToken.startsWith('sk_live_') ? bearerToken : undefined);
+    apiKeyHeader ||
+    (bearerToken && (bearerToken.startsWith('sk_live_') || bearerToken.startsWith('sk_proj_'))
+      ? bearerToken
+      : undefined);
 
   if (candidateApiKey) {
     const apiKeyHash = await hashSha256(candidateApiKey);
@@ -218,18 +252,49 @@ export const authMerchantMiddleware: MiddlewareHandler<AppContextEnv> = async (c
 
     const results = await db.select().from(merchants).where(apiConditions).limit(1);
     const merchant = results[0];
-    if (!merchant) {
-      throw new UnauthorizedError('Invalid merchant API key or merchant is inactive');
+    if (merchant) {
+      c.set('merchant', merchant);
+      c.set('merchantId', merchant.id);
+      c.set('authType', 'api_key');
+      await attachOptionalProjectContext(c, db, merchant.id, projectIdHeader);
+      await next();
+      return;
     }
 
-    c.set('merchant', merchant);
-    c.set('merchantId', merchant.id);
-    c.set('authType', 'api_key');
-    await next();
-    return;
+    // Check project-scoped API key (sk_proj_...)
+    const projectRows = await db
+      .select()
+      .from(merchantProjects)
+      .where(and(eq(merchantProjects.apiKeyHash, apiKeyHash), eq(merchantProjects.isActive, true)))
+      .limit(1);
+    const project: MerchantProjectRecord | undefined = projectRows[0];
+    if (project) {
+      if (projectIdHeader && projectIdHeader !== project.id) {
+        throw new ForbiddenError('Project API key cannot access another project');
+      }
+      const parentConditions = merchantIdHeader
+        ? and(eq(merchants.id, project.merchantId), eq(merchants.id, merchantIdHeader), eq(merchants.isActive, true))
+        : and(eq(merchants.id, project.merchantId), eq(merchants.isActive, true));
+      const parentRows = await db.select().from(merchants).where(parentConditions).limit(1);
+      const parentMerchant = parentRows[0];
+      if (!parentMerchant) {
+        throw new UnauthorizedError('Parent merchant for project API key is inactive or mismatched');
+      }
+
+      c.set('merchant', parentMerchant);
+      c.set('merchantId', parentMerchant.id);
+      c.set('project', project);
+      c.set('projectId', project.id);
+      c.set('projectAuthScoped', true);
+      c.set('authType', 'api_key');
+      await next();
+      return;
+    }
+
+    throw new UnauthorizedError('Invalid merchant API key or merchant is inactive');
   }
 
-  // 3. Fallback to X-Merchant-Secret / Bearer webhookSecret
+  // 3. Fallback to X-Merchant-Secret / Bearer webhookSecret (merchant or project-scoped)
   const secret = secretHeader || bearerToken;
   if (!secret) {
     throw new UnauthorizedError(
@@ -244,14 +309,49 @@ export const authMerchantMiddleware: MiddlewareHandler<AppContextEnv> = async (c
   const results = await db.select().from(merchants).where(conditions).limit(1);
   const merchant = results[0];
 
-  if (!merchant) {
-    throw new UnauthorizedError('Invalid merchant credentials or merchant is inactive');
+  if (merchant) {
+    c.set('merchant', merchant);
+    c.set('merchantId', merchant.id);
+    c.set('authType', 'webhook_secret');
+    await attachOptionalProjectContext(c, db, merchant.id, projectIdHeader);
+    await next();
+    return;
   }
 
-  c.set('merchant', merchant);
-  c.set('merchantId', merchant.id);
-  c.set('authType', 'webhook_secret');
-  await next();
+  const projectBySecretRows = await db
+    .select()
+    .from(merchantProjects)
+    .where(and(eq(merchantProjects.webhookSecret, secret), eq(merchantProjects.isActive, true)))
+    .limit(1);
+  const projectBySecret = projectBySecretRows[0];
+  if (projectBySecret) {
+    if (projectIdHeader && projectIdHeader !== projectBySecret.id) {
+      throw new ForbiddenError('Project webhook secret cannot access another project');
+    }
+    const parentConditions = merchantIdHeader
+      ? and(
+          eq(merchants.id, projectBySecret.merchantId),
+          eq(merchants.id, merchantIdHeader),
+          eq(merchants.isActive, true)
+        )
+      : and(eq(merchants.id, projectBySecret.merchantId), eq(merchants.isActive, true));
+    const parentRows = await db.select().from(merchants).where(parentConditions).limit(1);
+    const parentMerchant = parentRows[0];
+    if (!parentMerchant) {
+      throw new UnauthorizedError('Parent merchant for project secret is inactive or mismatched');
+    }
+
+    c.set('merchant', parentMerchant);
+    c.set('merchantId', parentMerchant.id);
+    c.set('project', projectBySecret);
+    c.set('projectId', projectBySecret.id);
+    c.set('projectAuthScoped', true);
+    c.set('authType', 'webhook_secret');
+    await next();
+    return;
+  }
+
+  throw new UnauthorizedError('Invalid merchant credentials or merchant is inactive');
 };
 
 /**
@@ -396,6 +496,19 @@ export const requireOwnerRoleMiddleware: MiddlewareHandler<AppContextEnv> = asyn
   }
   if (authType === 'device') {
     throw new ForbiddenError('Device credentials cannot perform owner-level configuration actions');
+  }
+  await next();
+};
+
+/**
+ * Blocks sub-project-scoped credentials (`sk_proj_...` or project webhookSecret)
+ * from mutating hub-wide merchant settings, SIM pools, keys, or sibling projects.
+ */
+export const requireMerchantWideScopeMiddleware: MiddlewareHandler<AppContextEnv> = async (c, next) => {
+  if (c.get('projectAuthScoped')) {
+    throw new ForbiddenError(
+      'Sub-project credentials cannot access hub-wide merchant configuration or sibling projects'
+    );
   }
   await next();
 };

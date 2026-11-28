@@ -17,6 +17,9 @@ export type PaymentLinkAmountType = 'FIXED' | 'OPEN';
 export interface PaymentLinkView {
   id: string;
   merchantId: string;
+  projectId?: string | null;
+  projectName?: string | null;
+  projectSlug?: string | null;
   merchantSlug: string;
   slug: string;
   sharePath: string;
@@ -58,6 +61,7 @@ export interface PublicPaymentLinkView extends PaymentLinkView {
 export type PublicPaymentLinkData = PublicPaymentLinkView;
 
 export interface CreatePaymentLinkDTO {
+  projectId?: string | null;
   slug?: string;
   title: string;
   description?: string;
@@ -71,11 +75,12 @@ export interface CreatePaymentLinkDTO {
   maxUses?: number;
 }
 
-export function usePaymentLinks() {
+export function usePaymentLinks(projectId?: string) {
   return useQuery<PaymentLinkView[]>({
-    queryKey: ['payment-links'],
+    queryKey: ['payment-links', projectId || 'ALL'],
     queryFn: async () => {
-      const res = await authFetch('/api/v1/payment-links');
+      const qs = projectId && projectId !== 'ALL' ? `?projectId=${encodeURIComponent(projectId)}` : '';
+      const res = await authFetch(`/api/v1/payment-links${qs}`);
       const data = await unwrapApiResponse<PaymentLinkView[]>(
         res,
         'Failed to fetch payment links',

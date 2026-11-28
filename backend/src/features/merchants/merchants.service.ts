@@ -368,9 +368,13 @@ export async function sendMerchantTestWebhook(
 export async function listMerchantWebhooks(
   db: AppDb,
   merchantId: string,
-  query: ListMerchantWebhooksQuery
+  query: ListMerchantWebhooksQuery,
+  scopedProjectId?: string
 ) {
   const conditions = [eq(webhookDeliveries.merchantId, merchantId)];
+  if (scopedProjectId) {
+    conditions.push(eq(webhookDeliveries.projectId, scopedProjectId));
+  }
   if (query.status !== 'ALL') {
     conditions.push(eq(webhookDeliveries.status, query.status));
   }

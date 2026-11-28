@@ -45,9 +45,23 @@ import {
   loginAdminWithPassword,
   logoutAdminSession,
   logoutAllAdminSessions,
+  recordAdminAudit,
   revokeSpecificAdminSession,
   updateAdminUser,
 } from './admin-auth.service';
+import {
+  adminUpdateSubProjectSchema,
+  createSubProjectSchema,
+  rotateProjectKeysSchema,
+} from '../projects/projects.schema';
+import {
+  createMerchantProject,
+  deleteMerchantProject,
+  listMerchantProjects,
+  resolveAuthorizedProject,
+  rotateMerchantProjectKeys,
+  updateMerchantProject,
+} from '../projects/projects.service';
 import {
   getAdminOverview,
   getAdminProjects,
@@ -354,7 +368,7 @@ router.patch('/projects/:id', requireAdminAuth, async (c) => {
   const body = await c.req.json();
   const input = updateProjectSchema.parse(body);
 
-  const updated = await updateAdminProject(db, id, input);
+  const updated = await updateAdminProject(db, id, input, c.env);
   return c.json({ success: true, data: updated });
 });
 
@@ -591,17 +605,145 @@ router.post('/projects/:id/payment-links', requireAdminAuth, async (c) => {
   const body = await c.req.json();
   const input = createPaymentLinkSchema.parse(body);
   const origin = resolvePublicOrigin(c.req.url, c.env.PRODUCTION_DOMAIN);
+  const subProject = input.projectId
+    ? await resolveAuthorizedProject(db, merchant.id, { requestedProjectId: input.projectId })
+    : null;
 
-  const created = await createPaymentLink(db, merchant, input, origin);
+  const created = await createPaymentLink(db, merchant, input, origin, subProject);
   emitMerchantRealtimeEvent(
     c.env,
     'PAYMENT_LINK_UPDATED',
-    { merchantId: merchant.id, action: 'created' },
+    { merchantId: merchant.id, projectId: subProject?.id ?? null, action: 'created' },
     merchant.id,
     c
   );
   return c.json({ success: true, data: created }, 201);
 });
+
+/**
+ * GET /api/v1/admin/projects/:id/sub-projects
+ * Lists all sub-projects provisioned under a merchant account.
+ */
+router.get('/projects/:id/sub-projects', requireAdminAuth, async (c) => {
+  const db = c.get('db');
+  const merchantId = c.req.param('id');
+  await requireProjectMerchant(db, merchantId);
+  const items = await listMerchantProjects(db, merchantId);
+  return c.json({ success: true, data: items });
+});
+
+/**
+ * POST /api/v1/admin/projects/:id/sub-projects
+ * Provisions a new sub-project under a merchant with Common or Specific SIM wallet assignment.
+ */
+router.post('/projects/:id/sub-projects', requireAdminAuth, async (c) => {
+  const db = c.get('db');
+  const merchantId = c.req.param('id');
+  await requireProjectMerchant(db, merchantId);
+  const body = await c.req.json();
+  const input = createSubProjectSchema.parse(body);
+  const created = await createMerchantProject(db, merchantId, input, c.env);
+
+  await recordAdminAudit(db, {
+    actor: extractAdminActor(c),
+    action: 'SUB_PROJECT_CREATED',
+    targetType: 'merchant_project',
+    targetId: created.project.id,
+    metadata: {
+      merchantId,
+      name: created.project.name,
+      walletSelectionMode: created.project.walletSelectionMode,
+    },
+  });
+
+  emitMerchantRealtimeEvent(
+    c.env,
+    'WALLET_SYNCED',
+    { merchantId, projectId: created.project.id, action: 'project_created' },
+    merchantId,
+    c
+  );
+  return c.json({ success: true, data: created }, 201);
+});
+
+/**
+ * PATCH /api/v1/admin/projects/:id/sub-projects/:subProjectId
+ * Updates a sub-project's settings, active status, or assigned SIM wallets.
+ */
+router.patch('/projects/:id/sub-projects/:subProjectId', requireAdminAuth, async (c) => {
+  const db = c.get('db');
+  const merchantId = c.req.param('id');
+  const subProjectId = c.req.param('subProjectId');
+  await requireProjectMerchant(db, merchantId);
+  const body = await c.req.json();
+  const input = adminUpdateSubProjectSchema.parse(body);
+  const updated = await updateMerchantProject(db, merchantId, subProjectId, input, c.env);
+
+  await recordAdminAudit(db, {
+    actor: extractAdminActor(c),
+    action: 'SUB_PROJECT_UPDATED',
+    targetType: 'merchant_project',
+    targetId: subProjectId,
+    metadata: {
+      merchantId,
+      walletSelectionMode: updated.walletSelectionMode,
+      isActive: updated.isActive,
+    },
+  });
+
+  return c.json({ success: true, data: updated });
+});
+
+/**
+ * POST /api/v1/admin/projects/:id/sub-projects/:subProjectId/rotate-keys
+ * Rotates a sub-project's API key and/or webhook secret.
+ */
+router.post('/projects/:id/sub-projects/:subProjectId/rotate-keys', requireAdminAuth, async (c) => {
+  const db = c.get('db');
+  const merchantId = c.req.param('id');
+  const subProjectId = c.req.param('subProjectId');
+  await requireProjectMerchant(db, merchantId);
+  const body = await c.req.json().catch(() => ({}));
+  const input = rotateProjectKeysSchema.parse(body);
+  const result = await rotateMerchantProjectKeys(db, merchantId, subProjectId, input.target);
+
+  await recordAdminAudit(db, {
+    actor: extractAdminActor(c),
+    action: 'SUB_PROJECT_KEYS_ROTATED',
+    targetType: 'merchant_project',
+    targetId: subProjectId,
+    metadata: { merchantId, target: input.target },
+  });
+
+  return c.json({ success: true, data: result });
+});
+
+/**
+ * DELETE /api/v1/admin/projects/:id/sub-projects/:subProjectId
+ * Removes a sub-project under a merchant (SUPER_ADMIN only).
+ */
+router.delete(
+  '/projects/:id/sub-projects/:subProjectId',
+  requireAdminAuth,
+  requireSuperAdminMiddleware,
+  async (c) => {
+    const db = c.get('db');
+    const merchantId = c.req.param('id');
+    const subProjectId = c.req.param('subProjectId');
+    await requireProjectMerchant(db, merchantId);
+    const deleted = await deleteMerchantProject(db, merchantId, subProjectId);
+
+    await recordAdminAudit(db, {
+      actor: extractAdminActor(c),
+      action: 'SUB_PROJECT_DELETED',
+      targetType: 'merchant_project',
+      targetId: subProjectId,
+      metadata: { merchantId, name: deleted.name },
+    });
+
+    return c.json({ success: true, data: deleted });
+  }
+);
 
 /**
  * POST /api/v1/admin/projects/:id/payments/:paymentIntentId/resolve

@@ -2,6 +2,7 @@ import { eq, and, desc, sql, like, or, inArray, type SQL } from 'drizzle-orm';
 import type { AppDb } from '../../db/client';
 import {
   merchantOrders,
+  merchantProjects,
   paymentIntents,
   type MerchantRecord,
   type MerchantOrderRecord,
@@ -9,11 +10,12 @@ import {
   type OrderPaymentStatus,
 } from '../../db/schema';
 import { generateSecureToken } from '../../shared/crypto';
-import { NotFoundError } from '../../shared/errors';
-import { parseAllowedOrigins, validateSafeWebhookUrl } from '../../shared/ssrf';
+import { ForbiddenError, NotFoundError } from '../../shared/errors';
+import { validateSafeWebhookUrl } from '../../shared/ssrf';
 import type { Env } from '../../shared/types';
 import { dispatchWebhook, sendPushToMerchantDevices } from '../webhooks/webhook.dispatcher';
 import { emitMerchantRealtimeEvent } from '../realtime/realtime.service';
+import { resolveProjectDispatchContext } from '../projects/projects.service';
 import type { NotifyOrderInput, ListOrdersQuery, OrderActionInput, OrderAction } from './orders.schema';
 
 const ACTION_CONFIG: Record<
@@ -41,11 +43,17 @@ export async function notifyOrder(
   const now = new Date();
   const normalizedTrxId = input.trxId ? input.trxId.trim().toUpperCase() : null;
   const callbackUrl = input.storeCallbackUrl ? input.storeCallbackUrl.trim() : null;
+  const dispatchCtx = await resolveProjectDispatchContext(
+    db,
+    merchant,
+    input.projectId,
+    callbackUrl
+  );
   if (callbackUrl) {
     validateSafeWebhookUrl(
       callbackUrl,
       env,
-      parseAllowedOrigins(merchant.allowedCallbackOriginsJson)
+      dispatchCtx.effective.allowedCallbackOrigins
     );
   }
   const customerEmail = input.customerEmail ? input.customerEmail.trim() : null;
@@ -71,6 +79,15 @@ export async function notifyOrder(
   let created = false;
 
   if (existing) {
+    if (
+      input.projectId !== undefined &&
+      (existing.projectId ?? null) !== (input.projectId || null)
+    ) {
+      throw new ForbiddenError(
+        `Order '${input.externalOrderId}' is already bound to a different sub-project`
+      );
+    }
+
     await db
       .update(merchantOrders)
       .set({
@@ -105,6 +122,7 @@ export async function notifyOrder(
     await db.insert(merchantOrders).values({
       id: orderId,
       merchantId: merchant.id,
+      projectId: input.projectId ?? null,
       externalOrderId: input.externalOrderId,
       customerName: input.customerName || null,
       customerPhone: input.customerPhone || null,
@@ -173,11 +191,15 @@ export async function listOrders(
   merchantId: string,
   query: ListOrdersQuery
 ): Promise<{
-  items: MerchantOrderRecord[];
+  items: Array<MerchantOrderRecord & { projectName?: string | null }>;
   total: number;
   pendingConfirmationCount: number;
 }> {
   const conditions: SQL[] = [eq(merchantOrders.merchantId, merchantId)];
+
+  if (query.projectId) {
+    conditions.push(eq(merchantOrders.projectId, query.projectId));
+  }
 
   if (query.orderStatus && query.orderStatus !== 'ALL') {
     conditions.push(eq(merchantOrders.orderStatus, query.orderStatus as OrderStatus));
@@ -201,7 +223,7 @@ export async function listOrders(
 
   const whereClause = and(...conditions);
 
-  const [countRes, pendingRes, items] = await Promise.all([
+  const [countRes, pendingRes, items, projects] = await Promise.all([
     db
       .select({ count: sql<number>`COUNT(*)` })
       .from(merchantOrders)
@@ -212,6 +234,7 @@ export async function listOrders(
       .where(
         and(
           eq(merchantOrders.merchantId, merchantId),
+          ...(query.projectId ? [eq(merchantOrders.projectId, query.projectId)] : []),
           inArray(merchantOrders.orderStatus, ['NEW', 'AWAITING_CONFIRMATION'])
         )
       ),
@@ -222,10 +245,19 @@ export async function listOrders(
       .orderBy(desc(merchantOrders.createdAt))
       .limit(query.limit)
       .offset(query.offset),
+    db
+      .select({ id: merchantProjects.id, name: merchantProjects.name })
+      .from(merchantProjects)
+      .where(eq(merchantProjects.merchantId, merchantId)),
   ]);
 
+  const projectNameMap = new Map(projects.map((p) => [p.id, p.name]));
+
   return {
-    items,
+    items: items.map((o) => ({
+      ...o,
+      projectName: o.projectId ? projectNameMap.get(o.projectId) ?? null : null,
+    })),
     total: Number(countRes[0]?.count || 0),
     pendingConfirmationCount: Number(pendingRes[0]?.count || 0),
   };
@@ -328,8 +360,16 @@ export async function performOrderAction(
     .limit(1);
   const updated = updatedRes[0];
 
+  const dispatchCtx = await resolveProjectDispatchContext(
+    db,
+    merchant,
+    updated.projectId,
+    updated.storeCallbackUrl
+  );
+
   const webhookData: Record<string, unknown> = {
     merchantId: merchant.id,
+    projectId: updated.projectId,
     externalOrderId: updated.externalOrderId,
     orderId: updated.externalOrderId,
     action: input.action,
@@ -352,8 +392,10 @@ export async function performOrderAction(
     webhookData,
     1,
     undefined,
-    updated.storeCallbackUrl,
-    env
+    dispatchCtx.targetUrlOverride,
+    env,
+    undefined,
+    dispatchCtx.webhookOptions
   );
 
   emitMerchantRealtimeEvent(

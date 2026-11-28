@@ -9,7 +9,7 @@ import {
   type MerchantRecord,
   type SmsLedgerRecord,
 } from '../../db/schema';
-import { BadRequestError, ConflictError, NotFoundError } from '../../shared/errors';
+import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from '../../shared/errors';
 import { safeWaitUntil } from '../../shared/middleware';
 import type { AppContextEnv, Env } from '../../shared/types';
 import { syncVerifiedOrderAndSession } from '../payments/verification.engine';
@@ -19,6 +19,7 @@ import {
   notifyPaymentVerifiedInvoiceEmail,
   resolveCustomerEmailForOrder,
 } from '../notifications/payment-email.service';
+import { resolveProjectDispatchContext } from '../projects/projects.service';
 import type { ListTransactionsQuery, ManualMatchInput } from './transactions.schema';
 
 export interface ListTransactionsResult {
@@ -141,6 +142,12 @@ export async function manualMatchTransaction(
     .limit(1);
   const intent = intentRows[0];
 
+  if (ctx?.get('projectAuthScoped')) {
+    if (!intent || intent.projectId !== ctx.get('projectId')) {
+      throw new ForbiddenError('Project credentials cannot manually match orders outside this project');
+    }
+  }
+
   const claimed = await db
     .update(smsLedger)
     .set({
@@ -157,21 +164,36 @@ export async function manualMatchTransaction(
     throw new ConflictError('Transaction was already claimed concurrently');
   }
 
-  await db
-    .insert(consumedTrxIds)
-    .values({
+  const resolutionSource =
+    ctx?.get('authType') === 'device' ? 'ORBIT_ANDROID' : 'ORBIT_DASHBOARD';
+
+  try {
+    await db.insert(consumedTrxIds).values({
       merchantId: merchant.id,
       trxId: row.trxId,
       provider: row.provider,
       paymentIntentId: intent?.id ?? null,
       externalRefId: payload.externalOrderId,
-      resolutionSource: ctx?.get('authType') === 'device' ? 'ORBIT_ANDROID' : 'ORBIT_DASHBOARD',
+      resolutionSource,
       consumedAt: now,
-    })
-    .onConflictDoNothing();
+    });
+  } catch {
+    await db
+      .update(smsLedger)
+      .set({
+        status: 'UNCLAIMED',
+        matchType: null,
+        externalOrderId: null,
+        paymentIntentId: null,
+        verifiedAt: null,
+      })
+      .where(eq(smsLedger.id, row.id))
+      .catch(() => {});
+    throw new ConflictError(`Transaction ID '${row.trxId}' was concurrently consumed`);
+  }
 
   if (intent) {
-    await db
+    const updatedIntents = await db
       .update(paymentIntents)
       .set({
         status: 'VERIFIED',
@@ -181,13 +203,39 @@ export async function manualMatchTransaction(
         matchType: 'MANUAL_VERIFIED',
         smsLedgerId: row.id,
         smsReconciliationState: 'RECONCILED',
-        resolutionSource: ctx?.get('authType') === 'device' ? 'ORBIT_ANDROID' : 'ORBIT_DASHBOARD',
+        resolutionSource,
         stateVersion: intent.stateVersion + 1,
         verifiedAt: now,
         resolvedAt: now,
         updatedAt: now,
       })
-      .where(eq(paymentIntents.id, intent.id));
+      .where(
+        and(
+          eq(paymentIntents.id, intent.id),
+          eq(paymentIntents.stateVersion, intent.stateVersion),
+          inArray(paymentIntents.status, ['OPEN', 'WAITING_FOR_SMS', 'MANUAL_REVIEW_REQUIRED'])
+        )
+      )
+      .returning();
+
+    if (!updatedIntents[0]) {
+      await db
+        .delete(consumedTrxIds)
+        .where(and(eq(consumedTrxIds.merchantId, merchant.id), eq(consumedTrxIds.trxId, row.trxId)))
+        .catch(() => {});
+      await db
+        .update(smsLedger)
+        .set({
+          status: 'UNCLAIMED',
+          matchType: null,
+          externalOrderId: null,
+          paymentIntentId: null,
+          verifiedAt: null,
+        })
+        .where(eq(smsLedger.id, row.id))
+        .catch(() => {});
+      throw new ConflictError('Payment intent state changed concurrently during manual match');
+    }
   }
 
   await db
@@ -203,6 +251,7 @@ export async function manualMatchTransaction(
 
   await syncVerifiedOrderAndSession(db, {
     merchantId: merchant.id,
+    projectId: intent?.projectId ?? null,
     externalOrderId: payload.externalOrderId,
     paymentIntentId: intent?.id ?? null,
     baseAmount: intent?.baseAmount ?? row.amount,
@@ -214,7 +263,13 @@ export async function manualMatchTransaction(
     customerPhone: row.senderNumber,
   });
 
-  await incrementWalletVolume(db, merchant.id, row.provider, row.amount);
+  await incrementWalletVolume(
+    db,
+    merchant.id,
+    row.provider,
+    row.amount,
+    row.receiverNumber ?? undefined
+  );
 
   const resolvedCustomer = await resolveCustomerEmailForOrder(db, {
     merchantId: merchant.id,
@@ -224,12 +279,17 @@ export async function manualMatchTransaction(
     customerJson: intent?.customerJson,
   });
 
-  const resolutionSource =
-    ctx?.get('authType') === 'device' ? 'ORBIT_ANDROID' : 'ORBIT_DASHBOARD';
+  const dispatchCtx = await resolveProjectDispatchContext(
+    db,
+    merchant,
+    intent?.projectId,
+    intent?.callbackUrl
+  );
 
   const webhookData = {
     paymentIntentId: intent?.id ?? null,
     merchantId: merchant.id,
+    projectId: intent?.projectId ?? null,
     externalRefId: payload.externalOrderId,
     externalOrderId: payload.externalOrderId,
     provider: row.provider,
@@ -253,8 +313,10 @@ export async function manualMatchTransaction(
         webhookData,
         1,
         undefined,
-        intent?.callbackUrl || undefined,
-        env
+        dispatchCtx.targetUrlOverride,
+        env,
+        undefined,
+        dispatchCtx.webhookOptions
       ),
       sendPushToMerchantDevices(
         db,
@@ -272,7 +334,7 @@ export async function manualMatchTransaction(
         ? [
             notifyPaymentVerifiedInvoiceEmail(db, env, {
               merchantId: merchant.id,
-              storeName: merchant.storeName,
+              storeName: dispatchCtx.effective.appName,
               externalRefId: payload.externalOrderId,
               paymentIntentId: intent?.id ?? null,
               customerEmail: resolvedCustomer.email,
@@ -302,13 +364,14 @@ export async function manualMatchTransaction(
 /**
  * Lists waiting or escalated verification queue items for the authenticated merchant.
  */
-export async function listPendingQueue(db: AppDb, merchantId: string) {
+export async function listPendingQueue(db: AppDb, merchantId: string, projectId?: string) {
   return db
     .select()
     .from(verificationQueue)
     .where(
       and(
         eq(verificationQueue.merchantId, merchantId),
+        ...(projectId ? [eq(verificationQueue.projectId, projectId)] : []),
         inArray(verificationQueue.status, ['WAITING_FOR_SMS', 'MANUAL_REVIEW_REQUIRED'])
       )
     )

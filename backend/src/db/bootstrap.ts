@@ -297,6 +297,43 @@ const CORE_TABLE_STATEMENTS: readonly string[] = [
     \`value_json\` text NOT NULL,
     \`updated_at\` integer NOT NULL
   )`,
+
+  // 0010_merchant_projects
+  `CREATE TABLE IF NOT EXISTS \`merchant_projects\` (
+    \`id\` text PRIMARY KEY NOT NULL,
+    \`merchant_id\` text NOT NULL,
+    \`name\` text NOT NULL,
+    \`slug\` text NOT NULL,
+    \`description\` text,
+    \`account_mode\` text DEFAULT 'WEBHOOK_CONNECTED' NOT NULL,
+    \`verification_mode\` text DEFAULT 'AUTO' NOT NULL,
+    \`wallet_selection_mode\` text DEFAULT 'COMMON' NOT NULL,
+    \`ignore_storefront_sync\` integer DEFAULT 0 NOT NULL,
+    \`webhook_url\` text DEFAULT '' NOT NULL,
+    \`webhook_secret\` text NOT NULL,
+    \`api_key_hash\` text,
+    \`api_key_prefix\` text,
+    \`publishable_key\` text,
+    \`allowed_callback_origins_json\` text DEFAULT '[]' NOT NULL,
+    \`telegram_bot_token\` text,
+    \`telegram_chat_id\` text,
+    \`is_default\` integer DEFAULT 0 NOT NULL,
+    \`is_active\` integer DEFAULT 1 NOT NULL,
+    \`created_at\` integer NOT NULL,
+    \`updated_at\` integer NOT NULL,
+    FOREIGN KEY (\`merchant_id\`) REFERENCES \`merchants\`(\`id\`) ON UPDATE no action ON DELETE no action
+  )`,
+  `CREATE INDEX IF NOT EXISTS \`idx_merchant_projects_merchant\` ON \`merchant_projects\` (\`merchant_id\`,\`is_active\`)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS \`uq_merchant_projects_slug\` ON \`merchant_projects\` (\`merchant_id\`,\`slug\`)`,
+  `CREATE INDEX IF NOT EXISTS \`idx_merchant_projects_api_key\` ON \`merchant_projects\` (\`api_key_hash\`)`,
+  `CREATE TABLE IF NOT EXISTS \`merchant_project_wallets\` (
+    \`project_id\` text NOT NULL,
+    \`wallet_id\` text NOT NULL,
+    \`created_at\` integer NOT NULL,
+    PRIMARY KEY(\`project_id\`, \`wallet_id\`),
+    FOREIGN KEY (\`project_id\`) REFERENCES \`merchant_projects\`(\`id\`) ON UPDATE no action ON DELETE no action,
+    FOREIGN KEY (\`wallet_id\`) REFERENCES \`merchant_wallets\`(\`id\`) ON UPDATE no action ON DELETE no action
+  )`,
 ];
 
 const ALTER_COLUMN_STATEMENTS: readonly string[] = [
@@ -356,6 +393,14 @@ const ALTER_COLUMN_STATEMENTS: readonly string[] = [
   `ALTER TABLE \`merchants\` ADD COLUMN \`account_mode\` text DEFAULT 'WEBHOOK_CONNECTED' NOT NULL`,
   `ALTER TABLE \`merchants\` ADD COLUMN \`ignore_storefront_sync\` integer DEFAULT 0 NOT NULL`,
   `ALTER TABLE \`merchant_wallets\` ADD COLUMN \`source\` text DEFAULT 'PERSONAL' NOT NULL`,
+
+  // 0010_merchant_projects
+  `ALTER TABLE \`payment_links\` ADD COLUMN \`project_id\` text`,
+  `ALTER TABLE \`payment_intents\` ADD COLUMN \`project_id\` text`,
+  `ALTER TABLE \`checkout_sessions\` ADD COLUMN \`project_id\` text`,
+  `ALTER TABLE \`verification_queue\` ADD COLUMN \`project_id\` text`,
+  `ALTER TABLE \`merchant_orders\` ADD COLUMN \`project_id\` text`,
+  `ALTER TABLE \`webhook_deliveries\` ADD COLUMN \`project_id\` text`,
 ];
 
 const POST_ALTER_INDEX_STATEMENTS: readonly string[] = [
@@ -365,10 +410,15 @@ const POST_ALTER_INDEX_STATEMENTS: readonly string[] = [
   `DROP INDEX IF EXISTS \`uq_active_unique_amount\``,
   `CREATE UNIQUE INDEX IF NOT EXISTS \`uq_payment_links_merchant_slug\` ON \`payment_links\` (\`merchant_id\`,\`slug\`)`,
   `CREATE INDEX IF NOT EXISTS \`idx_queue_intent\` ON \`verification_queue\` (\`payment_intent_id\`)`,
+  `CREATE INDEX IF NOT EXISTS \`idx_payment_links_project\` ON \`payment_links\` (\`merchant_id\`,\`project_id\`)`,
+  `CREATE INDEX IF NOT EXISTS \`idx_payment_intents_project\` ON \`payment_intents\` (\`merchant_id\`,\`project_id\`,\`created_at\`)`,
+  `CREATE INDEX IF NOT EXISTS \`idx_merchant_orders_project\` ON \`merchant_orders\` (\`merchant_id\`,\`project_id\`,\`created_at\`)`,
 ];
 
 const CORE_HEALTH_TABLES = [
   'merchants',
+  'merchant_projects',
+  'merchant_project_wallets',
   'otp_codes',
   'app_releases',
   'payment_intents',

@@ -2,11 +2,11 @@ import { Hono } from 'hono';
 import { and, eq } from 'drizzle-orm';
 import { merchants } from '../../db/schema';
 import { base64ToUint8 } from '../../router/image';
-import { BadRequestError, NotFoundError } from '../../shared/errors';
+import { BadRequestError, ForbiddenError, NotFoundError } from '../../shared/errors';
 import { authMerchantOrDeviceMiddleware } from '../../shared/middleware';
 import type { AppContextEnv } from '../../shared/types';
 import { checkoutResolveAliasSchema } from '../payments/payments.schema';
-import { resolvePaymentIntent, resolvePublicOrigin } from '../payments/payments.service';
+import { getPaymentIntentById, resolvePaymentIntent, resolvePublicOrigin } from '../payments/payments.service';
 import { emitMerchantRealtimeEvent } from '../realtime/realtime.service';
 import { createSessionSchema, verifyCheckoutSchema } from './checkout.schema';
 import {
@@ -35,7 +35,8 @@ router.post('/session', async (c) => {
     input.amount,
     input.customerEmail,
     input.provider,
-    c.env
+    c.env,
+    input.projectId
   );
 
   return c.json({ success: true, data: session }, 201);
@@ -182,6 +183,13 @@ router.post('/resolve', authMerchantOrDeviceMiddleware, async (c) => {
   const targetId = input.paymentIntentId || input.externalOrderId;
   if (!targetId) {
     throw new BadRequestError('Either paymentIntentId or externalOrderId is required');
+  }
+
+  if (c.get('projectAuthScoped')) {
+    const existing = await getPaymentIntentById(db, merchant, targetId);
+    if (existing.projectId !== c.get('projectId')) {
+      throw new ForbiddenError('Project credentials cannot resolve another project payment intent');
+    }
   }
 
   const result = await resolvePaymentIntent(db, c.env, merchant, targetId, input, {

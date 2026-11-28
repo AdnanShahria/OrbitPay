@@ -29,6 +29,8 @@ export type VerticalProfile =
 export interface PaymentIntentView {
   id: string;
   merchantId: string;
+  projectId?: string | null;
+  projectName?: string | null;
   vertical: VerticalProfile | string;
   externalRefId: string;
   verificationMode: VerificationMode;
@@ -75,6 +77,7 @@ export interface PaymentIntentsResponse {
 }
 
 export interface PaymentIntentFilters {
+  projectId?: string;
   status?: PaymentIntentStatus | 'ALL';
   vertical?: VerticalProfile | 'ALL';
   search?: string;
@@ -85,6 +88,9 @@ export function usePaymentIntents(filters?: PaymentIntentFilters) {
     queryKey: ['payment-intents', filters],
     queryFn: async () => {
       const params = new URLSearchParams();
+      if (filters?.projectId && filters.projectId !== 'ALL') {
+        params.append('projectId', filters.projectId);
+      }
       if (filters?.status && filters.status !== 'ALL') {
         params.append('status', filters.status);
       }

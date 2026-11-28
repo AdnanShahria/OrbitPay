@@ -23,6 +23,8 @@ export type OrderAction = 'CONFIRM' | 'READY_TO_SHIP' | 'SHIP' | 'MARK_PAID' | '
 export interface MerchantOrder {
   id: string;
   merchantId: string;
+  projectId?: string | null;
+  projectName?: string | null;
   externalOrderId: string;
   customerName: string | null;
   customerPhone: string | null;
@@ -49,6 +51,7 @@ export interface OrdersResponseData {
 }
 
 export interface OrderFilters {
+  projectId?: string;
   orderStatus?: OrderStatus | 'ALL';
   paymentMethod?: OrderPaymentMethod | 'ALL';
   search?: string;
@@ -59,6 +62,9 @@ export function useOrders(filters?: OrderFilters) {
     queryKey: ['orders', filters],
     queryFn: async () => {
       const params = new URLSearchParams();
+      if (filters?.projectId && filters.projectId !== 'ALL') {
+        params.append('projectId', filters.projectId);
+      }
       if (filters?.orderStatus && filters.orderStatus !== 'ALL') {
         params.append('orderStatus', filters.orderStatus);
       }

@@ -38,6 +38,7 @@ const optionalNullableUrl = z
 
 export const createPaymentLinkSchema = z
   .object({
+    projectId: nullishToUndefined(z.string().trim().min(1).max(80)),
     slug: z
       .string()
       .trim()
@@ -92,6 +93,7 @@ export const createPaymentLinkSchema = z
   );
 
 export const updatePaymentLinkSchema = z.object({
+  projectId: z.string().trim().min(1).max(80).optional().nullable(),
   slug: z
     .string()
     .trim()

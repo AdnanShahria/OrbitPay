@@ -27,6 +27,7 @@ import {
   AppError,
   BadRequestError,
   ConflictError,
+  ForbiddenError,
   NotFoundError,
   UnauthorizedError,
 } from '../../shared/errors';
@@ -50,6 +51,13 @@ import {
   incrementWalletVolume,
 } from '../wallets/wallets.service';
 import {
+  isReceiverAllowedForProject,
+  loadProjectById,
+  resolveEffectiveProjectConfig,
+  resolveProjectDispatchContext,
+  resolveProjectRotatedWallets,
+} from '../projects/projects.service';
+import {
   dispatchWebhook,
   sendDynamicPushToMerchantDevices,
   sendTelegramOfficeAlert,
@@ -71,6 +79,7 @@ export interface CheckoutSessionResult {
   paymentIntentId: string;
   sessionToken: string;
   merchantId: string;
+  projectId: string | null;
   orderId: string;
   storeName: string;
   baseAmount: number;
@@ -140,7 +149,8 @@ export async function createCheckoutSession(
   amount: number,
   customerEmail?: string,
   requestedProvider?: MfsProvider,
-  env?: Env
+  env?: Env,
+  projectId?: string
 ): Promise<CheckoutSessionResult> {
   if (amount <= 0) {
     throw new BadRequestError('Payment amount must be greater than zero');
@@ -160,36 +170,76 @@ export async function createCheckoutSession(
     throw new NotFoundError(`Active merchant '${merchantId}' not found`);
   }
 
-  let wallets = await getAllActiveRotatedWallets(db, merchantId, env);
-  if (requestedProvider) {
-    const specific = await getActiveRotatedWallet(db, merchantId, requestedProvider, env);
-    if (specific) {
-      wallets = [specific];
-    }
-  }
-
-  if (wallets.length === 0) {
-    throw new BadRequestError('No active SIM wallets configured for this merchant');
+  let project = projectId ? await loadProjectById(db, merchantId, projectId) : null;
+  if (projectId && (!project || !project.isActive)) {
+    throw new NotFoundError(`Active project '${projectId}' not found for merchant`);
   }
 
   const now = new Date();
+  const [existingIntent, existingSessions] = await Promise.all([
+    db
+      .select()
+      .from(paymentIntents)
+      .where(and(eq(paymentIntents.merchantId, merchantId), eq(paymentIntents.externalRefId, orderId)))
+      .limit(1),
+    db
+      .select()
+      .from(checkoutSessions)
+      .where(
+        and(
+          eq(checkoutSessions.merchantId, merchantId),
+          eq(checkoutSessions.externalOrderId, orderId),
+          inArray(checkoutSessions.status, ['OPEN', 'SUBMITTED']),
+          gt(checkoutSessions.expiresAt, now)
+        )
+      )
+      .orderBy(desc(checkoutSessions.createdAt))
+      .limit(1),
+  ]);
+
+  const boundIntent = existingIntent[0];
+  const reusable = existingSessions[0];
+
+  if (boundIntent) {
+    if (projectId && boundIntent.projectId !== projectId) {
+      throw new ForbiddenError(`Order '${orderId}' is already bound to a different sub-project`);
+    }
+    if (Math.abs(boundIntent.baseAmount - baseAmount) >= 0.01) {
+      throw new BadRequestError('Amount does not match existing payment intent for this order');
+    }
+    if (!project && boundIntent.projectId) {
+      project = await loadProjectById(db, merchantId, boundIntent.projectId);
+    }
+  }
+
+  if (reusable) {
+    if (projectId && reusable.projectId !== projectId) {
+      throw new ForbiddenError(`Checkout session for '${orderId}' is already bound to a different sub-project`);
+    }
+    if (!project && reusable.projectId) {
+      project = await loadProjectById(db, merchantId, reusable.projectId);
+    }
+  }
+
+  const effective = resolveEffectiveProjectConfig(merchant, project);
+  const wallets = await resolveProjectRotatedWallets(
+    db,
+    merchantId,
+    project,
+    requestedProvider,
+    env
+  );
+
+  if (wallets.length === 0) {
+    throw new BadRequestError(
+      project && project.walletSelectionMode === 'SPECIFIC'
+        ? `No active SIM wallets assigned to project '${project.name}'`
+        : 'No active SIM wallets configured for this merchant'
+    );
+  }
+
   const deviceStatus = await computeDeviceOnlineStatus(db, env, merchant);
 
-  const existingSessions = await db
-    .select()
-    .from(checkoutSessions)
-    .where(
-      and(
-        eq(checkoutSessions.merchantId, merchantId),
-        eq(checkoutSessions.externalOrderId, orderId),
-        inArray(checkoutSessions.status, ['OPEN', 'SUBMITTED']),
-        gt(checkoutSessions.expiresAt, now)
-      )
-    )
-    .orderBy(desc(checkoutSessions.createdAt))
-    .limit(1);
-
-  const reusable = existingSessions[0];
   let sessionId: string;
   let paymentIntentId: string;
   let uniqueAmount: number;
@@ -201,24 +251,17 @@ export async function createCheckoutSession(
     uniqueAmount = reusable.uniqueAmount;
     offsetCents = reusable.offsetCents;
     expiresAt = reusable.expiresAt;
-    paymentIntentId = reusable.paymentIntentId || `pay_${generateSecureToken(16)}`;
+    paymentIntentId = reusable.paymentIntentId || boundIntent?.id || `pay_${generateSecureToken(16)}`;
 
     if (!reusable.paymentIntentId) {
-      const existingIntent = await db
-        .select()
-        .from(paymentIntents)
-        .where(and(eq(paymentIntents.merchantId, merchantId), eq(paymentIntents.externalRefId, orderId)))
-        .limit(1);
-
-      if (existingIntent[0]) {
-        paymentIntentId = existingIntent[0].id;
-      } else {
+      if (!boundIntent) {
         await db.insert(paymentIntents).values({
           id: paymentIntentId,
           merchantId,
+          projectId: reusable.projectId ?? project?.id ?? null,
           vertical: 'ecommerce',
           externalRefId: orderId,
-          verificationMode: merchant.verificationMode,
+          verificationMode: effective.verificationMode,
           status: 'OPEN',
           baseAmount,
           uniqueAmount,
@@ -240,16 +283,11 @@ export async function createCheckoutSession(
   } else {
     expiresAt = new Date(now.getTime() + OPEN_SESSION_TTL_MS);
 
-    const existingIntent = await db
-      .select()
-      .from(paymentIntents)
-      .where(and(eq(paymentIntents.merchantId, merchantId), eq(paymentIntents.externalRefId, orderId)))
-      .limit(1);
-
-    paymentIntentId = existingIntent[0]?.id || `pay_${generateSecureToken(16)}`;
+    paymentIntentId = boundIntent?.id || `pay_${generateSecureToken(16)}`;
 
     const reserved = await reserveUniqueCheckoutSession(db, {
       merchantId,
+      projectId: boundIntent?.projectId ?? project?.id ?? null,
       paymentIntentId,
       vertical: 'ecommerce',
       externalOrderId: orderId,
@@ -263,13 +301,14 @@ export async function createCheckoutSession(
     uniqueAmount = reserved.uniqueAmount;
     offsetCents = reserved.offsetCents;
 
-    if (!existingIntent[0]) {
+    if (!boundIntent) {
       await db.insert(paymentIntents).values({
         id: paymentIntentId,
         merchantId,
+        projectId: project?.id ?? null,
         vertical: 'ecommerce',
         externalRefId: orderId,
-        verificationMode: merchant.verificationMode,
+        verificationMode: effective.verificationMode,
         status: 'OPEN',
         baseAmount,
         uniqueAmount,
@@ -284,11 +323,14 @@ export async function createCheckoutSession(
     }
   }
 
+  const effectiveProjectId = reusable?.projectId ?? boundIntent?.projectId ?? project?.id ?? null;
+
   const sessionToken = await createSignedSessionToken(
     {
       sessionId,
       paymentIntentId,
       merchantId,
+      projectId: effectiveProjectId,
       orderId,
       externalRefId: orderId,
       baseAmount,
@@ -306,14 +348,15 @@ export async function createCheckoutSession(
     paymentIntentId,
     sessionToken,
     merchantId,
+    projectId: project?.id ?? null,
     orderId,
-    storeName: merchant.storeName,
+    storeName: effective.appName,
     baseAmount,
     uniqueAmount,
     expectedAmount: uniqueAmount,
     offsetCents,
     expiresAt,
-    verificationMode: merchant.verificationMode,
+    verificationMode: effective.verificationMode,
     receiptPolicy: merchant.receiptPolicy,
     customerEmail: extractRealCustomerEmail(customerEmail, reusable?.customerEmail, effectiveEmail),
     deviceStatus,
@@ -362,8 +405,7 @@ export async function getPublicCheckoutSession(
     throw new NotFoundError('Merchant is inactive or not found');
   }
 
-  const [wallets, deviceStatus, intentRows] = await Promise.all([
-    getAllActiveRotatedWallets(db, merchant.id, env),
+  const [deviceStatus, intentRows] = await Promise.all([
     computeDeviceOnlineStatus(db, env, merchant),
     session.paymentIntentId
       ? db.select().from(paymentIntents).where(eq(paymentIntents.id, session.paymentIntentId)).limit(1)
@@ -380,6 +422,10 @@ export async function getPublicCheckoutSession(
   ]);
 
   const intent = intentRows[0];
+  const resolvedProjectId = session.projectId ?? intent?.projectId ?? null;
+  const project = await loadProjectById(db, merchant.id, resolvedProjectId);
+  const effective = resolveEffectiveProjectConfig(merchant, project);
+  const wallets = await resolveProjectRotatedWallets(db, merchant.id, project, undefined, env);
   const intentCustomer = extractCustomerFromJson(intent?.customerJson);
   const customerEmail = extractRealCustomerEmail(intentCustomer.email, session.customerEmail);
 
@@ -387,7 +433,9 @@ export async function getPublicCheckoutSession(
     sessionId: session.id,
     paymentIntentId: intent?.id ?? session.paymentIntentId ?? null,
     merchantId: merchant.id,
-    storeName: merchant.storeName,
+    projectId: resolvedProjectId,
+    projectName: project?.name ?? null,
+    storeName: effective.appName,
     externalOrderId: session.externalOrderId,
     externalRefId: session.externalOrderId,
     vertical: intent?.vertical ?? session.vertical,
@@ -397,7 +445,7 @@ export async function getPublicCheckoutSession(
     uniqueAmount: session.uniqueAmount,
     offsetCents: session.offsetCents,
     provider: intent?.provider ?? session.provider,
-    verificationMode: intent?.verificationMode ?? merchant.verificationMode,
+    verificationMode: intent?.verificationMode ?? effective.verificationMode,
     receiptPolicy: merchant.receiptPolicy,
     customerEmail,
     deviceStatus,
@@ -415,7 +463,7 @@ export async function getPublicCheckoutSession(
     })),
     display: parseDisplayMetadata(
       intent?.displayJson ?? session.displayJson,
-      merchant.storeName,
+      effective.appName,
       session.externalOrderId
     ),
     actions: parseActionsList(intent?.actionsJson ?? session.actionsJson),
@@ -631,10 +679,19 @@ async function escalatePaymentToManualReview(
       stateVersion: params.intent.stateVersion + 1,
       updatedAt: now,
     })
-    .where(eq(paymentIntents.id, params.intent.id))
+    .where(
+      and(
+        eq(paymentIntents.id, params.intent.id),
+        eq(paymentIntents.stateVersion, params.intent.stateVersion),
+        inArray(paymentIntents.status, ['OPEN', 'WAITING_FOR_SMS', 'MANUAL_REVIEW_REQUIRED'])
+      )
+    )
     .returning();
 
-  const updatedIntent = updatedIntents[0] || params.intent;
+  const updatedIntent = updatedIntents[0];
+  if (!updatedIntent) {
+    throw new ConflictError('Payment intent state changed concurrently during escalation');
+  }
 
   const existingQueue = await db
     .select()
@@ -672,6 +729,7 @@ async function escalatePaymentToManualReview(
     await db.insert(verificationQueue).values({
       id: `que_${generateSecureToken(16)}`,
       merchantId: merchant.id,
+      projectId: params.intent.projectId ?? null,
       paymentIntentId: params.intent.id,
       provider: params.provider,
       externalOrderId: params.intent.externalRefId,
@@ -716,9 +774,15 @@ async function escalatePaymentToManualReview(
       )
     );
 
+  const dispatchCtx = await resolveProjectDispatchContext(
+    db,
+    merchant,
+    updatedIntent.projectId,
+    updatedIntent.callbackUrl
+  );
   const display = parseDisplayMetadata(
     updatedIntent.displayJson,
-    merchant.storeName,
+    dispatchCtx.effective.appName,
     updatedIntent.externalRefId
   );
   const actions = parseActionsList(updatedIntent.actionsJson);
@@ -726,6 +790,7 @@ async function escalatePaymentToManualReview(
   const webhookPayload = {
     paymentIntentId: updatedIntent.id,
     merchantId: merchant.id,
+    projectId: updatedIntent.projectId,
     externalRefId: updatedIntent.externalRefId,
     externalOrderId: updatedIntent.externalRefId,
     vertical: updatedIntent.vertical,
@@ -754,8 +819,10 @@ async function escalatePaymentToManualReview(
         webhookPayload,
         1,
         undefined,
-        updatedIntent.callbackUrl || undefined,
-        env
+        dispatchCtx.targetUrlOverride,
+        env,
+        undefined,
+        dispatchCtx.webhookOptions
       ),
       dispatchWebhook(
         db,
@@ -764,14 +831,16 @@ async function escalatePaymentToManualReview(
         webhookPayload,
         1,
         undefined,
-        updatedIntent.callbackUrl || undefined,
-        env
+        dispatchCtx.targetUrlOverride,
+        env,
+        undefined,
+        dispatchCtx.webhookOptions
       ),
       sendDynamicPushToMerchantDevices(db, env, merchant, {
         event: 'payment.escalated_manual',
         paymentIntentId: updatedIntent.id,
         externalRefId: updatedIntent.externalRefId,
-        appName: display.appName || merchant.storeName,
+        appName: display.appName || dispatchCtx.effective.appName,
         appDomain: display.appDomain,
         category: display.category || updatedIntent.vertical,
         referenceLabel: display.referenceLabel,
@@ -785,11 +854,12 @@ async function escalatePaymentToManualReview(
       }),
       sendTelegramOfficeAlert(
         merchant,
-        `⚠️ Manual Review Required [${display.appName || merchant.storeName}]\nRef: ${updatedIntent.externalRefId}\nReason: ${params.escalationReason}\nAmount: ৳${params.submittedAmount} (${params.provider})\nTrxID: ${params.submittedTrxId}`
+        `⚠️ Manual Review Required [${display.appName || dispatchCtx.effective.appName}]\nRef: ${updatedIntent.externalRefId}\nReason: ${params.escalationReason}\nAmount: ৳${params.submittedAmount} (${params.provider})\nTrxID: ${params.submittedTrxId}`,
+        dispatchCtx.project
       ),
       notifyPaymentSubmittedEmail(db, env, {
         merchantId: merchant.id,
-        storeName: display.appName || merchant.storeName,
+        storeName: display.appName || dispatchCtx.effective.appName,
         externalRefId: updatedIntent.externalRefId,
         customerEmail: realCustomerEmail,
         customerName: params.customerName,
@@ -941,21 +1011,37 @@ export async function verifyCheckoutPayment(
   const effectiveCustomerEmail =
     realCustomerEmail || activeSession?.customerEmail || 'buyer@orbitsaas.cloud';
 
+  if (intent?.status === 'VERIFIED') {
+    return {
+      status: 'VERIFIED',
+      paymentIntentId: intent.id,
+      trxId: intent.trxId || submittedTrxId,
+      amount: intent.paidAmount ?? intent.uniqueAmount,
+      baseAmount: intent.baseAmount,
+      uniqueAmount: intent.uniqueAmount,
+      paidAmount: intent.paidAmount ?? intent.uniqueAmount,
+      matchType: intent.matchType ?? 'EXACT_UNIQUE',
+      provider: intent.provider ?? payload.provider,
+      customerEmail: realCustomerEmail,
+      stateVersion: intent.stateVersion,
+    };
+  }
+
+  if (activeSession) {
+    if (activeSession.expiresAt <= now) {
+      throw new BadRequestError('Checkout session has expired. Please start a new payment.');
+    }
+    if (['REJECTED', 'EXPIRED', 'CANCELLED'].includes(activeSession.status)) {
+      throw new BadRequestError(`Checkout session is already ${activeSession.status}`);
+    }
+  }
+
   if (intent) {
-    if (intent.status === 'VERIFIED') {
-      return {
-        status: 'VERIFIED',
-        paymentIntentId: intent.id,
-        trxId: intent.trxId || submittedTrxId,
-        amount: intent.paidAmount ?? intent.uniqueAmount,
-        baseAmount: intent.baseAmount,
-        uniqueAmount: intent.uniqueAmount,
-        paidAmount: intent.paidAmount ?? intent.uniqueAmount,
-        matchType: intent.matchType ?? 'EXACT_UNIQUE',
-        provider: intent.provider ?? payload.provider,
-        customerEmail: realCustomerEmail,
-        stateVersion: intent.stateVersion,
-      };
+    if (['REJECTED', 'EXPIRED', 'REFUNDED'].includes(intent.status)) {
+      throw new BadRequestError(`Payment intent is already ${intent.status}`);
+    }
+    if (intent.expiresAt && intent.expiresAt <= now && intent.status === 'OPEN') {
+      throw new BadRequestError('Payment window has expired. Please start a new payment.');
     }
 
     if (intent.submitAttempts >= MAX_SUBMIT_ATTEMPTS) {
@@ -977,22 +1063,40 @@ export async function verifyCheckoutPayment(
     const bumped = await db
       .update(paymentIntents)
       .set({
-        submitAttempts: intent.submitAttempts + 1,
+        submitAttempts: sql`${paymentIntents.submitAttempts} + 1`,
         ...(updatedCustomerJson ? { customerJson: updatedCustomerJson } : {}),
         updatedAt: now,
       })
-      .where(eq(paymentIntents.id, intent.id))
+      .where(
+        and(
+          eq(paymentIntents.id, intent.id),
+          sql`${paymentIntents.submitAttempts} < ${MAX_SUBMIT_ATTEMPTS}`,
+          inArray(paymentIntents.status, ['OPEN', 'WAITING_FOR_SMS', 'MANUAL_REVIEW_REQUIRED'])
+        )
+      )
       .returning();
-    intent = bumped[0] || intent;
+    if (!bumped[0]) {
+      throw new AppError(
+        `Maximum payment submission attempts (${MAX_SUBMIT_ATTEMPTS}) exceeded or intent is closed`,
+        409,
+        'MAX_SUBMIT_ATTEMPTS_EXCEEDED'
+      );
+    }
+    intent = bumped[0];
   } else {
     const intentId = `pay_${generateSecureToken(16)}`;
     const fallbackExpires = activeSession?.expiresAt ?? new Date(now.getTime() + OPEN_SESSION_TTL_MS);
+    const lazyProject = activeSession?.projectId
+      ? await loadProjectById(db, merchant.id, activeSession.projectId)
+      : null;
+    const lazyEffective = resolveEffectiveProjectConfig(merchant, lazyProject);
     await db.insert(paymentIntents).values({
       id: intentId,
       merchantId: merchant.id,
+      projectId: activeSession?.projectId ?? null,
       vertical: 'ecommerce',
       externalRefId: payload.orderId,
-      verificationMode: merchant.verificationMode,
+      verificationMode: lazyEffective.verificationMode,
       status: 'OPEN',
       baseAmount: effectiveBaseAmount,
       uniqueAmount: effectiveUniqueAmount,
@@ -1135,6 +1239,37 @@ export async function verifyCheckoutPayment(
       });
     }
 
+    const receiverAllowed = await isReceiverAllowedForProject(
+      db,
+      merchant.id,
+      intent.projectId ?? activeSession?.projectId,
+      matchedSms.provider,
+      matchedSms.receiverNumber
+    );
+
+    if (!receiverAllowed) {
+      return escalatePaymentToManualReview(db, env, merchant, {
+        intent,
+        activeSession,
+        provider: payload.provider,
+        submittedTrxId,
+        submittedSender,
+        submittedAmount,
+        effectiveBaseAmount,
+        effectiveUniqueAmount,
+        customerEmail: effectiveCustomerEmail,
+        customerName: intentCustomer.name,
+        receiptAssetId: effectiveReceiptAssetId,
+        receiptUrl: effectiveReceiptUrl,
+        deviceOnline: deviceStatus.online,
+        escalationReason: 'TRUST_FLAG_ANOMALY',
+        smsLedgerId: matchedSms.id,
+        trustFlag: 'PROJECT_WALLET_MISMATCH',
+        message: 'SMS arrived on a SIM wallet not assigned to this project; escalated for review.',
+        ctx,
+      });
+    }
+
     // Factor 6: Atomic CAS + consumed_trx_ids
     const updatedIntent = await executeAtomicVerificationCas(db, {
       merchantId: merchant.id,
@@ -1178,6 +1313,7 @@ export async function verifyCheckoutPayment(
 
     await syncVerifiedOrderAndSession(db, {
       merchantId: merchant.id,
+      projectId: intent.projectId ?? activeSession?.projectId ?? null,
       externalOrderId: payload.orderId,
       paymentIntentId: intent.id,
       baseAmount: effectiveBaseAmount,
@@ -1189,12 +1325,23 @@ export async function verifyCheckoutPayment(
       customerPhone: submittedSender,
     });
 
-    const display = parseDisplayMetadata(intent.displayJson, merchant.storeName, payload.orderId);
+    const dispatchCtx = await resolveProjectDispatchContext(
+      db,
+      merchant,
+      intent.projectId ?? activeSession?.projectId,
+      intent.callbackUrl
+    );
+    const display = parseDisplayMetadata(
+      intent.displayJson,
+      dispatchCtx.effective.appName,
+      payload.orderId
+    );
     const actions = parseActionsList(intent.actionsJson);
 
     const verifiedData = {
       paymentIntentId: intent.id,
       merchantId: merchant.id,
+      projectId: intent.projectId ?? activeSession?.projectId ?? null,
       externalRefId: payload.orderId,
       externalOrderId: payload.orderId,
       vertical: intent.vertical,
@@ -1223,14 +1370,16 @@ export async function verifyCheckoutPayment(
           verifiedData,
           1,
           undefined,
-          intent.callbackUrl || undefined,
-          env
+          dispatchCtx.targetUrlOverride,
+          env,
+          undefined,
+          dispatchCtx.webhookOptions
         ),
         sendDynamicPushToMerchantDevices(db, env, merchant, {
           event: 'payment.verified',
           paymentIntentId: intent.id,
           externalRefId: payload.orderId,
-          appName: display.appName || merchant.storeName,
+          appName: display.appName || dispatchCtx.effective.appName,
           appDomain: display.appDomain,
           category: display.category || intent.vertical,
           referenceLabel: display.referenceLabel,
@@ -1244,11 +1393,12 @@ export async function verifyCheckoutPayment(
         }),
         sendTelegramOfficeAlert(
           merchant,
-          `✅ Auto-Verified [${display.appName || merchant.storeName}]\nRef: ${payload.orderId}\nAmount: ৳${matchedSms.amount} (${matchedSms.provider})\nTrxID: ${submittedTrxId}`
+          `✅ Auto-Verified [${display.appName || dispatchCtx.effective.appName}]\nRef: ${payload.orderId}\nAmount: ৳${matchedSms.amount} (${matchedSms.provider})\nTrxID: ${submittedTrxId}`,
+          dispatchCtx.project
         ),
         notifyPaymentVerifiedInvoiceEmail(db, env, {
           merchantId: merchant.id,
-          storeName: display.appName || merchant.storeName,
+          storeName: display.appName || dispatchCtx.effective.appName,
           externalRefId: payload.orderId,
           paymentIntentId: intent.id,
           customerEmail: realCustomerEmail,
@@ -1301,6 +1451,14 @@ export async function verifyCheckoutPayment(
     .limit(1);
 
   if (existingQueue[0]) {
+    const sameOrderQueue =
+      existingQueue[0].paymentIntentId === intent.id ||
+      existingQueue[0].externalOrderId === payload.orderId;
+    if (!sameOrderQueue) {
+      throw new ConflictError(
+        `Transaction ID '${submittedTrxId}' is already pending verification for another order`
+      );
+    }
     if (payloadRealEmail) {
       await db
         .update(verificationQueue)
@@ -1327,6 +1485,7 @@ export async function verifyCheckoutPayment(
   await db.insert(verificationQueue).values({
     id: queueId,
     merchantId: merchant.id,
+    projectId: intent.projectId ?? activeSession?.projectId ?? null,
     paymentIntentId: intent.id,
     provider: payload.provider,
     externalOrderId: payload.orderId,
@@ -1366,10 +1525,19 @@ export async function verifyCheckoutPayment(
       stateVersion: intent.stateVersion + 1,
       updatedAt: now,
     })
-    .where(eq(paymentIntents.id, intent.id))
+    .where(
+      and(
+        eq(paymentIntents.id, intent.id),
+        eq(paymentIntents.stateVersion, intent.stateVersion),
+        inArray(paymentIntents.status, ['OPEN', 'WAITING_FOR_SMS', 'MANUAL_REVIEW_REQUIRED'])
+      )
+    )
     .returning();
 
-  const updatedIntent = updatedIntents[0] || intent;
+  const updatedIntent = updatedIntents[0];
+  if (!updatedIntent) {
+    throw new ConflictError('Payment intent state changed concurrently while queuing verification');
+  }
 
   await db
     .update(merchantOrders)
@@ -1388,13 +1556,24 @@ export async function verifyCheckoutPayment(
       )
     );
 
-  const display = parseDisplayMetadata(updatedIntent.displayJson, merchant.storeName, payload.orderId);
+  const dispatchCtx = await resolveProjectDispatchContext(
+    db,
+    merchant,
+    updatedIntent.projectId ?? activeSession?.projectId,
+    updatedIntent.callbackUrl
+  );
+  const display = parseDisplayMetadata(
+    updatedIntent.displayJson,
+    dispatchCtx.effective.appName,
+    payload.orderId
+  );
   const actions = parseActionsList(updatedIntent.actionsJson);
 
   // Immediately emit <2s `payment.submitted` webhook so client storefront sees buyer proof right away!
   const submittedPayload = {
     paymentIntentId: updatedIntent.id,
     merchantId: merchant.id,
+    projectId: updatedIntent.projectId ?? activeSession?.projectId ?? null,
     externalRefId: payload.orderId,
     externalOrderId: payload.orderId,
     vertical: updatedIntent.vertical,
@@ -1423,14 +1602,16 @@ export async function verifyCheckoutPayment(
         submittedPayload,
         1,
         undefined,
-        updatedIntent.callbackUrl || undefined,
-        env
+        dispatchCtx.targetUrlOverride,
+        env,
+        undefined,
+        dispatchCtx.webhookOptions
       ),
       sendDynamicPushToMerchantDevices(db, env, merchant, {
         event: 'payment.submitted',
         paymentIntentId: updatedIntent.id,
         externalRefId: payload.orderId,
-        appName: display.appName || merchant.storeName,
+        appName: display.appName || dispatchCtx.effective.appName,
         appDomain: display.appDomain,
         category: display.category || updatedIntent.vertical,
         referenceLabel: display.referenceLabel,
@@ -1444,11 +1625,12 @@ export async function verifyCheckoutPayment(
       }),
       sendTelegramOfficeAlert(
         merchant,
-        `🕒 Payment Submitted [${display.appName || merchant.storeName}]\nRef: ${payload.orderId}\nAmount: ৳${submittedAmount} (${payload.provider})\nTrxID: ${submittedTrxId}\nDevice Online: ${deviceStatus.online ? 'Yes' : 'Offline'}`
+        `🕒 Payment Submitted [${display.appName || dispatchCtx.effective.appName}]\nRef: ${payload.orderId}\nAmount: ৳${submittedAmount} (${payload.provider})\nTrxID: ${submittedTrxId}\nDevice Online: ${deviceStatus.online ? 'Yes' : 'Offline'}`,
+        dispatchCtx.project
       ),
       notifyPaymentSubmittedEmail(db, env, {
         merchantId: merchant.id,
-        storeName: display.appName || merchant.storeName,
+        storeName: display.appName || dispatchCtx.effective.appName,
         externalRefId: payload.orderId,
         customerEmail: realCustomerEmail,
         customerName: intentCustomer.name,

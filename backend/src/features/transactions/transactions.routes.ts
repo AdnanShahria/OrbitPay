@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { AppContextEnv } from '../../shared/types';
-import { authMerchantMiddleware } from '../../shared/middleware';
+import { authMerchantMiddleware, requireMerchantWideScopeMiddleware } from '../../shared/middleware';
 import { listTransactionsQuerySchema, manualMatchSchema } from './transactions.schema';
 import { listTransactions, manualMatchTransaction, listPendingQueue } from './transactions.service';
 
@@ -13,7 +13,7 @@ router.use('*', authMerchantMiddleware);
  * GET /api/v1/transactions
  * Filterable, searchable, and paginated ledger listing.
  */
-router.get('/', async (c) => {
+router.get('/', requireMerchantWideScopeMiddleware, async (c) => {
   const db = c.get('db');
   const merchantId = c.get('merchantId')!;
   const queryParams = c.req.query();
@@ -30,7 +30,8 @@ router.get('/', async (c) => {
 router.get('/queue', async (c) => {
   const db = c.get('db');
   const merchantId = c.get('merchantId')!;
-  const queue = await listPendingQueue(db, merchantId);
+  const scopedProjectId = c.get('projectAuthScoped') ? c.get('projectId') : undefined;
+  const queue = await listPendingQueue(db, merchantId, scopedProjectId);
   return c.json({ success: true, data: { queue } });
 });
 

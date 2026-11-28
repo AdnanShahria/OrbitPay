@@ -5,6 +5,7 @@ import {
 } from './useSetupLock';
 import { MerchantSettings } from './MerchantSettings';
 import { IntegrationGuide } from './IntegrationGuide';
+import { ProjectsManagerSection } from '@/features/projects/ProjectsManagerSection';
 import { DevicePairingQR } from '@/features/device/DevicePairingQR';
 import { TransactionTable } from '@/features/transactions/TransactionTable';
 import { Card, CardContent } from '@/components/base/card/card';
@@ -29,6 +30,7 @@ import {
   RiErrorWarningLine,
   RiFileCopyLine,
   RiFileList3Line,
+  RiFolder3Line,
   RiLock2Line,
   RiLockUnlockLine,
   RiMailLine,
@@ -58,6 +60,7 @@ export interface ConsolidatedSetupHubProps {
 }
 
 type AccordionKey =
+  | 'projects'
   | 'settings'
   | 'device'
   | 'transactions'
@@ -175,7 +178,8 @@ export function ConsolidatedSetupHub({
   } = useSetupLock();
 
   const [expanded, setExpanded] = useState<Record<AccordionKey, boolean>>({
-    settings: true,
+    projects: true,
+    settings: false,
     device: false,
     transactions: false,
     integration: false,
@@ -361,6 +365,23 @@ export function ConsolidatedSetupHub({
 
       {/* Consolidated Collapsible Dashboard Accordion Sections */}
       <div className="space-y-4">
+        <AccordionSection
+          id="setup-section-projects"
+          icon={RiFolder3Line}
+          title="Sub-Projects &amp; Website Connections"
+          description="Connect websites, configure per-project webhooks, rotate project API keys, and assign Common or Specific SIM numbers."
+          badgeLabel={isLocked ? 'View & Copy' : 'Editable'}
+          badgeColor={isLocked ? 'neutral' : 'lime'}
+          isExpanded={expanded.projects}
+          onToggle={() => toggleSection('projects')}
+        >
+          <ProjectsManagerSection
+            merchantId={merchantId}
+            readOnlyLocked={isLocked}
+            onRequestUnlock={handleOpenOtpModal}
+          />
+        </AccordionSection>
+
         <AccordionSection
           id="setup-section-settings"
           icon={RiSettings3Line}

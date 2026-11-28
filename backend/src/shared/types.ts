@@ -1,6 +1,6 @@
 /// <reference types="@cloudflare/workers-types/2023-07-01" />
 import type { AppDb } from '../db/client';
-import type { MerchantRecord } from '../db/schema';
+import type { MerchantProjectRecord, MerchantRecord } from '../db/schema';
 
 export interface SendEmailBinding {
   send(message: {
@@ -86,6 +86,9 @@ export interface AppVariables {
   db: AppDb;
   merchant?: MerchantRecord;
   merchantId?: string;
+  project?: MerchantProjectRecord;
+  projectId?: string;
+  projectAuthScoped?: boolean;
   userId?: string;
   deviceId?: string;
   sessionId?: string;

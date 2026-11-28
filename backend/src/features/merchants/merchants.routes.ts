@@ -3,6 +3,7 @@ import type { AppContextEnv } from '../../shared/types';
 import {
   authMasterAdminMiddleware,
   authMerchantMiddleware,
+  requireMerchantWideScopeMiddleware,
   requireOwnerRoleMiddleware,
 } from '../../shared/middleware';
 import {
@@ -83,7 +84,12 @@ router.get('/setup-lock/status', authMerchantMiddleware, async (c) => {
  * POST /api/v1/merchants/setup-lock/request-otp
  * Sends a 6-digit setup unlock OTP strictly to the authorized administrator email.
  */
-router.post('/setup-lock/request-otp', authMerchantMiddleware, requireOwnerRoleMiddleware, async (c) => {
+router.post(
+  '/setup-lock/request-otp',
+  authMerchantMiddleware,
+  requireOwnerRoleMiddleware,
+  requireMerchantWideScopeMiddleware,
+  async (c) => {
   const db = c.get('db');
   const merchant = c.get('merchant')!;
   const result = await requestSetupUnlockOtp(db, c.env, merchant);
@@ -94,7 +100,12 @@ router.post('/setup-lock/request-otp', authMerchantMiddleware, requireOwnerRoleM
  * POST /api/v1/merchants/setup-lock/verify-otp
  * Verifies the 6-digit setup unlock OTP and returns a 30-minute unlock token.
  */
-router.post('/setup-lock/verify-otp', authMerchantMiddleware, requireOwnerRoleMiddleware, async (c) => {
+router.post(
+  '/setup-lock/verify-otp',
+  authMerchantMiddleware,
+  requireOwnerRoleMiddleware,
+  requireMerchantWideScopeMiddleware,
+  async (c) => {
   const db = c.get('db');
   const merchant = c.get('merchant')!;
   const body = await c.req.json();
@@ -114,7 +125,12 @@ router.post('/setup-lock/verify-otp', authMerchantMiddleware, requireOwnerRoleMi
  * POST /api/v1/merchants/settings
  * Updates merchant configuration (owner role or server API key required).
  */
-router.post('/settings', authMerchantMiddleware, requireOwnerRoleMiddleware, async (c) => {
+router.post(
+  '/settings',
+  authMerchantMiddleware,
+  requireOwnerRoleMiddleware,
+  requireMerchantWideScopeMiddleware,
+  async (c) => {
   await assertSetupUnlockedForJwt(c);
   const db = c.get('db');
   const merchantId = c.get('merchantId')!;
@@ -129,7 +145,12 @@ router.post('/settings', authMerchantMiddleware, requireOwnerRoleMiddleware, asy
  * POST /api/v1/merchants/keys/rotate
  * Rotates webhook signing secret, API key, and/or companion app device key.
  */
-router.post('/keys/rotate', authMerchantMiddleware, requireOwnerRoleMiddleware, async (c) => {
+router.post(
+  '/keys/rotate',
+  authMerchantMiddleware,
+  requireOwnerRoleMiddleware,
+  requireMerchantWideScopeMiddleware,
+  async (c) => {
   await assertSetupUnlockedForJwt(c);
   const db = c.get('db');
   const merchantId = c.get('merchantId')!;
@@ -144,7 +165,12 @@ router.post('/keys/rotate', authMerchantMiddleware, requireOwnerRoleMiddleware, 
  * POST /api/v1/merchants/webhook/test
  * Dispatches a signed `webhook.test` event to the merchant's configured webhookUrl.
  */
-router.post('/webhook/test', authMerchantMiddleware, requireOwnerRoleMiddleware, async (c) => {
+router.post(
+  '/webhook/test',
+  authMerchantMiddleware,
+  requireOwnerRoleMiddleware,
+  requireMerchantWideScopeMiddleware,
+  async (c) => {
   await assertSetupUnlockedForJwt(c);
   const db = c.get('db');
   const merchant = c.get('merchant')!;
@@ -159,8 +185,9 @@ router.post('/webhook/test', authMerchantMiddleware, requireOwnerRoleMiddleware,
 router.get('/webhooks', authMerchantMiddleware, async (c) => {
   const db = c.get('db');
   const merchantId = c.get('merchantId')!;
+  const scopedProjectId = c.get('projectAuthScoped') ? c.get('projectId') : undefined;
   const query = listMerchantWebhooksQuerySchema.parse(c.req.query());
-  const data = await listMerchantWebhooks(db, merchantId, query);
+  const data = await listMerchantWebhooks(db, merchantId, query, scopedProjectId);
   return c.json({ success: true, data });
 });
 
@@ -168,7 +195,12 @@ router.get('/webhooks', authMerchantMiddleware, async (c) => {
  * POST /api/v1/merchants/webhooks/:id/replay
  * Replays an immutable webhook delivery record.
  */
-router.post('/webhooks/:id/replay', authMerchantMiddleware, requireOwnerRoleMiddleware, async (c) => {
+router.post(
+  '/webhooks/:id/replay',
+  authMerchantMiddleware,
+  requireOwnerRoleMiddleware,
+  requireMerchantWideScopeMiddleware,
+  async (c) => {
   await assertSetupUnlockedForJwt(c);
   const db = c.get('db');
   const merchant = c.get('merchant')!;
