@@ -95,13 +95,19 @@ class SyncWorker(
                 }
             }
 
-            // Sync stats & heartbeat
-            val statsRes = apiClient.fetchStats()
-            if (statsRes.exceptionOrNull() is UnauthorizedException) {
-                Log.w(TAG, "Background stats returned 401 Unauthorized; clearing stale session.")
-                preferencesManager.clearAuthSession()
-                StickyForegroundService.stopService(applicationContext)
-                return@withContext Result.failure()
+            // Sync stats (skip redundant call when WebSocket push is healthy and nothing was uploaded) & heartbeat
+            val shouldFetchStats = PushWebSocketClient.connectionState.value != WsPushState.CONNECTED ||
+                pendingUploads.isNotEmpty()
+            if (shouldFetchStats) {
+                val statsRes = apiClient.fetchStats()
+                if (statsRes.exceptionOrNull() is UnauthorizedException) {
+                    Log.w(TAG, "Background stats returned 401 Unauthorized; clearing stale session.")
+                    preferencesManager.clearAuthSession()
+                    StickyForegroundService.stopService(applicationContext)
+                    return@withContext Result.failure()
+                }
+            } else {
+                Log.d(TAG, "Skipping redundant stats fetch: WebSocket connected and no pending SMS uploaded.")
             }
 
             val hbRes = sendDeviceHeartbeat()

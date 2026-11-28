@@ -318,7 +318,11 @@ function AuthenticatedMerchantPortal({ onEnterAdmin }: { onEnterAdmin: () => voi
     }
   }, [ecommerceEnabled, activeTab]);
 
-  const { status: realtimeStatus, simulateTransaction } = useRealtime();
+  const {
+    status: realtimeStatus,
+    transport: realtimeTransport,
+    simulateTransaction,
+  } = useRealtime({ mode: 'merchant', enabled: Boolean(merchantId) });
   const { data: wallets } = useWallets(merchantId);
 
   const [demoAmount, setDemoAmount] = useState(50);
@@ -524,9 +528,11 @@ function AuthenticatedMerchantPortal({ onEnterAdmin }: { onEnterAdmin: () => voi
             <div
               className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-background-secondary-default border border-border-button-default text-caption-2-medium text-text-secondary"
               title={
-                realtimeStatus === 'connected'
-                  ? 'Real-time Server-Sent Events (SSE) stream active'
-                  : 'Connecting to real-time edge stream...'
+                realtimeStatus === 'connected' && realtimeTransport === 'websocket'
+                  ? 'Live push connected (zero-polling WebSocket)'
+                  : realtimeStatus === 'connected'
+                    ? 'Live stream active (SSE fallback)'
+                    : 'Connecting to live push hub...'
               }
             >
               <StatusDot

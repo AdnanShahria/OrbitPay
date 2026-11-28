@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { AppContextEnv } from '../../shared/types';
 import { authMerchantMiddleware, requireOwnerRoleMiddleware, safeWaitUntil } from '../../shared/middleware';
+import { emitMerchantRealtimeEvent } from '../realtime/realtime.service';
 import { createWalletSchema, syncWalletsSchema, updateWalletSchema } from './wallets.schema';
 import {
   listWallets,
@@ -50,6 +51,13 @@ router.post('/', requireOwnerRoleMiddleware, async (c) => {
   const input = createWalletSchema.parse(body);
   const created = await createWallet(db, merchant.id, input);
   safeWaitUntil(c, dispatchWalletSyncWebhook(db, merchant, 'wallet.synced', c.env));
+  emitMerchantRealtimeEvent(
+    c.env,
+    'WALLET_SYNCED',
+    { merchantId: merchant.id, action: 'created' },
+    merchant.id,
+    c
+  );
   return c.json({ success: true, data: created }, 201);
 });
 
@@ -62,7 +70,14 @@ router.post('/sync', requireOwnerRoleMiddleware, async (c) => {
   const merchant = c.get('merchant')!;
   const body = await c.req.json();
   const input = syncWalletsSchema.parse(body);
-  const data = await syncMerchantWallets(db, merchant.id, input);
+  const data = await syncMerchantWallets(db, merchant.id, input, c.env);
+  emitMerchantRealtimeEvent(
+    c.env,
+    'WALLET_SYNCED',
+    { merchantId: merchant.id, action: 'synced' },
+    merchant.id,
+    c
+  );
   return c.json({ success: true, data }, 200);
 });
 
@@ -78,6 +93,13 @@ router.patch('/:id', requireOwnerRoleMiddleware, async (c) => {
   const input = updateWalletSchema.parse(body);
   const updated = await updateWallet(db, merchant.id, walletId, input);
   safeWaitUntil(c, dispatchWalletSyncWebhook(db, merchant, 'wallet.synced', c.env));
+  emitMerchantRealtimeEvent(
+    c.env,
+    'WALLET_SYNCED',
+    { merchantId: merchant.id, action: 'updated' },
+    merchant.id,
+    c
+  );
   return c.json({ success: true, data: updated });
 });
 
@@ -91,6 +113,13 @@ router.delete('/:id', requireOwnerRoleMiddleware, async (c) => {
   const walletId = c.req.param('id');
   await deleteWallet(db, merchant.id, walletId);
   safeWaitUntil(c, dispatchWalletSyncWebhook(db, merchant, 'wallet.synced', c.env));
+  emitMerchantRealtimeEvent(
+    c.env,
+    'WALLET_SYNCED',
+    { merchantId: merchant.id, action: 'deleted' },
+    merchant.id,
+    c
+  );
   return c.json({ success: true, message: 'Wallet removed successfully' });
 });
 

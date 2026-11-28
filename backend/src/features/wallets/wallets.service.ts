@@ -12,7 +12,7 @@ import { generateSecureToken } from '../../shared/crypto';
 import { BadRequestError, NotFoundError } from '../../shared/errors';
 import { sanitizePhoneNumber } from '../../shared/parsers/mfs';
 import type { Env } from '../../shared/types';
-import { realtimeHub } from '../realtime/realtime.service';
+import { emitMerchantRealtimeEvent } from '../realtime/realtime.service';
 import { dispatchWebhook } from '../webhooks/webhook.dispatcher';
 import type { CreateWalletInput, SyncWalletsInput, UpdateWalletInput } from './wallets.schema';
 
@@ -237,7 +237,8 @@ export function enrichWalletRecord(
 export async function getActiveRotatedWallet(
   db: AppDb,
   merchantId: string,
-  provider: MfsProvider
+  provider: MfsProvider,
+  env?: Env
 ): Promise<EnrichedWalletRecord | null> {
   const [activeWallets, devices] = await Promise.all([
     db
@@ -314,7 +315,8 @@ export async function getActiveRotatedWallet(
       winner.rotationState = 'ACTIVE_PRIMARY';
     }
 
-    realtimeHub.broadcast(
+    emitMerchantRealtimeEvent(
+      env,
       'WALLET_ROTATED',
       {
         provider,
@@ -337,11 +339,12 @@ export async function getActiveRotatedWallet(
  */
 export async function getAllActiveRotatedWallets(
   db: AppDb,
-  merchantId: string
+  merchantId: string,
+  env?: Env
 ): Promise<EnrichedWalletRecord[]> {
   const results: EnrichedWalletRecord[] = [];
   for (const provider of MFS_PROVIDERS) {
-    const wallet = await getActiveRotatedWallet(db, merchantId, provider);
+    const wallet = await getActiveRotatedWallet(db, merchantId, provider, env);
     if (wallet) {
       results.push(wallet);
     }
@@ -612,7 +615,7 @@ export async function incrementWalletVolume(
   }
 
   if (!targetWallet) {
-    targetWallet = await getActiveRotatedWallet(db, merchantId, provider);
+    targetWallet = await getActiveRotatedWallet(db, merchantId, provider, options?.env);
   }
 
   if (!targetWallet) {
@@ -631,7 +634,7 @@ export async function incrementWalletVolume(
     })
     .where(eq(merchantWallets.id, targetWallet.id));
 
-  const nextActive = await getActiveRotatedWallet(db, merchantId, provider);
+  const nextActive = await getActiveRotatedWallet(db, merchantId, provider, options?.env);
   const rotated = Boolean(
     nextActive && (nextActive.id !== targetWallet.id || (prevVolume < safeLimit && newVolume >= safeLimit))
   );
@@ -659,7 +662,8 @@ export async function incrementWalletVolume(
 export async function syncMerchantWallets(
   db: AppDb,
   merchantId: string,
-  input: SyncWalletsInput
+  input: SyncWalletsInput,
+  env?: Env
 ): Promise<SyncMerchantWalletsResult> {
   const normalizedItems = input.wallets.map((item, index) => {
     const normalizedNumber = sanitizePhoneNumber(item.walletNumber, item.provider);
@@ -777,7 +781,7 @@ export async function syncMerchantWallets(
 
   // Run intelligent rotation check per provider so active primary always honors 250k/300k & device status
   for (const provider of MFS_PROVIDERS) {
-    await getActiveRotatedWallet(db, merchantId, provider);
+    await getActiveRotatedWallet(db, merchantId, provider, env);
   }
 
   const [allWallets, devices] = await Promise.all([

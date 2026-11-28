@@ -7,7 +7,7 @@ import { authMerchantOrDeviceMiddleware } from '../../shared/middleware';
 import type { AppContextEnv } from '../../shared/types';
 import { checkoutResolveAliasSchema } from '../payments/payments.schema';
 import { resolvePaymentIntent, resolvePublicOrigin } from '../payments/payments.service';
-import { realtimeHub } from '../realtime/realtime.service';
+import { emitMerchantRealtimeEvent } from '../realtime/realtime.service';
 import { createSessionSchema, verifyCheckoutSchema } from './checkout.schema';
 import {
   createCheckoutSession,
@@ -132,7 +132,8 @@ router.post('/verify', async (c) => {
   const result = await verifyCheckoutPayment(db, merchant, input, c.env, c);
 
   if (result.status === 'VERIFIED') {
-    realtimeHub.broadcast(
+    emitMerchantRealtimeEvent(
+      c.env,
       'PAYMENT_VERIFIED',
       {
         paymentIntentId: result.paymentIntentId,
@@ -144,10 +145,12 @@ router.post('/verify', async (c) => {
         matchType: result.matchType,
         provider: input.provider,
       },
-      merchant.id
+      merchant.id,
+      c
     );
   } else {
-    realtimeHub.broadcast(
+    emitMerchantRealtimeEvent(
+      c.env,
       'QUEUE_UPDATED',
       {
         paymentIntentId: result.paymentIntentId,
@@ -158,7 +161,8 @@ router.post('/verify', async (c) => {
         status: result.status,
         escalationReason: result.escalationReason,
       },
-      merchant.id
+      merchant.id,
+      c
     );
   }
 

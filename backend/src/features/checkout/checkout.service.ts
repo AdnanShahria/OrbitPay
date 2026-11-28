@@ -160,9 +160,9 @@ export async function createCheckoutSession(
     throw new NotFoundError(`Active merchant '${merchantId}' not found`);
   }
 
-  let wallets = await getAllActiveRotatedWallets(db, merchantId);
+  let wallets = await getAllActiveRotatedWallets(db, merchantId, env);
   if (requestedProvider) {
-    const specific = await getActiveRotatedWallet(db, merchantId, requestedProvider);
+    const specific = await getActiveRotatedWallet(db, merchantId, requestedProvider, env);
     if (specific) {
       wallets = [specific];
     }
@@ -363,7 +363,7 @@ export async function getPublicCheckoutSession(
   }
 
   const [wallets, deviceStatus, intentRows] = await Promise.all([
-    getAllActiveRotatedWallets(db, merchant.id),
+    getAllActiveRotatedWallets(db, merchant.id, env),
     computeDeviceOnlineStatus(db, env, merchant),
     session.paymentIntentId
       ? db.select().from(paymentIntents).where(eq(paymentIntents.id, session.paymentIntentId)).limit(1)

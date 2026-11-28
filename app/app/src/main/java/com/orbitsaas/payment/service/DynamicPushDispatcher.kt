@@ -14,6 +14,7 @@ import com.orbitsaas.payment.data.local.PreferencesManager
 import com.orbitsaas.payment.data.remote.DynamicPaymentActionDto
 import com.orbitsaas.payment.ui.MainActivity
 import com.orbitsaas.payment.update.AppUpdateManager
+import com.orbitsaas.payment.widget.PendingPaymentsWidgetProvider
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -150,6 +151,9 @@ object DynamicPushDispatcher {
         }
 
         notifyRefreshNeeded(effectiveEvent)
+        if (effectiveEvent.startsWith("payment.") || effectiveEvent == "order.created") {
+            PendingPaymentsWidgetProvider.refreshFromPushIfPinned(appContext)
+        }
 
         val resolvedTitle = buildDynamicTitle(
             appContext = appContext,

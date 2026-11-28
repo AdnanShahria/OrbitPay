@@ -342,7 +342,7 @@ export async function getPublicPaymentLink(
     merchantSlug
   );
   const [wallets, deviceStatus, platformConfig] = await Promise.all([
-    getAllActiveRotatedWallets(db, merchant.id),
+    getAllActiveRotatedWallets(db, merchant.id, env),
     computeDeviceOnlineStatus(db, env, merchant),
     getPlatformSettings(db),
   ]);

@@ -13,7 +13,7 @@ import { NotFoundError } from '../../shared/errors';
 import { parseAllowedOrigins, validateSafeWebhookUrl } from '../../shared/ssrf';
 import type { Env } from '../../shared/types';
 import { dispatchWebhook, sendPushToMerchantDevices } from '../webhooks/webhook.dispatcher';
-import { realtimeHub } from '../realtime/realtime.service';
+import { emitMerchantRealtimeEvent } from '../realtime/realtime.service';
 import type { NotifyOrderInput, ListOrdersQuery, OrderActionInput, OrderAction } from './orders.schema';
 
 const ACTION_CONFIG: Record<
@@ -132,7 +132,8 @@ export async function notifyOrder(
     order = insertedRes[0];
   }
 
-  realtimeHub.broadcast(
+  emitMerchantRealtimeEvent(
+    env,
     created ? 'ORDER_CREATED' : 'ORDER_UPDATED',
     {
       merchantId: merchant.id,
@@ -355,7 +356,8 @@ export async function performOrderAction(
     env
   );
 
-  realtimeHub.broadcast(
+  emitMerchantRealtimeEvent(
+    env,
     'ORDER_UPDATED',
     {
       merchantId: merchant.id,

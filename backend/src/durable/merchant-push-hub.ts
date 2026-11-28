@@ -5,6 +5,13 @@ interface PushRequestPayload {
   title?: string;
   body?: string;
   data?: Record<string, unknown>;
+  target?: 'android' | 'web' | 'all';
+}
+
+interface RealtimeRequestPayload {
+  event?: string;
+  data?: unknown;
+  timestamp?: string;
 }
 
 /**
@@ -33,7 +40,8 @@ export class MerchantPushHub implements DurableObject {
 
       const pair = new WebSocketPair();
       const [client, server] = Object.values(pair) as [WebSocket, WebSocket];
-      const clientType = url.searchParams.get('clientType')?.trim() || 'android';
+      const rawClientType = url.searchParams.get('clientType')?.trim().toLowerCase();
+      const clientType = rawClientType === 'web' ? 'web' : 'android';
 
       this.state.acceptWebSocket(server, [clientType]);
       server.send(
@@ -41,6 +49,7 @@ export class MerchantPushHub implements DurableObject {
           type: 'connected',
           serverTime: Date.now(),
           transport: 'cloudflare_do_ws',
+          clientType,
         })
       );
 
@@ -74,8 +83,16 @@ export class MerchantPushHub implements DurableObject {
         timestamp: Date.now(),
       });
 
+      const target = payload.target ?? 'android';
+      const targetSockets =
+        target === 'all'
+          ? this.state.getWebSockets()
+          : target === 'web'
+            ? this.state.getWebSockets('web')
+            : this.state.getWebSockets('android');
+
       let delivered = 0;
-      for (const ws of this.state.getWebSockets()) {
+      for (const ws of targetSockets) {
         try {
           ws.send(frame);
           delivered++;
@@ -91,13 +108,65 @@ export class MerchantPushHub implements DurableObject {
       return Response.json({
         ok: true,
         delivered,
-        activeSockets: this.state.getWebSockets().length,
+        activeSockets: targetSockets.length,
+      });
+    }
+
+    if (request.method === 'POST' && url.pathname === '/realtime') {
+      let payload: RealtimeRequestPayload;
+      try {
+        payload = (await request.json()) as RealtimeRequestPayload;
+      } catch {
+        return Response.json({ success: false, error: 'Invalid JSON payload' }, { status: 400 });
+      }
+
+      const eventName = typeof payload.event === 'string' ? payload.event.trim() : '';
+      if (!eventName) {
+        return Response.json(
+          { success: false, error: 'Field "event" must be a non-empty string' },
+          { status: 400 }
+        );
+      }
+
+      const frame = JSON.stringify({
+        type: 'realtime',
+        event: eventName,
+        data: payload.data ?? {},
+        timestamp: payload.timestamp || new Date().toISOString(),
+      });
+
+      const sockets = this.state.getWebSockets('web');
+      let delivered = 0;
+      for (const ws of sockets) {
+        if (ws.readyState !== WebSocket.OPEN) continue;
+        try {
+          ws.send(frame);
+          delivered++;
+        } catch {
+          try {
+            ws.close(1011, 'Failed to deliver realtime frame');
+          } catch {
+            // Socket already closed
+          }
+        }
+      }
+
+      return Response.json({
+        success: true,
+        delivered,
+        activeWebSockets: sockets.length,
       });
     }
 
     if (request.method === 'GET' && url.pathname === '/status') {
+      const all = this.state.getWebSockets();
+      const android = this.state.getWebSockets('android');
+      const web = this.state.getWebSockets('web');
       return Response.json({
-        activeSockets: this.state.getWebSockets().length,
+        activeSockets: all.length,
+        androidSockets: android.length,
+        webSockets: web.length,
+        transport: 'cloudflare_do_ws',
       });
     }
 

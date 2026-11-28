@@ -48,7 +48,7 @@ import {
   notifyPaymentVerifiedInvoiceEmail,
   resolveCustomerEmailForOrder,
 } from '../notifications/payment-email.service';
-import { realtimeHub } from '../realtime/realtime.service';
+import { emitMerchantRealtimeEvent } from '../realtime/realtime.service';
 import type { IngestMessageDTO, PreflightCheckDTO } from './device.schema';
 
 export interface IngestBatchResult {
@@ -224,14 +224,16 @@ export async function ingestDeviceSmsBatch(
 
     if (trustFlag !== null) {
       flaggedCount++;
-      realtimeHub.broadcast(
+      emitMerchantRealtimeEvent(
+        env,
         'SMS_FLAGGED',
         {
           trxId: normalizedTrxId,
           provider: msg.provider,
           flag: trustFlag,
         },
-        merchant.id
+        merchant.id,
+        ctx
       );
 
       // Escalate any waiting intent/queue item matching this TrxID to MANUAL_REVIEW_REQUIRED
@@ -598,7 +600,8 @@ export async function ingestDeviceSmsBatch(
         ])
       );
 
-      realtimeHub.broadcast(
+      emitMerchantRealtimeEvent(
+        env,
         'PAYMENT_VERIFIED',
         {
           paymentIntentId: intent?.id ?? pendingQueueRecord.paymentIntentId,
@@ -610,13 +613,30 @@ export async function ingestDeviceSmsBatch(
           matchType: sixFactor.matchType,
           provider: msg.provider,
         },
-        merchant.id
+        merchant.id,
+        ctx
       );
 
       autoVerifiedCount++;
     } catch (err) {
       console.warn('[Device Reconciler CAS Skip]:', err);
     }
+  }
+
+  if (ingestedCount > 0 && autoVerifiedCount === 0) {
+    emitMerchantRealtimeEvent(
+      env,
+      'TRANSACTION_NEW',
+      {
+        merchantId: merchant.id,
+        ingestedCount,
+        autoVerifiedCount,
+        flaggedCount,
+        timestamp: new Date().toISOString(),
+      },
+      merchant.id,
+      ctx
+    );
   }
 
   return {

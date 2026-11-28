@@ -6,6 +6,7 @@ import {
 } from '../../shared/middleware';
 import type { AppContextEnv } from '../../shared/types';
 import { resolvePublicOrigin } from '../payments/payments.service';
+import { emitMerchantRealtimeEvent } from '../realtime/realtime.service';
 import {
   createPaymentLinkSchema,
   payPaymentLinkSchema,
@@ -81,6 +82,13 @@ router.post('/', authMerchantMiddleware, requireOwnerRoleMiddleware, async (c) =
   const input = createPaymentLinkSchema.parse(body);
   const origin = resolvePublicOrigin(c.req.url, c.env.PRODUCTION_DOMAIN);
   const created = await createPaymentLink(db, merchant, input, origin);
+  emitMerchantRealtimeEvent(
+    c.env,
+    'PAYMENT_LINK_UPDATED',
+    { merchantId: merchant.id, action: 'created' },
+    merchant.id,
+    c
+  );
   return c.json({ success: true, data: created }, 201);
 });
 
@@ -101,6 +109,13 @@ router.patch('/:id', authMerchantMiddleware, requireOwnerRoleMiddleware, async (
   const input = updatePaymentLinkSchema.parse(body);
   const origin = resolvePublicOrigin(c.req.url, c.env.PRODUCTION_DOMAIN);
   const updated = await updatePaymentLink(db, merchant, id, input, origin);
+  emitMerchantRealtimeEvent(
+    c.env,
+    'PAYMENT_LINK_UPDATED',
+    { merchantId: merchant.id, action: 'updated' },
+    merchant.id,
+    c
+  );
   return c.json({ success: true, data: updated });
 });
 
@@ -109,6 +124,13 @@ router.delete('/:id', authMerchantMiddleware, requireOwnerRoleMiddleware, async 
   const merchant = c.get('merchant')!;
   const id = c.req.param('id');
   const result = await deletePaymentLink(db, merchant, id);
+  emitMerchantRealtimeEvent(
+    c.env,
+    'PAYMENT_LINK_UPDATED',
+    { merchantId: merchant.id, action: 'deleted' },
+    merchant.id,
+    c
+  );
   return c.json({ success: true, data: result });
 });
 

@@ -250,7 +250,7 @@ export function PollingStatus({
     borderClass: 'border-border-button-default',
   };
 
-  // Poll backend status every 2.5s until terminal state
+  // Adaptive polling until terminal state (3.5s active verification, 12s manual review)
   useEffect(() => {
     if (pollStatus === 'VERIFIED' || pollStatus === 'REJECTED' || pollStatus === 'EXPIRED') {
       return;
@@ -317,12 +317,13 @@ export function PollingStatus({
       return false;
     };
 
+    const intervalMs = pollStatus === 'MANUAL_REVIEW_REQUIRED' ? 12_000 : 3_500;
     const interval = setInterval(async () => {
       const done = await checkStatus();
       if (done) {
         clearInterval(interval);
       }
-    }, 3500);
+    }, intervalMs);
 
     return () => clearInterval(interval);
   }, [merchantId, orderId, trxId, expectedAmount, pollStatus, meta.name, onVerified, onStatusChange]);

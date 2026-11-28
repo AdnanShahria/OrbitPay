@@ -11,6 +11,7 @@ import {
 } from '@/features/admin/useAdmin';
 
 export type RealtimeStatus = 'connected' | 'connecting' | 'disconnected';
+export type RealtimeTransport = 'websocket' | 'sse' | 'none';
 
 export interface RealtimeMessage {
   type: string;
@@ -24,8 +25,22 @@ export interface UseRealtimeOptions {
 }
 
 const BACKOFF_STEPS_MS = [3000, 6000, 12000, 30000] as const;
-const EDGE_SYNC_INTERVAL_CONNECTED_MS = 60_000;
-const EDGE_SYNC_INTERVAL_DISCONNECTED_MS = 20_000;
+const WS_PING_INTERVAL_MS = 45_000;
+const EDGE_SYNC_FALLBACK_INTERVAL_MS = 45_000;
+const VISIBILITY_CATCHUP_THRESHOLD_MS = 60_000;
+
+const SSE_EVENT_TYPES = [
+  'TRANSACTION_NEW',
+  'PAYMENT_VERIFIED',
+  'DEVICE_HEARTBEAT',
+  'QUEUE_UPDATED',
+  'ORDER_CREATED',
+  'ORDER_UPDATED',
+  'SMS_FLAGGED',
+  'WALLET_ROTATED',
+  'WALLET_SYNCED',
+  'PAYMENT_LINK_UPDATED',
+] as const;
 
 interface RecentIntentSnapshot {
   id: string;
@@ -48,18 +63,36 @@ export function useRealtime(options?: UseRealtimeOptions) {
   const enabled = options?.enabled ?? true;
   const queryClient = useQueryClient();
   const [status, setStatus] = useState<RealtimeStatus>('disconnected');
+  const [transport, setTransport] = useState<RealtimeTransport>('none');
   const [lastEvent, setLastEvent] = useState<RealtimeMessage | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const hasConnectedOnceRef = useRef(false);
 
   const notifiedVerifiedRef = useRef<Set<string>>(new Set());
   const notifiedPendingRef = useRef<Set<string>>(new Set());
   const baselineSeededRef = useRef(false);
   const statusRef = useRef<RealtimeStatus>('disconnected');
+  const transportRef = useRef<RealtimeTransport>('none');
   const isSyncingIntentsRef = useRef(false);
 
   useEffect(() => {
     statusRef.current = status;
   }, [status]);
+
+  useEffect(() => {
+    transportRef.current = transport;
+  }, [transport]);
+
+  const updateStatus = useCallback((next: RealtimeStatus) => {
+    statusRef.current = next;
+    setStatus(next);
+  }, []);
+
+  const updateTransport = useCallback((next: RealtimeTransport) => {
+    transportRef.current = next;
+    setTransport(next);
+  }, []);
 
   const notifyPaymentVerified = useCallback(
     (payload: {
@@ -143,7 +176,16 @@ export function useRealtime(options?: UseRealtimeOptions) {
   useEffect(() => {
     let cancelled = false;
     let reconnectTimeout: ReturnType<typeof setTimeout> | undefined;
+    let pingInterval: ReturnType<typeof setInterval> | undefined;
     let attempt = 0;
+    hasConnectedOnceRef.current = false;
+
+    function clearPingInterval() {
+      if (pingInterval !== undefined) {
+        clearInterval(pingInterval);
+        pingInterval = undefined;
+      }
+    }
 
     function resolveStreamUrl(): string | null {
       if (!enabled) return null;
@@ -159,7 +201,32 @@ export function useRealtime(options?: UseRealtimeOptions) {
       return `/api/v1/realtime/stream?token=${encodeURIComponent(merchantToken)}`;
     }
 
+    function resolveWsUrl(): string | null {
+      if (!enabled || mode !== 'merchant' || typeof window === 'undefined') {
+        return null;
+      }
+      const merchantToken = getAuthToken()?.trim();
+      if (!merchantToken) return null;
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      return `${protocol}//${window.location.host}/api/v1/realtime/ws?token=${encodeURIComponent(merchantToken)}`;
+    }
+
     function cleanupCurrentSource() {
+      clearPingInterval();
+      if (wsRef.current) {
+        const activeWs = wsRef.current;
+        wsRef.current = null;
+        activeWs.onopen = null;
+        activeWs.onmessage = null;
+        activeWs.onerror = null;
+        activeWs.onclose = null;
+        if (
+          activeWs.readyState === WebSocket.OPEN ||
+          activeWs.readyState === WebSocket.CONNECTING
+        ) {
+          activeWs.close();
+        }
+      }
       if (eventSourceRef.current) {
         eventSourceRef.current.close();
         eventSourceRef.current = null;
@@ -182,173 +249,188 @@ export function useRealtime(options?: UseRealtimeOptions) {
       queryClient.invalidateQueries({ queryKey: ['orders'] });
     }
 
-    function connect() {
-      if (cancelled) return;
+    function handleRealtimeEvent(eventType: string, data: unknown) {
+      setLastEvent({ type: eventType, data, timestamp: new Date().toISOString() });
 
-      const streamUrl = resolveStreamUrl();
-      if (!streamUrl) {
-        cleanupCurrentSource();
-        setStatus('disconnected');
-        return;
-      }
-
-      cleanupCurrentSource();
-      setStatus('connecting');
-
-      let hasOpened = false;
-      const es = new EventSource(streamUrl);
-      eventSourceRef.current = es;
-
-      es.onopen = () => {
-        if (cancelled) return;
-        hasOpened = true;
-        attempt = 0;
-        setStatus('connected');
-      };
-
-      es.addEventListener('CONNECTED', (e) => {
-        if (cancelled) return;
-        hasOpened = true;
-        attempt = 0;
-        setStatus('connected');
-        try {
-          const data = JSON.parse(e.data);
-          setLastEvent({ type: 'CONNECTED', data, timestamp: new Date().toISOString() });
-        } catch {
-          // ignore parse errors
-        }
-      });
-
-      es.addEventListener('TRANSACTION_NEW', (e) => {
-        try {
-          const data = JSON.parse(e.data) as {
-            provider?: string;
-            trxId?: string;
-            amount?: number;
-          };
-          setLastEvent({ type: 'TRANSACTION_NEW', data, timestamp: new Date().toISOString() });
+      switch (eventType) {
+        case 'TRANSACTION_NEW': {
           invalidateMerchantQueries();
           invalidateAdminIfApplicable();
-        } catch {
-          // ignore
+          break;
         }
-      });
-
-      es.addEventListener('PAYMENT_VERIFIED', (e) => {
-        try {
-          const data = JSON.parse(e.data) as {
+        case 'PAYMENT_VERIFIED': {
+          const payload = (data && typeof data === 'object' ? data : {}) as {
             paymentIntentId?: string;
             orderId?: string;
             trxId?: string;
             amount?: number;
             paidAmount?: number;
             provider?: string;
+            linkTitle?: string;
           };
-          setLastEvent({ type: 'PAYMENT_VERIFIED', data, timestamp: new Date().toISOString() });
           invalidateMerchantQueries();
           invalidateAdminIfApplicable();
 
           if (mode === 'merchant') {
             notifyPaymentVerified({
-              paymentIntentId: data.paymentIntentId,
-              orderId: data.orderId,
-              trxId: data.trxId,
-              amount: data.paidAmount ?? data.amount,
-              provider: data.provider,
+              paymentIntentId: payload.paymentIntentId,
+              orderId: payload.orderId,
+              trxId: payload.trxId,
+              amount: payload.paidAmount ?? payload.amount,
+              provider: payload.provider,
+              linkTitle: payload.linkTitle,
             });
           }
-        } catch {
-          // ignore
+          break;
         }
-      });
-
-      es.addEventListener('DEVICE_HEARTBEAT', (e) => {
-        try {
-          const data = JSON.parse(e.data);
-          setLastEvent({ type: 'DEVICE_HEARTBEAT', data, timestamp: new Date().toISOString() });
+        case 'DEVICE_HEARTBEAT': {
           queryClient.invalidateQueries({ queryKey: ['device', 'stats'] });
+          queryClient.invalidateQueries({ queryKey: ['wallets', 'overview'] });
           invalidateAdminIfApplicable();
-        } catch {
-          // ignore
+          break;
         }
-      });
-
-      es.addEventListener('QUEUE_UPDATED', (e) => {
-        try {
-          const data = JSON.parse(e.data) as {
+        case 'QUEUE_UPDATED': {
+          const payload = (data && typeof data === 'object' ? data : null) as {
             paymentIntentId?: string;
             orderId?: string;
             trxId?: string;
             expectedAmount?: number;
             provider?: string;
             status?: string;
-          };
-          setLastEvent({ type: 'QUEUE_UPDATED', data, timestamp: new Date().toISOString() });
+          } | null;
           queryClient.invalidateQueries({ queryKey: ['verification-queue'] });
           queryClient.invalidateQueries({ queryKey: ['payment-intents'] });
           queryClient.invalidateQueries({ queryKey: ['payment-links'] });
+          queryClient.invalidateQueries({ queryKey: ['device', 'stats'] });
           invalidateAdminIfApplicable();
 
-          if (mode === 'merchant' && data?.trxId) {
+          if (mode === 'merchant' && payload?.trxId) {
             notifyPaymentSubmitted({
-              paymentIntentId: data.paymentIntentId,
-              orderId: data.orderId,
-              trxId: data.trxId,
-              amount: data.expectedAmount,
-              provider: data.provider,
-              status: data.status,
+              paymentIntentId: payload.paymentIntentId,
+              orderId: payload.orderId,
+              trxId: payload.trxId,
+              amount: payload.expectedAmount,
+              provider: payload.provider,
+              status: payload.status,
             });
           }
-        } catch {
-          // ignore
+          break;
         }
-      });
-
-      es.addEventListener('ORDER_CREATED', (e) => {
-        try {
-          const data = JSON.parse(e.data);
-          setLastEvent({ type: 'ORDER_CREATED', data, timestamp: new Date().toISOString() });
+        case 'ORDER_CREATED':
+        case 'ORDER_UPDATED': {
           queryClient.invalidateQueries({ queryKey: ['orders'] });
+          queryClient.invalidateQueries({ queryKey: ['payment-intents'] });
           queryClient.invalidateQueries({ queryKey: ['device', 'stats'] });
           invalidateAdminIfApplicable();
-        } catch {
-          // ignore
+          break;
         }
-      });
-
-      es.addEventListener('ORDER_UPDATED', (e) => {
-        try {
-          const data = JSON.parse(e.data);
-          setLastEvent({ type: 'ORDER_UPDATED', data, timestamp: new Date().toISOString() });
-          queryClient.invalidateQueries({ queryKey: ['orders'] });
-          queryClient.invalidateQueries({ queryKey: ['device', 'stats'] });
-          invalidateAdminIfApplicable();
-        } catch {
-          // ignore
-        }
-      });
-
-      es.addEventListener('SMS_FLAGGED', (e) => {
-        try {
-          const data = JSON.parse(e.data);
-          setLastEvent({ type: 'SMS_FLAGGED', data, timestamp: new Date().toISOString() });
+        case 'SMS_FLAGGED': {
           queryClient.invalidateQueries({ queryKey: ['transactions'] });
+          queryClient.invalidateQueries({ queryKey: ['payment-intents'] });
+          queryClient.invalidateQueries({ queryKey: ['verification-queue'] });
           queryClient.invalidateQueries({ queryKey: ['device', 'stats'] });
           invalidateAdminIfApplicable();
+          break;
+        }
+        case 'WALLET_ROTATED':
+        case 'WALLET_SYNCED': {
+          queryClient.invalidateQueries({ queryKey: ['wallets'] });
+          queryClient.invalidateQueries({ queryKey: ['wallets', 'overview'] });
+          queryClient.invalidateQueries({ queryKey: ['device', 'stats'] });
+          invalidateAdminIfApplicable();
+          break;
+        }
+        case 'PAYMENT_LINK_UPDATED': {
+          queryClient.invalidateQueries({ queryKey: ['payment-links'] });
+          break;
+        }
+        default:
+          break;
+      }
+    }
+
+    function scheduleReconnect(targetFn: () => void, checkUrl: () => string | null) {
+      const delayMs = BACKOFF_STEPS_MS[Math.min(attempt, BACKOFF_STEPS_MS.length - 1)];
+      attempt += 1;
+      clearTimeout(reconnectTimeout);
+      reconnectTimeout = setTimeout(() => {
+        if (!cancelled && checkUrl()) {
+          targetFn();
+        }
+      }, delayMs);
+    }
+
+    function connectSse() {
+      if (cancelled) return;
+
+      const streamUrl = resolveStreamUrl();
+      if (!streamUrl) {
+        cleanupCurrentSource();
+        updateStatus('disconnected');
+        updateTransport('none');
+        return;
+      }
+
+      cleanupCurrentSource();
+      updateStatus('connecting');
+      updateTransport('sse');
+
+      let hasOpened = false;
+      const es = new EventSource(streamUrl);
+      eventSourceRef.current = es;
+
+      es.onopen = () => {
+        if (cancelled || eventSourceRef.current !== es) return;
+        hasOpened = true;
+        attempt = 0;
+        updateStatus('connected');
+        updateTransport('sse');
+      };
+
+      es.addEventListener('CONNECTED', (e) => {
+        if (cancelled || eventSourceRef.current !== es) return;
+        hasOpened = true;
+        attempt = 0;
+        updateStatus('connected');
+        updateTransport('sse');
+        try {
+          const data = JSON.parse((e as MessageEvent<string>).data);
+          setLastEvent({ type: 'CONNECTED', data, timestamp: new Date().toISOString() });
         } catch {
-          // ignore
+          // ignore parse errors
+        }
+        if (hasConnectedOnceRef.current) {
+          if (mode === 'merchant') {
+            invalidateMerchantQueries();
+          } else {
+            invalidateAdminIfApplicable();
+          }
+        } else {
+          hasConnectedOnceRef.current = true;
         }
       });
+
+      for (const eventType of SSE_EVENT_TYPES) {
+        es.addEventListener(eventType, (e) => {
+          try {
+            const data = JSON.parse((e as MessageEvent<string>).data);
+            handleRealtimeEvent(eventType, data);
+          } catch {
+            // ignore parse errors
+          }
+        });
+      }
 
       es.onerror = () => {
         es.close();
         if (eventSourceRef.current === es) {
           eventSourceRef.current = null;
         }
-        setStatus('disconnected');
+        updateStatus('disconnected');
 
         if (cancelled) return;
         if (!resolveStreamUrl()) {
+          updateTransport('none');
           return;
         }
 
@@ -360,93 +442,220 @@ export function useRealtime(options?: UseRealtimeOptions) {
           void checkRes
             .then((res) => {
               if (cancelled || res.status === 401 || !resolveStreamUrl()) {
+                if (res.status === 401) {
+                  updateTransport('none');
+                }
                 return;
               }
-              const delayMs =
-                BACKOFF_STEPS_MS[Math.min(attempt, BACKOFF_STEPS_MS.length - 1)];
-              attempt += 1;
-              clearTimeout(reconnectTimeout);
-              reconnectTimeout = setTimeout(() => {
-                if (!cancelled && resolveStreamUrl()) {
-                  connect();
-                }
-              }, delayMs);
+              scheduleReconnect(connectSse, resolveStreamUrl);
             })
             .catch(() => {
               if (cancelled || !resolveStreamUrl()) return;
-              const delayMs =
-                BACKOFF_STEPS_MS[Math.min(attempt, BACKOFF_STEPS_MS.length - 1)];
-              attempt += 1;
-              clearTimeout(reconnectTimeout);
-              reconnectTimeout = setTimeout(() => {
-                if (!cancelled && resolveStreamUrl()) {
-                  connect();
-                }
-              }, delayMs);
+              scheduleReconnect(connectSse, resolveStreamUrl);
             });
           return;
         }
 
-        const delayMs =
-          BACKOFF_STEPS_MS[Math.min(attempt, BACKOFF_STEPS_MS.length - 1)];
-        attempt += 1;
-
-        clearTimeout(reconnectTimeout);
-        reconnectTimeout = setTimeout(() => {
-          if (!cancelled && resolveStreamUrl()) {
-            connect();
-          }
-        }, delayMs);
+        scheduleReconnect(connectSse, resolveStreamUrl);
       };
+    }
+
+    function connectWs() {
+      if (cancelled) return;
+
+      const wsUrl = resolveWsUrl();
+      if (!wsUrl) {
+        cleanupCurrentSource();
+        updateStatus('disconnected');
+        updateTransport('none');
+        return;
+      }
+
+      cleanupCurrentSource();
+      updateStatus('connecting');
+
+      let hasOpened = false;
+      let handledDisconnect = false;
+      const ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+
+      const handleWsDisconnect = () => {
+        if (handledDisconnect) return;
+        handledDisconnect = true;
+        clearPingInterval();
+
+        if (wsRef.current === ws) {
+          wsRef.current = null;
+        }
+        ws.onopen = null;
+        ws.onmessage = null;
+        ws.onerror = null;
+        ws.onclose = null;
+        if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+          ws.close();
+        }
+
+        updateStatus('disconnected');
+
+        if (cancelled) return;
+        if (!resolveWsUrl()) {
+          updateTransport('none');
+          return;
+        }
+
+        if (!hasOpened) {
+          void authFetch('/api/v1/auth/me')
+            .then((res) => {
+              if (cancelled || res.status === 401 || !resolveWsUrl()) {
+                if (res.status === 401) {
+                  updateTransport('none');
+                }
+                return;
+              }
+              connectSse();
+            })
+            .catch(() => {
+              if (cancelled || !resolveWsUrl()) return;
+              connectSse();
+            });
+          return;
+        }
+
+        scheduleReconnect(connectWs, resolveWsUrl);
+      };
+
+      ws.onopen = () => {
+        if (cancelled || wsRef.current !== ws) {
+          ws.close();
+          return;
+        }
+        clearPingInterval();
+        pingInterval = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send('ping');
+          }
+        }, WS_PING_INTERVAL_MS);
+      };
+
+      ws.onmessage = (event) => {
+        if (cancelled || wsRef.current !== ws) return;
+        if (event.data === 'pong') return;
+        if (typeof event.data !== 'string') return;
+
+        try {
+          const msg = JSON.parse(event.data) as {
+            type?: string;
+            event?: string;
+            data?: unknown;
+          };
+
+          if (msg.type === 'connected') {
+            hasOpened = true;
+            attempt = 0;
+            updateStatus('connected');
+            updateTransport('websocket');
+            setLastEvent({
+              type: 'CONNECTED',
+              data: msg,
+              timestamp: new Date().toISOString(),
+            });
+
+            if (hasConnectedOnceRef.current) {
+              invalidateMerchantQueries();
+            } else {
+              hasConnectedOnceRef.current = true;
+            }
+            return;
+          }
+
+          if (msg.type === 'realtime' && typeof msg.event === 'string') {
+            handleRealtimeEvent(msg.event, msg.data);
+          }
+        } catch {
+          // ignore parse errors
+        }
+      };
+
+      ws.onerror = handleWsDisconnect;
+      ws.onclose = handleWsDisconnect;
+    }
+
+    function connect() {
+      if (cancelled) return;
+      if (mode === 'admin') {
+        connectSse();
+      } else {
+        connectWs();
+      }
     }
 
     const handleUnauthorized = () => {
       clearTimeout(reconnectTimeout);
       cleanupCurrentSource();
-      setStatus('disconnected');
+      updateStatus('disconnected');
+      updateTransport('none');
+    };
+
+    const handleOnline = () => {
+      if (cancelled) return;
+      if (statusRef.current !== 'connected') {
+        clearTimeout(reconnectTimeout);
+        attempt = 0;
+        connect();
+      }
     };
 
     const unauthorizedEventName =
       mode === 'admin' ? ADMIN_UNAUTHORIZED_EVENT : UNAUTHORIZED_EVENT;
     window.addEventListener(unauthorizedEventName, handleUnauthorized);
+    window.addEventListener('online', handleOnline);
 
     connect();
 
     return () => {
       cancelled = true;
       window.removeEventListener(unauthorizedEventName, handleUnauthorized);
+      window.removeEventListener('online', handleOnline);
       clearTimeout(reconnectTimeout);
       cleanupCurrentSource();
-      setStatus('disconnected');
+      updateStatus('disconnected');
+      updateTransport('none');
     };
-  }, [queryClient, mode, enabled, notifyPaymentVerified, notifyPaymentSubmitted]);
+  }, [
+    queryClient,
+    mode,
+    enabled,
+    notifyPaymentVerified,
+    notifyPaymentSubmitted,
+    updateStatus,
+    updateTransport,
+  ]);
 
-  // Distributed Cloudflare Workers edge sync: ensures Payment Received toasts
-  // still fire reliably even if checkout/SMS hit a different Worker isolate.
+  // Zero-Idle-Polling Edge Sync: seed baseline once on mount and only run
+  // fallback sync when WebSocket push is not actively connected.
   useEffect(() => {
     if (mode !== 'merchant' || !enabled || !getAuthToken()) {
       return;
     }
 
     let cancelled = false;
-    let lastSyncAt = 0;
+    let hiddenAt: number | null =
+      typeof document !== 'undefined' && document.hidden ? Date.now() : null;
     baselineSeededRef.current = false;
 
     const syncRecentIntents = async (isInitial = false) => {
       if (cancelled || !getAuthToken()) return;
-      if (typeof document !== 'undefined' && document.hidden) return;
-      if (isSyncingIntentsRef.current) return;
-
-      const minInterval =
+      if (!isInitial && typeof document !== 'undefined' && document.hidden) return;
+      if (
+        !isInitial &&
+        transportRef.current === 'websocket' &&
         statusRef.current === 'connected'
-          ? EDGE_SYNC_INTERVAL_CONNECTED_MS
-          : EDGE_SYNC_INTERVAL_DISCONNECTED_MS;
-      if (!isInitial && baselineSeededRef.current && Date.now() - lastSyncAt < minInterval) {
+      ) {
         return;
       }
+      if (isSyncingIntentsRef.current) return;
 
       isSyncingIntentsRef.current = true;
-      lastSyncAt = Date.now();
       try {
         const res = await authFetch('/api/v1/payment-intents?limit=12&offset=0');
         if (!res.ok) return;
@@ -463,9 +672,7 @@ export function useRealtime(options?: UseRealtimeOptions) {
               item.status === 'WAITING_FOR_SMS' ||
               item.status === 'MANUAL_REVIEW_REQUIRED'
             ) {
-              notifiedPendingRef.current.add(
-                `${item.id}:${item.status}`,
-              );
+              notifiedPendingRef.current.add(`${item.id}:${item.status}`);
             }
           }
           baselineSeededRef.current = true;
@@ -527,13 +734,40 @@ export function useRealtime(options?: UseRealtimeOptions) {
     };
 
     void syncRecentIntents(true);
+
     const timer = setInterval(() => {
+      if (transportRef.current === 'websocket' && statusRef.current === 'connected') {
+        return;
+      }
       void syncRecentIntents(false);
-    }, EDGE_SYNC_INTERVAL_DISCONNECTED_MS);
+    }, EDGE_SYNC_FALLBACK_INTERVAL_MS);
+
+    const handleVisibilityChange = () => {
+      if (cancelled || typeof document === 'undefined') return;
+      if (document.hidden) {
+        hiddenAt = Date.now();
+        return;
+      }
+      const hiddenDuration = hiddenAt !== null ? Date.now() - hiddenAt : 0;
+      hiddenAt = null;
+      if (
+        hiddenDuration > VISIBILITY_CATCHUP_THRESHOLD_MS &&
+        statusRef.current !== 'connected'
+      ) {
+        void syncRecentIntents(false);
+      }
+    };
+
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+    }
 
     return () => {
       cancelled = true;
       clearInterval(timer);
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      }
     };
   }, [mode, enabled, queryClient, notifyPaymentVerified, notifyPaymentSubmitted]);
 
@@ -595,6 +829,7 @@ export function useRealtime(options?: UseRealtimeOptions) {
 
   return {
     status,
+    transport,
     lastEvent,
     simulateTransaction,
   };

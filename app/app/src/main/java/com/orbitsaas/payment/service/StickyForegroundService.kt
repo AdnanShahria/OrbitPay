@@ -27,7 +27,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -68,7 +67,9 @@ class StickyForegroundService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP_SERVICE) {
             pollingJob?.cancel()
+            pollingJob = null
             wsObserverJob?.cancel()
+            wsObserverJob = null
             pushWebSocketClient.disconnect()
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
@@ -95,14 +96,15 @@ class StickyForegroundService : Service() {
         }
 
         observeWebSocketState()
-        startPollingLoopIfNeeded()
         Log.i(TAG, "StickyForegroundService started in foreground.")
         return START_STICKY
     }
 
     override fun onDestroy() {
         pollingJob?.cancel()
+        pollingJob = null
         wsObserverJob?.cancel()
+        wsObserverJob = null
         pushWebSocketClient.disconnect()
         serviceScope.cancel()
         releaseWakeLock()
@@ -115,11 +117,26 @@ class StickyForegroundService : Service() {
     private fun observeWebSocketState() {
         if (wsObserverJob?.isActive == true) return
         wsObserverJob = serviceScope.launch {
-            PushWebSocketClient.connectionState
-                .drop(1)
-                .collect {
+            var hasObservedFirstState = false
+            PushWebSocketClient.connectionState.collect { state ->
+                if (hasObservedFirstState) {
                     updateForegroundNotification()
+                } else {
+                    hasObservedFirstState = true
                 }
+
+                when (state) {
+                    WsPushState.CONNECTED,
+                    WsPushState.UNAUTHORIZED -> {
+                        pollingJob?.cancel()
+                        pollingJob = null
+                    }
+                    WsPushState.DISCONNECTED,
+                    WsPushState.CONNECTING -> {
+                        ensureFallbackPollingLoop()
+                    }
+                }
+            }
         }
     }
 
@@ -135,10 +152,17 @@ class StickyForegroundService : Service() {
         }
     }
 
-    private fun startPollingLoopIfNeeded() {
+    private fun ensureFallbackPollingLoop() {
         if (pollingJob?.isActive == true) return
         pollingJob = serviceScope.launch {
-            while (isActive) {
+            // Grace period so brief WebSocket reconnects do not trigger redundant /sync polls
+            delay(INITIAL_FALLBACK_GRACE_MS)
+
+            while (
+                isActive &&
+                PushWebSocketClient.connectionState.value != WsPushState.CONNECTED &&
+                PushWebSocketClient.connectionState.value != WsPushState.UNAUTHORIZED
+            ) {
                 try {
                     performIncrementalSync()
                 } catch (ce: CancellationException) {
@@ -147,13 +171,10 @@ class StickyForegroundService : Service() {
                     Log.w(TAG, "Error in polling fallback loop: ${e.message}")
                 }
 
-                val intervalMs = if (
-                    PushWebSocketClient.connectionState.value != WsPushState.CONNECTED &&
-                    !FcmTokenRegistrar.isFirebaseAvailable(this@StickyForegroundService)
-                ) {
-                    POLL_INTERVAL_NO_FCM_MS
-                } else {
+                val intervalMs = if (FcmTokenRegistrar.isFirebaseAvailable(this@StickyForegroundService)) {
                     POLL_INTERVAL_WITH_FCM_MS
+                } else {
+                    POLL_INTERVAL_NO_FCM_MS
                 }
 
                 delay(intervalMs)
@@ -203,7 +224,9 @@ class StickyForegroundService : Service() {
         if (!stoppingUnauthorized.compareAndSet(false, true)) return
         Log.w(TAG, "Received 401 Unauthorized; clearing auth session and stopping.")
         pollingJob?.cancel()
+        pollingJob = null
         wsObserverJob?.cancel()
+        wsObserverJob = null
         preferencesManager.clearAuthSession()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
@@ -321,7 +344,8 @@ class StickyForegroundService : Service() {
     companion object {
         private const val TAG = "StickyForegroundService"
         private const val NOTIFICATION_ID = 1001
-        private const val POLL_INTERVAL_NO_FCM_MS = 60_000L
+        private const val INITIAL_FALLBACK_GRACE_MS = 20_000L
+        private const val POLL_INTERVAL_NO_FCM_MS = 120_000L
         private const val POLL_INTERVAL_WITH_FCM_MS = 300_000L
 
         const val ACTION_START_SERVICE = "com.orbitsaas.payment.action.START_SERVICE"

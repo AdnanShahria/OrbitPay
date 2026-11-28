@@ -87,7 +87,10 @@ class PendingPaymentsWidgetProvider : AppWidgetProvider() {
 
     companion object {
         private const val TAG = "PendingWidgetProvider"
+        private const val PUSH_REFRESH_COOLDOWN_MS = 10_000L
         private val isRefreshingWidget = AtomicBoolean(false)
+        @Volatile
+        private var lastPushRefreshMs = 0L
         const val ACTION_REFRESH_WIDGET = "com.orbitsaas.payment.action.REFRESH_PENDING_WIDGET"
         private const val PREF_WIDGET_SNAPSHOT = "pending_widget_snapshot_json"
         private const val PREFS_NAME = "orbit_payment_preferences"
@@ -101,6 +104,36 @@ class PendingPaymentsWidgetProvider : AppWidgetProvider() {
         private val json = Json {
             ignoreUnknownKeys = true
             encodeDefaults = true
+        }
+
+        fun hasActiveWidgets(context: Context): Boolean {
+            val manager = AppWidgetManager.getInstance(context)
+            val componentName = ComponentName(context, PendingPaymentsWidgetProvider::class.java)
+            return manager.getAppWidgetIds(componentName).isNotEmpty()
+        }
+
+        fun refreshFromPushIfPinned(context: Context) {
+            val appContext = context.applicationContext
+            if (!hasActiveWidgets(appContext)) return
+            val prefs = PreferencesManager(appContext)
+            if (!prefs.isLoggedIn()) return
+
+            val now = System.currentTimeMillis()
+            if (now - lastPushRefreshMs < PUSH_REFRESH_COOLDOWN_MS) return
+            if (!isRefreshingWidget.compareAndSet(false, true)) return
+            lastPushRefreshMs = now
+
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    OrbitApiClient(prefs).listPaymentIntents(limit = 50).onSuccess { data ->
+                        saveAndRefresh(appContext, data.items, prefs.storeName)
+                    }
+                } catch (err: Exception) {
+                    Log.w(TAG, "Push widget refresh failed: ${err.message}")
+                } finally {
+                    isRefreshingWidget.set(false)
+                }
+            }
         }
 
         fun saveAndRefresh(

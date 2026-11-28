@@ -10,7 +10,7 @@ import {
   authMerchantOrDeviceMiddleware,
   authenticateJwtSession,
 } from '../../shared/middleware';
-import { realtimeHub, type RealtimeEvent } from './realtime.service';
+import { emitMerchantRealtimeEvent, realtimeHub, type RealtimeEvent } from './realtime.service';
 import { ingestDeviceSmsBatch } from '../device/device.service';
 import { merchants } from '../../db/schema';
 
@@ -129,6 +129,44 @@ router.get('/stream', authStreamMiddleware, async (c) => {
 });
 
 /**
+ * GET /api/v1/realtime/ws
+ * Upgrades an authenticated Merchant Portal connection to the tenant-scoped
+ * MerchantPushHub Durable Object WebSocket (`clientType=web`).
+ */
+router.get('/ws', authStreamMiddleware, async (c) => {
+  if (c.req.header('upgrade')?.toLowerCase() !== 'websocket') {
+    return c.json({ success: false, error: 'WebSocket upgrade required' }, 426);
+  }
+
+  if (c.get('adminUserId')) {
+    return c.json(
+      {
+        success: false,
+        error: 'Admin cross-tenant realtime uses SSE at /api/v1/realtime/stream',
+      },
+      400
+    );
+  }
+
+  const merchantId = c.get('merchantId');
+  if (!merchantId) {
+    return c.json({ success: false, error: 'Unauthorized: merchant context missing' }, 401);
+  }
+
+  if (!c.env.PUSH_HUB) {
+    return c.json(
+      { success: false, error: 'Self-hosted push hub binding (PUSH_HUB) is not configured' },
+      503
+    );
+  }
+
+  return c.env.PUSH_HUB.get(c.env.PUSH_HUB.idFromName(merchantId)).fetch(
+    'https://push-hub.internal/connect?clientType=web',
+    { headers: c.req.raw.headers }
+  );
+});
+
+/**
  * POST /api/v1/realtime/simulate
  * Fail-closed simulation endpoint: disabled in production and gated by Master Admin Key everywhere.
  */
@@ -190,7 +228,8 @@ router.post('/simulate', authMasterAdminMiddleware, async (c) => {
       c
     );
 
-    realtimeHub.broadcast(
+    emitMerchantRealtimeEvent(
+      c.env,
       'TRANSACTION_NEW',
       {
         merchantId: merchant.id,
@@ -202,7 +241,8 @@ router.post('/simulate', authMasterAdminMiddleware, async (c) => {
         ingestResult,
         timestamp: new Date().toISOString(),
       },
-      merchant.id
+      merchant.id,
+      c
     );
   }
 

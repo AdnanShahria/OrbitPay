@@ -77,7 +77,7 @@ export function resolveMasterAdminKey(env: Env): string | undefined {
  * falling back to detached promise execution with error logging in non-Worker runtimes.
  */
 export function safeWaitUntil(
-  c: Context<AppContextEnv> | undefined,
+  c: { executionCtx?: { waitUntil(promise: Promise<unknown>): void } } | undefined,
   promise: Promise<unknown>
 ): void {
   const guarded = promise.catch((err) => {

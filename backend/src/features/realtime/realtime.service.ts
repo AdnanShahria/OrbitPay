@@ -1,3 +1,7 @@
+import { broadcastRealtimeToMerchantWeb } from '../../router/push-hub';
+import { safeWaitUntil } from '../../shared/middleware';
+import type { Env } from '../../shared/types';
+
 export type RealtimeEventType =
   | 'CONNECTED'
   | 'PING'
@@ -10,7 +14,8 @@ export type RealtimeEventType =
   | 'ORDER_CREATED'
   | 'ORDER_UPDATED'
   | 'WALLET_ROTATED'
-  | 'WALLET_SYNCED';
+  | 'WALLET_SYNCED'
+  | 'PAYMENT_LINK_UPDATED';
 
 export interface RealtimeEvent {
   type: RealtimeEventType;
@@ -60,3 +65,28 @@ class RealtimeHub {
 }
 
 export const realtimeHub = new RealtimeHub();
+
+/**
+ * Fans out a merchant-scoped realtime event to both the local isolate SSE hub
+ * and the merchant's multi-isolate MerchantPushHub Durable Object (`web` sockets only).
+ */
+export function emitMerchantRealtimeEvent(
+  env: Env | undefined,
+  type: RealtimeEventType,
+  data: unknown,
+  merchantId?: string,
+  ctx?: { executionCtx?: { waitUntil(promise: Promise<unknown>): void } }
+): void {
+  realtimeHub.broadcast(type, data, merchantId);
+
+  if (merchantId && env?.PUSH_HUB) {
+    const promise = broadcastRealtimeToMerchantWeb(env, merchantId, type, data);
+    if (ctx) {
+      safeWaitUntil(ctx, promise);
+    } else {
+      promise.catch((err) => {
+        console.warn('[Realtime DO Broadcast Error]:', err);
+      });
+    }
+  }
+}

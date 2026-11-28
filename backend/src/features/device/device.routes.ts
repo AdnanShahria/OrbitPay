@@ -25,7 +25,7 @@ import { listOrdersQuerySchema, orderActionSchema } from '../orders/orders.schem
 import { listOrders, performOrderAction } from '../orders/orders.service';
 import { listTransactionsQuerySchema, manualMatchSchema } from '../transactions/transactions.schema';
 import { listTransactions, listPendingQueue, manualMatchTransaction } from '../transactions/transactions.service';
-import { realtimeHub } from '../realtime/realtime.service';
+import { emitMerchantRealtimeEvent } from '../realtime/realtime.service';
 
 const router = new Hono<AppContextEnv>();
 
@@ -92,7 +92,8 @@ router.post('/heartbeat', authDeviceMiddleware, async (c) => {
       simSlots: input.simSlots,
     }
   );
-  realtimeHub.broadcast(
+  emitMerchantRealtimeEvent(
+    c.env,
     'DEVICE_HEARTBEAT',
     {
       merchantId,
@@ -104,7 +105,8 @@ router.post('/heartbeat', authDeviceMiddleware, async (c) => {
       listenerEnabled: input.listenerEnabled,
       simSlots: input.simSlots ?? [],
     },
-    merchantId
+    merchantId,
+    c
   );
   return c.json({ success: true, message: 'Heartbeat acknowledged' });
 });

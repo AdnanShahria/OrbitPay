@@ -18,7 +18,7 @@ import { safeWaitUntil } from '../../shared/middleware';
 import { sanitizePhoneNumber } from '../../shared/parsers/mfs';
 import { parseAllowedOrigins, validateSafeWebhookUrl } from '../../shared/ssrf';
 import type { AppContextEnv, AuthType, Env } from '../../shared/types';
-import { realtimeHub } from '../realtime/realtime.service';
+import { emitMerchantRealtimeEvent } from '../realtime/realtime.service';
 import {
   getActiveRotatedWallet,
   getAllActiveRotatedWallets,
@@ -219,9 +219,9 @@ export async function createPaymentIntent(
     validateSafeWebhookUrl(callbackUrl, env, allowedOrigins);
   }
 
-  let wallets = await getAllActiveRotatedWallets(db, merchant.id);
+  let wallets = await getAllActiveRotatedWallets(db, merchant.id, env);
   if (input.provider) {
-    const specific = await getActiveRotatedWallet(db, merchant.id, input.provider);
+    const specific = await getActiveRotatedWallet(db, merchant.id, input.provider, env);
     if (specific) {
       wallets = [specific];
     }
@@ -791,7 +791,8 @@ export async function resolvePaymentIntent(
       );
     }
 
-    realtimeHub.broadcast(
+    emitMerchantRealtimeEvent(
+      env,
       'PAYMENT_VERIFIED',
       {
         paymentIntentId: updatedIntent.id,
@@ -802,7 +803,8 @@ export async function resolvePaymentIntent(
         provider: updatedIntent.provider,
         resolutionSource,
       },
-      merchant.id
+      merchant.id,
+      authContext?.ctx
     );
 
     const resolvedCustomer = await resolveCustomerEmailForOrder(db, {
@@ -979,7 +981,8 @@ export async function resolvePaymentIntent(
     );
   }
 
-  realtimeHub.broadcast(
+  emitMerchantRealtimeEvent(
+    env,
     'ORDER_UPDATED',
     {
       paymentIntentId: updatedIntent.id,
@@ -987,7 +990,8 @@ export async function resolvePaymentIntent(
       status: 'REJECTED',
       reason: updatedIntent.rejectionReason,
     },
-    merchant.id
+    merchant.id,
+    authContext?.ctx
   );
 
   safeWaitUntil(
