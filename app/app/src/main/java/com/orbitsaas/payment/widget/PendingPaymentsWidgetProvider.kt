@@ -154,8 +154,7 @@ class PendingPaymentsWidgetProvider : AppWidgetProvider() {
                 it.status.uppercase(Locale.US) in PENDING_STATUSES
             }
             val mappedItems = pending.take(2).map { intent ->
-                val title = intent.display.title?.takeIf { it.isNotBlank() }
-                    ?: "#${intent.externalRefId}"
+                val title = com.orbitsaas.payment.ui.components.formatBusinessIntentTitle(context, intent)
                 val providerText = intent.provider?.takeIf { it.isNotBlank() } ?: "MFS"
                 val statusLabel = when (intent.status.uppercase(Locale.US)) {
                     "MANUAL_REVIEW_REQUIRED" -> context.getString(R.string.intent_status_manual_review)

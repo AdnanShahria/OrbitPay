@@ -28,6 +28,7 @@ import io.ktor.http.contentType
 import io.ktor.http.encodeURLPathPart
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
@@ -39,11 +40,13 @@ class OrbitApiClient(
     private val preferencesManager: PreferencesManager
 ) {
 
+    @OptIn(ExperimentalSerializationApi::class)
     private val json = Json {
         prettyPrint = false
         isLenient = true
         ignoreUnknownKeys = true
         encodeDefaults = true
+        explicitNulls = false
         coerceInputValues = true
     }
 

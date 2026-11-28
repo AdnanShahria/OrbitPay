@@ -530,6 +530,7 @@ private fun CreatePaymentLinkDialog(
 
     val titleRequiredError = stringResource(R.string.links_error_title_required)
     val amountRequiredError = stringResource(R.string.links_error_amount_required)
+    val maxLessThanMinError = stringResource(R.string.links_error_max_lt_min)
 
     val fieldColors = OutlinedTextFieldDefaults.colors(
         focusedBorderColor = MaterialTheme.colorScheme.primary,
@@ -649,11 +650,23 @@ private fun CreatePaymentLinkDialog(
                             localError = amountRequiredError
                             return@Button
                         }
-                        onCreate(trimmedTitle, description.ifBlank { null }, "FIXED", amt, null, null)
+                        onCreate(trimmedTitle, description.trim().ifBlank { null }, "FIXED", amt, null, null)
                     } else {
-                        val minAmt = minAmountText.toDoubleOrNull()
-                        val maxAmt = maxAmountText.toDoubleOrNull()
-                        onCreate(trimmedTitle, description.ifBlank { null }, "OPEN", null, minAmt, maxAmt)
+                        val minAmt = minAmountText.trim().takeIf { it.isNotEmpty() }?.toDoubleOrNull()
+                        val maxAmt = maxAmountText.trim().takeIf { it.isNotEmpty() }?.toDoubleOrNull()
+                        if (minAmountText.isNotBlank() && (minAmt == null || minAmt <= 0.0)) {
+                            localError = amountRequiredError
+                            return@Button
+                        }
+                        if (maxAmountText.isNotBlank() && (maxAmt == null || maxAmt <= 0.0)) {
+                            localError = amountRequiredError
+                            return@Button
+                        }
+                        if (minAmt != null && maxAmt != null && minAmt > maxAmt) {
+                            localError = maxLessThanMinError
+                            return@Button
+                        }
+                        onCreate(trimmedTitle, description.trim().ifBlank { null }, "OPEN", null, minAmt, maxAmt)
                     }
                 },
                 enabled = !isSubmitting,

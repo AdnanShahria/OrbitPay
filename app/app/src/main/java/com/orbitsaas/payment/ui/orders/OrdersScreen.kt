@@ -50,8 +50,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -62,6 +62,11 @@ import com.orbitsaas.payment.ui.OrdersLoadingCard
 import com.orbitsaas.payment.ui.components.SegmentedPillTabs
 import com.orbitsaas.payment.ui.components.StatusPill
 import com.orbitsaas.payment.ui.components.formatBdtAmount
+import com.orbitsaas.payment.ui.components.formatBusinessOrderHeadline
+import com.orbitsaas.payment.ui.components.formatBusinessOrderSubRef
+import com.orbitsaas.payment.ui.components.formatShortTimestamp
+import com.orbitsaas.payment.ui.components.isDeliveryOrder
+import com.orbitsaas.payment.ui.components.parseIsoEpochMs
 import com.orbitsaas.payment.ui.theme.OrbitSemanticColors
 import com.orbitsaas.payment.ui.theme.StatusAmberBg
 import com.orbitsaas.payment.ui.theme.StatusGreenBg
@@ -195,10 +200,17 @@ private fun MerchantOrderCard(
     isActionInProgress: Boolean,
     onAction: (String) -> Unit
 ) {
+    val context = LocalContext.current
     val cardShape = RoundedCornerShape(16.dp)
     val normalizedOrder = order.orderStatus.uppercase(Locale.US)
     val normalizedPay = order.paymentStatus.uppercase(Locale.US)
     val normalizedMethod = order.paymentMethod.uppercase(Locale.US)
+    val headline = remember(order) { formatBusinessOrderHeadline(context, order) }
+    val subRef = remember(order) { formatBusinessOrderSubRef(context, order) }
+    val showDeliveryActions = remember(order) { isDeliveryOrder(order) }
+    val placedTimeText = remember(order.createdAt) {
+        parseIsoEpochMs(order.createdAt)?.let { formatShortTimestamp(it) }
+    }
 
     val methodLabel = when (normalizedMethod) {
         "COD" -> stringResource(R.string.payment_method_cod)
@@ -254,20 +266,39 @@ private fun MerchantOrderCard(
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.Top
             ) {
-                Text(
-                    text = "#${order.externalOrderId}",
-                    style = MaterialTheme.typography.titleMedium.copy(fontFeatureSettings = "tnum"),
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        text = headline,
+                        style = MaterialTheme.typography.titleMedium.copy(fontFeatureSettings = "tnum"),
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    val metaSubLine = listOfNotNull(subRef, placedTimeText).joinToString(" · ")
+                    if (metaSubLine.isNotBlank()) {
+                        Text(
+                            text = metaSubLine,
+                            style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
                 Text(
                     text = formatBdtAmount(order.baseAmount),
                     style = MaterialTheme.typography.titleMedium.copy(fontFeatureSettings = "tnum"),
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1
                 )
             }
 
@@ -285,8 +316,8 @@ private fun MerchantOrderCard(
             }
 
             val customerSummary = listOfNotNull(
-                order.customerName?.takeIf { it.isNotBlank() },
-                order.customerPhone?.takeIf { it.isNotBlank() }
+                order.customerName?.takeIf { it.isNotBlank() && !it.trim().equals(headline, ignoreCase = true) },
+                order.customerPhone?.takeIf { it.isNotBlank() && !it.trim().equals(headline, ignoreCase = true) }
             ).joinToString(" · ")
             if (customerSummary.isNotBlank()) {
                 Text(
@@ -337,7 +368,7 @@ private fun MerchantOrderCard(
                             Text(stringResource(R.string.order_action_confirm))
                         }
                     }
-                    if (normalizedOrder !in setOf("READY_TO_SHIP", "SHIPPED")) {
+                    if (showDeliveryActions && normalizedOrder !in setOf("READY_TO_SHIP", "SHIPPED")) {
                         OutlinedButton(
                             onClick = { onAction("READY_TO_SHIP") },
                             enabled = !isActionInProgress,
@@ -350,7 +381,7 @@ private fun MerchantOrderCard(
                             Text(stringResource(R.string.order_action_ready_to_ship))
                         }
                     }
-                    if (normalizedOrder != "SHIPPED") {
+                    if (showDeliveryActions && normalizedOrder != "SHIPPED") {
                         OutlinedButton(
                             onClick = { onAction("SHIP") },
                             enabled = !isActionInProgress,

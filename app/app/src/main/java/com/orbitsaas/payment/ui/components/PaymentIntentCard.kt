@@ -116,8 +116,8 @@ fun intentStatusBadgeColors(status: String): Triple<String, Color, Color> {
         )
         "OPEN" -> Triple(
             stringResource(R.string.intent_status_open),
-            MaterialTheme.colorScheme.primary,
-            MaterialTheme.colorScheme.surfaceVariant
+            OrbitSemanticColors.statusGray,
+            StatusGrayBg
         )
         "REJECTED" -> Triple(
             stringResource(R.string.intent_status_rejected),
@@ -165,9 +165,7 @@ fun PaymentIntentCard(
 
     val displayAppName = intent.display.appName?.takeIf { it.isNotBlank() }
         ?: fallbackAppName.ifBlank { stringResource(R.string.app_name) }
-    val displayRefLabel = intent.display.referenceLabel?.takeIf { it.isNotBlank() } ?: "Ref"
-    val displayTitle = intent.display.title?.takeIf { it.isNotBlank() }
-        ?: "$displayRefLabel #${intent.externalRefId}"
+    val displayTitle = formatBusinessIntentTitle(context, intent)
 
     val (statusLabel, statusFg, statusBg) = intentStatusBadgeColors(intent.status)
     val normalizedStatus = intent.status.uppercase(Locale.US)
@@ -459,6 +457,84 @@ fun PaymentIntentCard(
                 }
             }
 
+            // Order Placed & Verification Timestamps
+            val createdMs = remember(intent.createdAt) { parseIsoEpochMs(intent.createdAt) }
+            val verifiedMs = remember(intent.verifiedAt, intent.resolvedAt, intent.updatedAt, normalizedStatus) {
+                when (normalizedStatus) {
+                    "VERIFIED" -> parseIsoEpochMs(intent.verifiedAt ?: intent.resolvedAt ?: intent.updatedAt)
+                    "REJECTED" -> parseIsoEpochMs(intent.resolvedAt ?: intent.updatedAt)
+                    else -> null
+                }
+            }
+            if (createdMs != null || verifiedMs != null) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp)),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        createdMs?.let { ms ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.intent_time_order_placed),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.weight(0.85f)
+                                )
+                                Text(
+                                    text = formatFullTimestamp(ms),
+                                    style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.weight(1.15f),
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.End
+                                )
+                            }
+                        }
+                        verifiedMs?.let { ms ->
+                            val timeLabel = if (normalizedStatus == "VERIFIED") {
+                                stringResource(R.string.intent_time_verified_at)
+                            } else {
+                                stringResource(R.string.intent_time_rejected_at)
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                Text(
+                                    text = timeLabel,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.weight(0.85f)
+                                )
+                                Text(
+                                    text = formatFullTimestamp(ms),
+                                    style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (normalizedStatus == "VERIFIED") {
+                                        OrbitSemanticColors.statusGreen
+                                    } else {
+                                        OrbitSemanticColors.statusRed
+                                    },
+                                    modifier = Modifier.weight(1.15f),
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.End
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             // Action Buttons (>= 48dp touch targets)
             val hasAnyButton = isActionable || intent.actions.isNotEmpty() || safeAdminUrl != null || safeReceiptUrl != null
             if (hasAnyButton) {
@@ -619,8 +695,10 @@ fun RejectIntentDialog(
     onDismiss: () -> Unit,
     onConfirmReject: (reason: String?) -> Unit
 ) {
+    val context = LocalContext.current
     var reason by remember(intent.id) { mutableStateOf("") }
     val amountText = formatBdtAmount(intent.paidAmount ?: intent.uniqueAmount)
+    val friendlyName = remember(intent) { formatBusinessIntentTitle(context, intent) }
 
     AlertDialog(
         onDismissRequest = { if (!isSubmitting) onDismiss() },
@@ -637,7 +715,7 @@ fun RejectIntentDialog(
                 Text(
                     text = stringResource(
                         R.string.intent_reject_dialog_body,
-                        intent.externalRefId,
+                        friendlyName,
                         amountText
                     ),
                     style = MaterialTheme.typography.bodyMedium,
@@ -699,7 +777,9 @@ fun ApproveIntentDialog(
     onDismiss: () -> Unit,
     onConfirmApprove: () -> Unit
 ) {
+    val context = LocalContext.current
     val amountText = formatBdtAmount(intent.paidAmount ?: intent.uniqueAmount)
+    val friendlyName = remember(intent) { formatBusinessIntentTitle(context, intent) }
 
     AlertDialog(
         onDismissRequest = { if (!isSubmitting) onDismiss() },
@@ -712,10 +792,10 @@ fun ApproveIntentDialog(
             )
         },
         text = {
-            Text(
+                Text(
                 text = stringResource(
                     R.string.intent_approve_dialog_body,
-                    intent.externalRefId,
+                    friendlyName,
                     amountText
                 ),
                 style = MaterialTheme.typography.bodyMedium,

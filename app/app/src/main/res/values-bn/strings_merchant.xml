@@ -97,14 +97,24 @@
     <string name="links_field_max">সর্বোচ্চ (ঐচ্ছিক)</string>
     <string name="links_error_title_required">অনুগ্রহ করে অন্তত ২ অক্ষরের একটি নাম লিখুন।</string>
     <string name="links_error_amount_required">০-এর বেশি সঠিক টাকার পরিমাণ লিখুন।</string>
+    <string name="links_error_max_lt_min">সর্বোচ্চ পরিমাণ সর্বনিম্ন পরিমাণের চেয়ে কম হতে পারবে না।</string>
     <string name="links_create_submit">লিংক তৈরি করুন</string>
 
-    <!-- Orders & COD Sync Screen -->
-    <string name="orders_screen_title">অর্ডার ও COD</string>
-    <string name="orders_screen_subtitle">অর্ডার কনফার্ম, শিপমেন্ট এবং ক্যাশ-অন-ডেলিভারি পরিচালনা করুন</string>
+    <!-- Orders & Delivery Screen -->
+    <string name="orders_screen_title">অর্ডারসমূহ</string>
+    <string name="orders_screen_subtitle">গ্রাহকের অর্ডার, পেমেন্ট ও ডেলিভারি পরিচালনা করুন</string>
     <string name="orders_filter_all">সব (%1$d)</string>
     <string name="orders_filter_active">করণীয় আছে</string>
-    <string name="orders_filter_cod">শুধু COD</string>
+    <string name="orders_filter_cod">ক্যাশ অন ডেলিভারি</string>
+    <string name="order_business_fallback_title">গ্রাহকের অর্ডার</string>
+    <string name="order_link_payment_label">পেমেন্ট লিংক · %1$s</string>
+    <string name="order_readable_title">অর্ডার %1$s</string>
+    <string name="order_ref_short">রেফ %1$s</string>
+    <string name="order_placed_at_short">সময়: %1$s</string>
+
+    <!-- Settings: Verification Widget Section -->
+    <string name="settings_verification_widget_section">যাচাই উইজেট</string>
+    <string name="settings_widget_pin_manual_hint">হোম স্ক্রিনে কিছুক্ষণ চেপে ধরে Widgets থেকে ORBIT Pay উইজেটটি যোগ করুন।</string>
 
     <!-- SIM Pool & Limits Screen -->
     <string name="sim_pool_title">সিম পুল ও লিমিট</string>

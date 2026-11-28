@@ -97,14 +97,24 @@
     <string name="links_field_max">Max (optional)</string>
     <string name="links_error_title_required">Please enter a title (at least 2 characters).</string>
     <string name="links_error_amount_required">Please enter a valid amount greater than 0.</string>
+    <string name="links_error_max_lt_min">Maximum amount cannot be less than minimum amount.</string>
     <string name="links_create_submit">Create Link</string>
 
-    <!-- Orders & COD Sync Screen -->
-    <string name="orders_screen_title">Orders &amp; COD Sync</string>
-    <string name="orders_screen_subtitle">Confirm, pack, ship &amp; mark Cash-on-Delivery paid</string>
+    <!-- Orders & Delivery Screen -->
+    <string name="orders_screen_title">Orders</string>
+    <string name="orders_screen_subtitle">Track customer orders, payments &amp; delivery</string>
     <string name="orders_filter_all">All (%1$d)</string>
     <string name="orders_filter_active">Needs Action</string>
-    <string name="orders_filter_cod">COD Only</string>
+    <string name="orders_filter_cod">Cash on Delivery</string>
+    <string name="order_business_fallback_title">Customer Order</string>
+    <string name="order_link_payment_label">Payment Link · %1$s</string>
+    <string name="order_readable_title">Order %1$s</string>
+    <string name="order_ref_short">Ref %1$s</string>
+    <string name="order_placed_at_short">Placed %1$s</string>
+
+    <!-- Settings: Verification Widget Section -->
+    <string name="settings_verification_widget_section">Verification Widget</string>
+    <string name="settings_widget_pin_manual_hint">Long-press your phone home screen, tap Widgets, and drag ORBIT Pay onto your home screen.</string>
 
     <!-- SIM Pool & Limits Screen -->
     <string name="sim_pool_title">SIM Pool &amp; Limits</string>

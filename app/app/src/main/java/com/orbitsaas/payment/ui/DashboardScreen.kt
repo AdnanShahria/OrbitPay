@@ -38,7 +38,6 @@ import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -79,7 +78,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.orbitsaas.payment.R
-import com.orbitsaas.payment.widget.PendingPaymentsWidgetProvider
 import com.orbitsaas.payment.data.local.SmsEntity
 import com.orbitsaas.payment.data.remote.MerchantOrderDto
 import com.orbitsaas.payment.data.remote.PaymentIntentDto
@@ -88,7 +86,14 @@ import com.orbitsaas.payment.ui.components.ApproveIntentDialog
 import com.orbitsaas.payment.ui.components.PaymentIntentCard
 import com.orbitsaas.payment.ui.components.ProviderDot
 import com.orbitsaas.payment.ui.components.RejectIntentDialog
+import com.orbitsaas.payment.ui.components.formatBusinessIntentTitle
+import com.orbitsaas.payment.ui.components.formatBusinessOrderHeadline
+import com.orbitsaas.payment.ui.components.formatBusinessOrderSubRef
+import com.orbitsaas.payment.ui.components.formatFullTimestamp
+import com.orbitsaas.payment.ui.components.formatShortTimestamp
 import com.orbitsaas.payment.ui.components.intentStatusBadgeColors
+import com.orbitsaas.payment.ui.components.isDeliveryOrder
+import com.orbitsaas.payment.ui.components.parseIsoEpochMs
 import com.orbitsaas.payment.ui.components.providerDisplayName
 import com.orbitsaas.payment.ui.theme.OrbitSemanticColors
 import com.orbitsaas.payment.ui.theme.StatusAmber
@@ -258,24 +263,6 @@ fun DashboardScreen(
                         onClick = onOpenDiagnostics
                     )
                 }
-            }
-
-            // 0.5 Live Waiting-for-Verification Widget Card (pinned inside Overview + pin-to-home shortcut)
-            item {
-                val waitingIntents = remember(state.paymentIntents) {
-                    state.paymentIntents.filter {
-                        it.status.uppercase(Locale.US) in setOf(
-                            "OPEN",
-                            "WAITING_FOR_SMS",
-                            "MANUAL_REVIEW_REQUIRED"
-                        )
-                    }
-                }
-                WaitingForVerificationWidgetCard(
-                    waitingIntents = waitingIntents,
-                    onInspectIntent = { intent -> inspectedIntent = intent },
-                    onApproveIntent = { intent -> pendingApproveIntent = intent }
-                )
             }
 
             // 1. Calm Hero Moment Card (Verified this month + Active SIM Rotation Strip)
@@ -453,185 +440,6 @@ fun DashboardScreen(
                 pendingRejectIntent = null
             }
         )
-    }
-}
-
-@Composable
-private fun WaitingForVerificationWidgetCard(
-    waitingIntents: List<PaymentIntentDto>,
-    onInspectIntent: (PaymentIntentDto) -> Unit,
-    onApproveIntent: (PaymentIntentDto) -> Unit
-) {
-    val context = LocalContext.current
-    val cardShape = RoundedCornerShape(16.dp)
-    val canPin = remember { PendingPaymentsWidgetProvider.canRequestPin(context) }
-    var pinFeedback by remember { mutableStateOf(false) }
-
-    val hasWaiting = waitingIntents.isNotEmpty()
-    val badgeBg = if (hasWaiting) Color(0x1AF59E0B) else Color(0x1A10B981)
-    val badgeFg = if (hasWaiting) OrbitSemanticColors.statusAmber else OrbitSemanticColors.statusGreen
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(
-                width = if (hasWaiting) 1.5.dp else 1.dp,
-                color = if (hasWaiting) StatusAmber.copy(alpha = 0.45f) else MaterialTheme.colorScheme.outline,
-                shape = cardShape
-            ),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        shape = cardShape
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    Text(
-                        text = stringResource(R.string.dashboard_waiting_widget_title),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = stringResource(R.string.dashboard_waiting_widget_subtitle),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                CompactStatusChip(
-                    label = stringResource(R.string.widget_pending_count_badge, waitingIntents.size),
-                    foreground = badgeFg,
-                    background = badgeBg
-                )
-            }
-
-            if (waitingIntents.isEmpty()) {
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp)),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Text(
-                        text = stringResource(R.string.dashboard_waiting_widget_empty),
-                        modifier = Modifier.padding(12.dp),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = OrbitSemanticColors.statusGreen,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-            } else {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    waitingIntents.take(3).forEach { intent ->
-                        val title = intent.display.title?.takeIf { it.isNotBlank() }
-                            ?: "#${intent.externalRefId}"
-                        val meta = buildList {
-                            intent.provider?.takeIf { it.isNotBlank() }?.let { add(providerDisplayName(it)) }
-                            intent.senderNumber?.takeIf { it.isNotBlank() }?.let { add(it) }
-                            intent.trxId?.takeIf { it.isNotBlank() }?.let { add(it) }
-                        }.joinToString(" · ")
-                        val amount = formatCleanBdt(intent.paidAmount ?: intent.uniqueAmount)
-
-                        Surface(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp))
-                                .clickable { onInspectIntent(intent) },
-                            color = MaterialTheme.colorScheme.surfaceVariant,
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                Column(
-                                    modifier = Modifier.weight(1f),
-                                    verticalArrangement = Arrangement.spacedBy(2.dp)
-                                ) {
-                                    Text(
-                                        text = title,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.SemiBold,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    if (meta.isNotBlank()) {
-                                        Text(
-                                            text = meta,
-                                            style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
-                                }
-                                Text(
-                                    text = amount,
-                                    style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"),
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Button(
-                                    onClick = { onApproveIntent(intent) },
-                                    modifier = Modifier.heightIn(min = 38.dp),
-                                    shape = RoundedCornerShape(10.dp),
-                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
-                                ) {
-                                    Text(
-                                        text = stringResource(R.string.dashboard_waiting_widget_approve),
-                                        style = MaterialTheme.typography.labelSmall
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (canPin) {
-                OutlinedButton(
-                    onClick = {
-                        if (PendingPaymentsWidgetProvider.requestPinWidget(context)) {
-                            pinFeedback = true
-                        }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 44.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Widgets,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.size(6.dp))
-                    Text(
-                        text = if (pinFeedback) {
-                            stringResource(R.string.widget_pin_added)
-                        } else {
-                            stringResource(R.string.dashboard_waiting_widget_pin)
-                        },
-                        style = MaterialTheme.typography.labelMedium
-                    )
-                }
-            }
-        }
     }
 }
 
@@ -1094,12 +902,12 @@ private fun CompactPaymentIntentRow(
     isHighlighted: Boolean,
     onClick: () -> Unit
 ) {
+    val context = LocalContext.current
     val cardShape = RoundedCornerShape(14.dp)
     val borderColor = if (isHighlighted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
     val borderWidth = if (isHighlighted) 1.5.dp else 1.dp
 
-    val displayTitle = intent.display.title?.takeIf { it.isNotBlank() }
-        ?: "#${intent.externalRefId}"
+    val displayTitle = remember(intent) { formatBusinessIntentTitle(context, intent) }
     val displayApp = intent.display.appName?.takeIf { it.isNotBlank() }
         ?: fallbackAppName.takeIf { it.isNotBlank() }
 
@@ -1141,8 +949,8 @@ private fun CompactPaymentIntentRow(
         if (isEmpty()) {
             cleanedDisplaySubtitle?.let { add(it) }
                 ?: displayApp?.takeIf { !it.equals(displayTitle, ignoreCase = true) }?.let { add(it) }
-                ?: if (!displayTitle.contains(intent.externalRefId)) add(intent.externalRefId) else Unit
         }
+        parseIsoEpochMs(intent.createdAt)?.let { add(formatShortTimestamp(it)) }
     }
 
     Surface(
@@ -1225,9 +1033,15 @@ private fun CompactOrderRow(
     order: MerchantOrderDto,
     onClick: () -> Unit
 ) {
+    val context = LocalContext.current
     val cardShape = RoundedCornerShape(14.dp)
     val normalizedMethod = order.paymentMethod.uppercase(Locale.US)
     val normalizedOrderStatus = order.orderStatus.uppercase(Locale.US)
+    val headline = remember(order) { formatBusinessOrderHeadline(context, order) }
+    val subRef = remember(order) { formatBusinessOrderSubRef(context, order) }
+    val shortPlacedTime = remember(order.createdAt) {
+        parseIsoEpochMs(order.createdAt)?.let { formatShortTimestamp(it) }
+    }
 
     val methodLabel = when (normalizedMethod) {
         "COD" -> stringResource(R.string.payment_method_cod)
@@ -1237,7 +1051,7 @@ private fun CompactOrderRow(
     }
 
     val localizedOrderStatus = when (normalizedOrderStatus) {
-        "PENDING" -> stringResource(R.string.order_status_pending)
+        "PENDING", "NEW", "AWAITING_CONFIRMATION" -> stringResource(R.string.order_status_pending)
         "CONFIRMED" -> stringResource(R.string.order_status_confirmed)
         "READY_TO_SHIP" -> stringResource(R.string.order_status_ready_to_ship)
         "SHIPPED" -> stringResource(R.string.order_status_shipped)
@@ -1256,9 +1070,10 @@ private fun CompactOrderRow(
     }
 
     val subtitleText = listOfNotNull(
-        order.customerName?.takeIf { it.isNotBlank() },
+        subRef,
         order.customerPhone?.takeIf { it.isNotBlank() },
-        order.itemsSummary?.takeIf { it.isNotBlank() }
+        order.itemsSummary?.takeIf { it.isNotBlank() },
+        shortPlacedTime
     ).take(2).joinToString(" · ").ifBlank { methodLabel }
 
     Surface(
@@ -1288,15 +1103,15 @@ private fun CompactOrderRow(
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text(
-                        text = "#${order.externalOrderId}",
+                        text = headline,
                         style = MaterialTheme.typography.bodyLarge.copy(
                             fontFeatureSettings = "tnum"
                         ),
-                        fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
                     Text(
                         text = "· $methodLabel",
@@ -1494,10 +1309,16 @@ private fun OrderDetailSheetContent(
     isActionInProgress: Boolean,
     onActionClick: (String) -> Unit
 ) {
+    val context = LocalContext.current
     val normalizedOrderStatus = order.orderStatus.uppercase(Locale.US)
     val normalizedPaymentStatus = order.paymentStatus.uppercase(Locale.US)
     val normalizedMethod = order.paymentMethod.uppercase(Locale.US)
     val redFg = OrbitSemanticColors.statusRed
+    val headline = remember(order) { formatBusinessOrderHeadline(context, order) }
+    val subRef = remember(order) { formatBusinessOrderSubRef(context, order) }
+    val showDeliveryActions = remember(order) { isDeliveryOrder(order) }
+    val placedEpochMs = remember(order.createdAt) { parseIsoEpochMs(order.createdAt) }
+    val updatedEpochMs = remember(order.updatedAt) { parseIsoEpochMs(order.updatedAt) }
 
     val methodLabel = when (normalizedMethod) {
         "COD" -> stringResource(R.string.payment_method_cod)
@@ -1507,7 +1328,7 @@ private fun OrderDetailSheetContent(
     }
 
     val localizedOrderStatus = when (normalizedOrderStatus) {
-        "PENDING" -> stringResource(R.string.order_status_pending)
+        "PENDING", "NEW", "AWAITING_CONFIRMATION" -> stringResource(R.string.order_status_pending)
         "CONFIRMED" -> stringResource(R.string.order_status_confirmed)
         "READY_TO_SHIP" -> stringResource(R.string.order_status_ready_to_ship)
         "SHIPPED" -> stringResource(R.string.order_status_shipped)
@@ -1552,15 +1373,30 @@ private fun OrderDetailSheetContent(
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment = Alignment.Top
         ) {
-            Text(
-                text = "#${order.externalOrderId}",
-                style = MaterialTheme.typography.titleLarge.copy(fontFeatureSettings = "tnum"),
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface
-            )
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(end = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = headline,
+                    style = MaterialTheme.typography.titleLarge.copy(fontFeatureSettings = "tnum"),
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                subRef?.let { refText ->
+                    Text(
+                        text = refText,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
             Text(
                 text = formatCleanBdt(order.baseAmount),
                 style = MaterialTheme.typography.titleLarge.copy(fontFeatureSettings = "tnum"),
@@ -1607,6 +1443,16 @@ private fun OrderDetailSheetContent(
         order.shippingAddress?.trim()?.takeIf { it.isNotBlank() }?.let {
             SheetMetaRow(stringResource(R.string.dashboard_detail_address), it)
         }
+        placedEpochMs?.let { ms ->
+            SheetMetaRow(stringResource(R.string.order_time_placed), formatFullTimestamp(ms))
+        }
+        updatedEpochMs?.let { ms ->
+            val isVerifiedOrPaid = normalizedPaymentStatus in setOf("PAID", "VERIFIED") ||
+                normalizedOrderStatus in setOf("CONFIRMED", "READY_TO_SHIP", "SHIPPED", "DELIVERED", "COMPLETED")
+            if (isVerifiedOrPaid && (placedEpochMs == null || ms != placedEpochMs)) {
+                SheetMetaRow(stringResource(R.string.order_time_confirmed), formatFullTimestamp(ms))
+            }
+        }
 
         val isTerminal = normalizedOrderStatus in setOf("CANCELLED", "DELIVERED", "COMPLETED")
         if (!isTerminal) {
@@ -1645,7 +1491,7 @@ private fun OrderDetailSheetContent(
                     }
                 }
 
-                if (normalizedOrderStatus !in setOf("READY_TO_SHIP", "SHIPPED")) {
+                if (showDeliveryActions && normalizedOrderStatus !in setOf("READY_TO_SHIP", "SHIPPED")) {
                     val isPrimaryStep = normalizedOrderStatus == "CONFIRMED"
                     if (isPrimaryStep) {
                         Button(
@@ -1677,7 +1523,7 @@ private fun OrderDetailSheetContent(
                     }
                 }
 
-                if (normalizedOrderStatus != "SHIPPED") {
+                if (showDeliveryActions && normalizedOrderStatus != "SHIPPED") {
                     val isPrimaryShip = normalizedOrderStatus == "READY_TO_SHIP"
                     if (isPrimaryShip) {
                         Button(

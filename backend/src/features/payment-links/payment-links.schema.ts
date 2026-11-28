@@ -2,6 +2,28 @@ import { z } from 'zod';
 import { MFS_PROVIDERS, VERIFICATION_MODES, VERTICAL_PROFILES } from '../../db/schema';
 import { paymentActionSchema, paymentDisplaySchema } from '../payments/payments.schema';
 
+const nullishToUndefined = <T extends z.ZodTypeAny>(schema: T) =>
+  schema.nullish().transform((v) => (v === null ? undefined : v));
+
+const optionalNullableString = (minLen = 0, maxLen = 1000) =>
+  z
+    .string()
+    .trim()
+    .max(maxLen)
+    .nullish()
+    .transform((v) => {
+      if (v == null || v === '') return undefined;
+      return v;
+    })
+    .refine((v) => v === undefined || v.length >= minLen, {
+      message: `Must be at least ${minLen} characters`,
+    });
+
+const optionalNullableUrl = z
+  .union([z.string().trim().url(), z.literal('')])
+  .nullish()
+  .transform((v) => (v == null || v === '' ? undefined : v));
+
 export const createPaymentLinkSchema = z
   .object({
     slug: z
@@ -11,28 +33,51 @@ export const createPaymentLinkSchema = z
       .max(80)
       .regex(/^[a-z0-9-]+$/i, 'Slug may only contain letters, numbers, and hyphens')
       .transform((s) => s.toLowerCase())
-      .optional(),
+      .nullish()
+      .transform((v) => (v == null ? undefined : v)),
     title: z.string().trim().min(2).max(160),
-    description: z.string().trim().max(1000).optional(),
-    vertical: z.enum(VERTICAL_PROFILES).optional().default('custom'),
-    amountType: z.enum(['FIXED', 'OPEN']).default('FIXED'),
-    fixedAmount: z.number().positive().optional(),
-    minAmount: z.number().positive().optional(),
-    maxAmount: z.number().positive().optional(),
-    currency: z.string().trim().min(3).max(8).default('BDT'),
-    verificationMode: z.enum(VERIFICATION_MODES).optional(),
-    display: paymentDisplaySchema.optional(),
-    actions: z.array(paymentActionSchema).max(8).optional(),
-    metadata: z.record(z.unknown()).optional(),
-    returnUrl: z.union([z.string().trim().url(), z.literal('')]).optional(),
-    cancelUrl: z.union([z.string().trim().url(), z.literal('')]).optional(),
-    maxUses: z.number().int().positive().optional(),
-    expiresAt: z.string().datetime().optional(),
+    description: optionalNullableString(0, 1000),
+    vertical: z
+      .enum(VERTICAL_PROFILES)
+      .nullish()
+      .transform((v) => v ?? 'custom'),
+    amountType: z
+      .enum(['FIXED', 'OPEN'])
+      .nullish()
+      .transform((v) => v ?? 'FIXED'),
+    fixedAmount: nullishToUndefined(z.number().positive()),
+    minAmount: nullishToUndefined(z.number().positive()),
+    maxAmount: nullishToUndefined(z.number().positive()),
+    currency: z
+      .string()
+      .trim()
+      .min(3)
+      .max(8)
+      .nullish()
+      .transform((v) => v ?? 'BDT'),
+    verificationMode: nullishToUndefined(z.enum(VERIFICATION_MODES)),
+    display: nullishToUndefined(paymentDisplaySchema),
+    actions: nullishToUndefined(z.array(paymentActionSchema).max(8)),
+    metadata: nullishToUndefined(z.record(z.unknown())),
+    returnUrl: optionalNullableUrl,
+    cancelUrl: optionalNullableUrl,
+    maxUses: nullishToUndefined(z.number().int().positive()),
+    expiresAt: nullishToUndefined(z.string().datetime()),
   })
   .refine((d) => (d.amountType === 'FIXED' ? (d.fixedAmount ?? 0) > 0 : true), {
     message: 'fixedAmount is required when amountType is FIXED',
     path: ['fixedAmount'],
-  });
+  })
+  .refine(
+    (d) =>
+      d.minAmount !== undefined && d.maxAmount !== undefined
+        ? d.minAmount <= d.maxAmount
+        : true,
+    {
+      message: 'minAmount cannot exceed maxAmount',
+      path: ['maxAmount'],
+    }
+  );
 
 export const updatePaymentLinkSchema = z.object({
   slug: z

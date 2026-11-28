@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Store
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Translate
+import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -84,6 +85,8 @@ import com.orbitsaas.payment.R
 import com.orbitsaas.payment.data.local.PreferencesManager
 import com.orbitsaas.payment.ui.locale.LocaleHelper
 import com.orbitsaas.payment.ui.theme.OrbitSemanticColors
+import com.orbitsaas.payment.ui.theme.StatusAmberBg
+import com.orbitsaas.payment.ui.theme.StatusGrayBg
 import com.orbitsaas.payment.ui.theme.StatusGreen
 import com.orbitsaas.payment.ui.theme.StatusGreenBg
 import com.orbitsaas.payment.ui.theme.StatusRed
@@ -91,7 +94,9 @@ import com.orbitsaas.payment.ui.theme.StatusRedBg
 import com.orbitsaas.payment.ui.viewmodel.DashboardUiState
 import com.orbitsaas.payment.update.AppUpdateManager
 import com.orbitsaas.payment.update.UpdateStatus
+import com.orbitsaas.payment.widget.PendingPaymentsWidgetProvider
 import kotlinx.coroutines.launch
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -451,6 +456,124 @@ fun SettingsScreen(
                                 modifier = Modifier.size(20.dp)
                             )
                         }
+                    }
+                }
+            }
+
+            // Verification Widget Section
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, MaterialTheme.colorScheme.outline, cardShape),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                shape = cardShape
+            ) {
+                val waitingCount = remember(state.paymentIntents) {
+                    state.paymentIntents.count {
+                        it.status.uppercase(Locale.US) in setOf(
+                            "OPEN",
+                            "WAITING_FOR_SMS",
+                            "MANUAL_REVIEW_REQUIRED"
+                        )
+                    }
+                }
+                val canPinWidget = remember { PendingPaymentsWidgetProvider.canRequestPin(context) }
+                var widgetPinRequested by remember { mutableStateOf(false) }
+
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Widgets,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = stringResource(R.string.settings_verification_widget_section),
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (waitingCount > 0) StatusGrayBg else StatusGreenBg
+                        ) {
+                            Text(
+                                text = if (waitingCount > 0) {
+                                    stringResource(R.string.widget_pending_count_badge, waitingCount)
+                                } else {
+                                    stringResource(R.string.widget_pending_empty_title)
+                                },
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontFeatureSettings = "tnum"
+                                ),
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (waitingCount > 0) {
+                                    OrbitSemanticColors.statusGray
+                                } else {
+                                    OrbitSemanticColors.statusGreen
+                                }
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = stringResource(R.string.onboarding_widget_desc),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    if (canPinWidget) {
+                        OutlinedButton(
+                            onClick = {
+                                if (PendingPaymentsWidgetProvider.requestPinWidget(context)) {
+                                    widgetPinRequested = true
+                                }
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 48.dp),
+                            shape = fieldShape,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Widgets,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.size(8.dp))
+                            Text(
+                                text = if (widgetPinRequested) {
+                                    stringResource(R.string.widget_pin_added)
+                                } else {
+                                    stringResource(R.string.dashboard_waiting_widget_pin)
+                                },
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    } else {
+                        Text(
+                            text = stringResource(R.string.settings_widget_pin_manual_hint),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
             }

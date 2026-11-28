@@ -33,6 +33,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.orbitsaas.payment.R
+import com.orbitsaas.payment.data.remote.MerchantOrderDto
+import com.orbitsaas.payment.data.remote.PaymentIntentDto
 import com.orbitsaas.payment.ui.theme.ColorBkash
 import com.orbitsaas.payment.ui.theme.ColorCellfin
 import com.orbitsaas.payment.ui.theme.ColorNagad
@@ -92,12 +94,134 @@ fun formatBdtAmount(amount: Double): String {
 fun parseIsoEpochMs(iso: String?): Long? {
     val trimmed = iso?.trim().orEmpty()
     if (trimmed.isBlank()) return null
+    val numeric = trimmed.toLongOrNull()
+    if (numeric != null && numeric > 0L) {
+        return if (numeric < 10_000_000_000L) numeric * 1000L else numeric
+    }
     return runCatching { Instant.parse(trimmed).toEpochMilli() }.getOrNull()
 }
 
 fun formatFullTimestamp(epochMs: Long): String {
     val formatter = SimpleDateFormat("dd MMM yyyy, hh:mm:ss a", Locale.getDefault())
     return formatter.format(Date(epochMs))
+}
+
+fun formatShortTimestamp(epochMs: Long): String {
+    val formatter = SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault())
+    return formatter.format(Date(epochMs))
+}
+
+private val UUID_REF_REGEX = Regex(
+    "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+
+fun isPaymentLinkOrder(order: MerchantOrderDto): Boolean {
+    return order.externalOrderId.trim().startsWith("lnk_", ignoreCase = true)
+}
+
+fun isDeliveryOrder(order: MerchantOrderDto): Boolean {
+    if (isPaymentLinkOrder(order)) return false
+    return order.paymentMethod.equals("COD", ignoreCase = true) ||
+        !order.shippingAddress.isNullOrBlank() ||
+        !order.itemsSummary.isNullOrBlank()
+}
+
+private fun extractPaymentLinkLabel(externalOrderId: String): String {
+    val withoutPrefix = externalOrderId.trim().removePrefix("lnk_").removePrefix("LNK_")
+    val slugPart = if (withoutPrefix.contains("_")) {
+        withoutPrefix.substringBeforeLast("_")
+    } else {
+        withoutPrefix
+    }
+    return slugPart
+        .replace('-', ' ')
+        .trim()
+        .replace(Regex("\\s+"), " ")
+        .split(" ")
+        .filter { it.isNotBlank() }
+        .joinToString(" ") { word ->
+            word.replaceFirstChar { ch ->
+                if (ch.isLowerCase()) ch.titlecase(Locale.getDefault()) else ch.toString()
+            }
+        }
+}
+
+fun formatBusinessOrderHeadline(context: Context, order: MerchantOrderDto): String {
+    val customerName = order.customerName?.trim()?.takeIf { it.isNotBlank() }
+    val rawId = order.externalOrderId.trim()
+
+    if (isPaymentLinkOrder(order)) {
+        val linkName = extractPaymentLinkLabel(rawId)
+        return when {
+            customerName != null -> customerName
+            linkName.isNotBlank() -> context.getString(R.string.order_link_payment_label, linkName)
+            else -> context.getString(R.string.order_business_fallback_title)
+        }
+    }
+
+    if (UUID_REF_REGEX.matches(rawId)) {
+        return customerName
+            ?: order.itemsSummary?.trim()?.takeIf { it.isNotBlank() }
+            ?: order.customerPhone?.trim()?.takeIf { it.isNotBlank() }
+            ?: context.getString(R.string.order_business_fallback_title)
+    }
+
+    if (customerName != null) {
+        return customerName
+    }
+
+    val cleanId = rawId.removePrefix("#").trim()
+    return if (cleanId.isNotBlank()) {
+        context.getString(R.string.order_readable_title, cleanId)
+    } else {
+        context.getString(R.string.order_business_fallback_title)
+    }
+}
+
+fun formatBusinessOrderSubRef(context: Context, order: MerchantOrderDto): String? {
+    val rawId = order.externalOrderId.trim()
+    if (isPaymentLinkOrder(order)) {
+        val linkName = extractPaymentLinkLabel(rawId)
+        return if (linkName.isNotBlank()) {
+            context.getString(R.string.order_link_payment_label, linkName)
+        } else {
+            null
+        }
+    }
+    if (UUID_REF_REGEX.matches(rawId)) {
+        return null
+    }
+    val hasCustomerName = !order.customerName.isNullOrBlank()
+    val cleanId = rawId.removePrefix("#").trim()
+    return if (hasCustomerName && cleanId.isNotBlank()) {
+        context.getString(R.string.order_readable_title, cleanId)
+    } else {
+        null
+    }
+}
+
+fun formatBusinessIntentTitle(context: Context, intent: PaymentIntentDto): String {
+    intent.display.title?.trim()?.takeIf { it.isNotBlank() }?.let { rawTitle ->
+        if (!rawTitle.contains("lnk_", ignoreCase = true) && !UUID_REF_REGEX.containsMatchIn(rawTitle)) {
+            return rawTitle
+        }
+    }
+    val customerName = intent.customer?.name?.trim()?.takeIf { it.isNotBlank() }
+    val rawId = intent.externalRefId.trim().removePrefix("#").trim()
+    if (rawId.startsWith("lnk_", ignoreCase = true)) {
+        val linkName = extractPaymentLinkLabel(rawId)
+        return when {
+            customerName != null -> customerName
+            linkName.isNotBlank() -> context.getString(R.string.order_link_payment_label, linkName)
+            else -> context.getString(R.string.order_business_fallback_title)
+        }
+    }
+    if (UUID_REF_REGEX.matches(rawId) || rawId.isBlank()) {
+        return customerName
+            ?: intent.customer?.phone?.trim()?.takeIf { it.isNotBlank() }
+            ?: context.getString(R.string.order_business_fallback_title)
+    }
+    return context.getString(R.string.order_readable_title, rawId)
 }
 
 fun formatRelativeTime(context: Context, epochMs: Long): String {
