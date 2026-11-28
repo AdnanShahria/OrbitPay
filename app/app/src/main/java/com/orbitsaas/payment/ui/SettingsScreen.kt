@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.CheckCircle
@@ -30,7 +31,6 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Error
-import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.LightMode
@@ -83,6 +83,8 @@ import androidx.compose.ui.unit.dp
 import com.orbitsaas.payment.BuildConfig
 import com.orbitsaas.payment.R
 import com.orbitsaas.payment.data.local.PreferencesManager
+import com.orbitsaas.payment.ui.components.FloatingToastTone
+import com.orbitsaas.payment.ui.components.OrbitFloatingToast
 import com.orbitsaas.payment.ui.locale.LocaleHelper
 import com.orbitsaas.payment.ui.theme.OrbitSemanticColors
 import com.orbitsaas.payment.ui.theme.StatusAmberBg
@@ -184,51 +186,18 @@ fun SettingsScreen(
         },
         containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(16.dp)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Test Connection Feedback Banner
-            AnimatedVisibility(visible = testResult != null) {
-                testResult?.let { (isSuccess, message) ->
-                    val bannerBg = if (isSuccess) StatusGreenBg else StatusRedBg
-                    val bannerBorder = if (isSuccess) StatusGreen else StatusRed
-                    val textColor = if (isSuccess) greenFg else redFg
-
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .border(1.dp, bannerBorder.copy(alpha = 0.45f), cardShape),
-                        color = bannerBg,
-                        shape = cardShape
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Icon(
-                                imageVector = if (isSuccess) Icons.Default.CheckCircle else Icons.Default.Error,
-                                contentDescription = stringResource(
-                                    if (isSuccess) R.string.cd_connection_success else R.string.cd_connection_error
-                                ),
-                                tint = textColor,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Text(
-                                text = message,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = textColor,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                    }
-                }
-            }
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp, vertical = 16.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
 
             // Devices & Diagnostics Card
             if (state.isLoggedIn) {
@@ -1129,7 +1098,7 @@ fun SettingsScreen(
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Default.HelpOutline,
+                                imageVector = Icons.AutoMirrored.Filled.HelpOutline,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(20.dp)
@@ -1323,6 +1292,16 @@ fun SettingsScreen(
                 )
             }
         }
+
+        // True floating toast overlay (never shifts layout up or down)
+        OrbitFloatingToast(
+            visible = testResult != null,
+            message = testResult?.second.orEmpty(),
+            tone = if (testResult?.first == true) FloatingToastTone.SUCCESS else FloatingToastTone.ERROR,
+            onDismiss = { testResult = null },
+            modifier = Modifier.align(Alignment.TopCenter)
+        )
+    }
     }
 }
 

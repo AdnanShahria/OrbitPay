@@ -18,6 +18,7 @@ import path from 'node:path';
 import readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import { fileURLToPath } from 'node:url';
+import { runAppCheckSuite } from './app-check.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -58,7 +59,9 @@ const ACTION_LABELS = {
   release: 'Auto Build & Push Production APK (No Prompts)',
   ota: 'OTA Release & Push Manager (Advanced)',
   android: 'Launch Android App (Phone / Emulator)',
-  check: 'System Readiness Check (FCM, Keystore, Tools)',
+  check: 'App Checking Suite (Tests, Lint, Release Compile, Security & Health)',
+  'check:security': 'AppSec Static Audit (/claude-red OWASP MASVS)',
+  'check:ci': 'Full App CI Suite (Tests, Lint, Compile, Security + Web/Backend)',
   deploy: 'Deploy Backend & Web to Cloudflare',
 };
 
@@ -334,7 +337,7 @@ function printMenu(cfg) {
   ${c.cyan}[4]${c.reset}     OTA Release Manager (Manual / Force-Update / Broadcast / History)
   ${c.cyan}[5]${c.reset}     Android Device / Emulator / Studio Launcher
   ${c.cyan}[6]${c.reset}     Open Web Dashboards (Merchant / Admin / Checkout Demo)
-  ${c.cyan}[7]${c.reset}     System Readiness Check (FCM, Keystore, ADB, Java, R2, Backend Health)
+  ${c.cyan}[7]${c.reset}     ${c.bold}App Checking Suite${c.reset} (Unit Tests, Lint, Release Compile, /claude-red AppSec & Health)
   ${c.cyan}[8]${c.reset}     Deploy Web & Cloudflare Worker (npm run deploy)
   ${c.cyan}[9]${c.reset}     Settings (Set Default Mode, Server Target, Install Global \`app\` Command)
   ${c.dim}[0]${c.reset}     Exit
@@ -944,7 +947,7 @@ async function handleWebOpeners(rl) {
   await runNodeScript('scripts/launch.mjs', [mode], orbitDir);
 }
 
-async function handleReadinessCheck(rl, cfg) {
+async function handleReadinessCheck(rl, cfg, presetChoice = null) {
   const s = inspectEnvironment();
   const okTag = `${c.green}PASS${c.reset}`;
   const warnTag = `${c.yellow}WARN${c.reset}`;
@@ -967,26 +970,30 @@ async function handleReadinessCheck(rl, cfg) {
     `  [${s.hasKeystoreProps && s.keystoreFileExists ? okTag : warnTag}] Android release signing (keystore.properties=${s.hasKeystoreProps}, storeFileExists=${s.keystoreFileExists})`
   );
 
-  if (rl) {
-    const pingServer = await askYesNo(rl, 'Check live backend /api/v1/health and /api/v1/app/latest now?', true);
-    if (pingServer) {
-      const targetUrl = getPreferredServerUrl(cfg).replace(/\/+$/, '');
-      try {
-        const hRes = await fetch(`${targetUrl}/api/v1/health`);
-        const hJson = await hRes.json();
-        console.log(`  ${c.green}Health (${targetUrl}):${c.reset} ${JSON.stringify(hJson)}`);
-      } catch (err) {
-        console.log(`  ${c.yellow}Health (${targetUrl}): unreachable (${err.message})${c.reset}`);
-      }
-      try {
-        const aRes = await fetch(`${targetUrl}/api/v1/app/latest?currentVersionCode=1&platform=ANDROID`);
-        const aJson = await aRes.json();
-        console.log(`  ${c.green}Latest OTA (${targetUrl}):${c.reset} ${JSON.stringify(aJson)}`);
-      } catch (err) {
-        console.log(`  ${c.yellow}Latest OTA (${targetUrl}): unreachable (${err.message})${c.reset}`);
-      }
-    }
+  let modeChoice = presetChoice;
+  if (!modeChoice && rl) {
+    console.log(`\n${c.bold}Select App Checking Series:${c.reset}
+  1) Quick Check (Readiness + /claude-red AppSec Scan + Live Health/OTA Probe)
+  2) Standard Check (Unit Tests + Kotlin Release Compile + /claude-red AppSec Scan)
+  3) Full CI Check (Unit Tests + Android Lint + Kotlin Release Compile + /claude-red AppSec + Web/Backend Build)
+  4) Security Audit Only (/claude-red OWASP MASVS Static Scan)`);
+    modeChoice = await ask(rl, 'Choose check suite', '2');
   }
+
+  const targetUrl = getPreferredServerUrl(cfg).replace(/\/+$/, '');
+  const suiteMode =
+    modeChoice === '1'
+      ? 'quick'
+      : modeChoice === '3'
+        ? 'full'
+        : modeChoice === '4'
+          ? 'security'
+          : 'standard';
+
+  await runAppCheckSuite({
+    mode: suiteMode,
+    targetUrl: suiteMode === 'quick' || suiteMode === 'full' ? targetUrl : null,
+  });
 }
 
 async function handleDeploy(rl) {
@@ -1111,7 +1118,13 @@ async function dispatchAction(actionKey, rl, cfg) {
       await handleAndroidLauncher(rl);
       break;
     case 'check':
-      await handleReadinessCheck(rl, cfg);
+      await handleReadinessCheck(rl, cfg, process.argv.includes('--ci') || process.argv.includes('--full') ? '3' : rl ? null : '2');
+      break;
+    case 'check:security':
+      await handleReadinessCheck(rl, cfg, '4');
+      break;
+    case 'check:ci':
+      await handleReadinessCheck(rl, cfg, '3');
       break;
     case 'deploy':
       await handleDeploy(rl);
@@ -1133,7 +1146,9 @@ Usage:
   app release         Zero-prompt: auto-version + build signed APK + push OTA to Cloudflare
   app ota             Open OTA release & push menu (advanced)
   app android         Launch Android app on phone / emulator
-  app check           Run FCM / keystore / tooling readiness check
+  app check           Run interactive App Checking Suite (Tests, Lint, Compile, Security, Health)
+  app check --ci      Run Full CI Checks non-interactively
+  app check:security  Run /claude-red OWASP MASVS Android AppSec scan only
   app deploy          Deploy Web + Cloudflare Worker
   app --help          Show this help
 `);

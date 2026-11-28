@@ -218,11 +218,24 @@ class VerifyViewModel(application: Application) : AndroidViewModel(application) 
                 loadReviewIntents()
                 loadUnpaidOrders()
             }.onFailure { err ->
+                val rawMessage = err.message.orEmpty()
+                val isVersionConflict = rawMessage.contains("State version mismatch", ignoreCase = true) ||
+                    rawMessage.contains("concurrently", ignoreCase = true) ||
+                    rawMessage.contains("already", ignoreCase = true)
+                val friendlyMessage = if (isVersionConflict) {
+                    "This payment was already updated on the server. Refreshed latest status."
+                } else {
+                    "Resolve failed: ${rawMessage.ifBlank { "Unknown error" }}"
+                }
                 _uiState.update {
                     it.copy(
                         actionInProgressIntentId = null,
-                        feedbackMessage = "Resolve failed: ${err.message ?: "Unknown error"}"
+                        feedbackMessage = friendlyMessage
                     )
+                }
+                if (isVersionConflict) {
+                    loadReviewIntents()
+                    loadUnpaidOrders()
                 }
             }
         }

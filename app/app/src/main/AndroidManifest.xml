@@ -2,6 +2,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Declare telephony hardware optional so ChromeOS / Wi-Fi tablets can install companion mode -->
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
+
     <!-- Essential MFS Telecom & Ingestion Permissions -->
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
     <uses-permission android:name="android.permission.READ_SMS" />

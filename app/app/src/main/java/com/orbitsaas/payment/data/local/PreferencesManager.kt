@@ -2,6 +2,8 @@ package com.orbitsaas.payment.data.local
 
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -19,6 +21,24 @@ data class ConfirmedSimSlot(
 class PreferencesManager(context: Context) {
 
     private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private val securePrefs: SharedPreferences = runCatching {
+        val masterKey = MasterKey.Builder(context.applicationContext)
+            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+            .build()
+        EncryptedSharedPreferences.create(
+            context.applicationContext,
+            SECURE_PREFS_NAME,
+            masterKey,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        )
+    }.getOrElse { prefs }.also { encrypted ->
+        if (encrypted !== prefs) {
+            migrateSecretKey(prefs, encrypted, KEY_DEVICE_KEY)
+            migrateSecretKey(prefs, encrypted, KEY_AUTH_TOKEN)
+            migrateSecretKey(prefs, encrypted, KEY_SESSION_ID)
+        }
+    }
     private val simJson = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
@@ -71,25 +91,25 @@ class PreferencesManager(context: Context) {
         }
 
     var deviceKey: String
-        get() = prefs.getString(KEY_DEVICE_KEY, "") ?: ""
+        get() = securePrefs.getString(KEY_DEVICE_KEY, "") ?: ""
         set(value) {
             val sanitized = value.trim()
-            prefs.edit().putString(KEY_DEVICE_KEY, sanitized).apply()
+            securePrefs.edit().putString(KEY_DEVICE_KEY, sanitized).apply()
             _deviceKeyFlow.value = sanitized
         }
 
     var authToken: String
-        get() = prefs.getString(KEY_AUTH_TOKEN, "") ?: ""
+        get() = securePrefs.getString(KEY_AUTH_TOKEN, "") ?: ""
         set(value) {
             val sanitized = value.trim()
-            prefs.edit().putString(KEY_AUTH_TOKEN, sanitized).apply()
+            securePrefs.edit().putString(KEY_AUTH_TOKEN, sanitized).apply()
             _authTokenFlow.value = sanitized
         }
 
     var sessionId: String
-        get() = prefs.getString(KEY_SESSION_ID, "") ?: ""
+        get() = securePrefs.getString(KEY_SESSION_ID, "") ?: ""
         set(value) {
-            prefs.edit().putString(KEY_SESSION_ID, value.trim()).apply()
+            securePrefs.edit().putString(KEY_SESSION_ID, value.trim()).apply()
         }
 
     var userEmail: String
@@ -264,13 +284,15 @@ class PreferencesManager(context: Context) {
     }
 
     fun clearAuthSession() {
-        prefs.edit()
+        securePrefs.edit()
             .remove(KEY_AUTH_TOKEN)
             .remove(KEY_SESSION_ID)
+            .remove(KEY_DEVICE_KEY)
+            .apply()
+        prefs.edit()
             .remove(KEY_USER_EMAIL)
             .remove(KEY_STORE_NAME)
             .remove(KEY_MERCHANT_ID)
-            .remove(KEY_DEVICE_KEY)
             .remove(KEY_LAST_INBOX_SCAN_AT)
             .remove(KEY_LAST_SYNC_AT)
             .remove(KEY_SEEN_ORDER_IDS)
@@ -284,8 +306,23 @@ class PreferencesManager(context: Context) {
 
     companion object {
         private const val PREFS_NAME = "orbit_payment_preferences"
+        private const val SECURE_PREFS_NAME = "orbit_payment_secure_preferences"
         private const val DEFAULT_SERVER_URL = "https://payment.orbitsaas.cloud"
         private const val MAX_SEEN_ORDER_IDS = 200
+
+        private fun migrateSecretKey(
+            legacy: SharedPreferences,
+            encrypted: SharedPreferences,
+            key: String
+        ) {
+            if (!encrypted.contains(key) && legacy.contains(key)) {
+                val legacyValue = legacy.getString(key, null)
+                if (!legacyValue.isNullOrBlank()) {
+                    encrypted.edit().putString(key, legacyValue).apply()
+                }
+                legacy.edit().remove(key).apply()
+            }
+        }
 
         const val LANG_SYSTEM = "system"
         const val LANG_EN = "en"

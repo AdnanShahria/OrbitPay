@@ -1,6 +1,7 @@
 package com.orbitsaas.payment.data.remote
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
 
 @Serializable
 data class ApiEnvelope<T>(
@@ -260,6 +261,8 @@ data class LoginResponse(
 data class MerchantOrderDto(
     val id: String = "",
     val merchantId: String = "",
+    val projectId: String? = null,
+    val projectName: String? = null,
     val externalOrderId: String,
     val paymentMethod: String = "COD",
     val paymentStatus: String = "PENDING",
@@ -351,6 +354,8 @@ data class PaymentCustomerDto(
 data class PaymentIntentDto(
     val id: String = "",
     val merchantId: String = "",
+    val projectId: String? = null,
+    val projectName: String? = null,
     val vertical: String = "custom",
     val externalRefId: String = "",
     val verificationMode: String = "AUTO",
@@ -374,6 +379,7 @@ data class PaymentIntentDto(
     val customer: PaymentCustomerDto? = null,
     val display: PaymentDisplayDto = PaymentDisplayDto(),
     val actions: List<DynamicPaymentActionDto> = emptyList(),
+    val metadata: Map<String, JsonElement>? = null,
     val stateVersion: Int = 1,
     val submitAttempts: Int = 0,
     val graceExpiresAt: String? = null,
@@ -502,9 +508,27 @@ data class DevicePreflightData(
 )
 
 @Serializable
+data class MerchantProjectDto(
+    val id: String = "",
+    val merchantId: String = "",
+    val name: String = "",
+    val slug: String = "",
+    val description: String? = null,
+    val accountMode: String = "WEBHOOK_CONNECTED",
+    val verificationMode: String = "AUTO",
+    val walletSelectionMode: String = "COMMON",
+    val walletIds: List<String> = emptyList(),
+    val isDefault: Boolean = false,
+    val isActive: Boolean = true
+)
+
+@Serializable
 data class PaymentLinkDto(
     val id: String = "",
     val merchantId: String = "",
+    val projectId: String? = null,
+    val projectName: String? = null,
+    val projectSlug: String? = null,
     val merchantSlug: String? = null,
     val slug: String = "",
     val sharePath: String = "",
@@ -517,6 +541,8 @@ data class PaymentLinkDto(
     val minAmount: Double? = null,
     val maxAmount: Double? = null,
     val currency: String = "BDT",
+    val verificationMode: String? = null,
+    val returnUrl: String? = null,
     val isActive: Boolean = true,
     val maxUses: Int? = null,
     val usedCount: Int = 0,
@@ -527,21 +553,35 @@ data class PaymentLinkDto(
 
 @Serializable
 data class CreatePaymentLinkRequest(
+    val projectId: String? = null,
+    val slug: String? = null,
     val title: String,
     val description: String? = null,
     val vertical: String = "custom",
     val amountType: String = "FIXED",
     val fixedAmount: Double? = null,
     val minAmount: Double? = null,
-    val maxAmount: Double? = null
+    val maxAmount: Double? = null,
+    val verificationMode: String? = null,
+    val maxUses: Int? = null,
+    val returnUrl: String? = null
 )
 
 @Serializable
 data class UpdatePaymentLinkRequest(
+    val projectId: String? = null,
+    val slug: String? = null,
     val isActive: Boolean? = null,
     val title: String? = null,
     val description: String? = null,
-    val fixedAmount: Double? = null
+    val vertical: String? = null,
+    val amountType: String? = null,
+    val fixedAmount: Double? = null,
+    val minAmount: Double? = null,
+    val maxAmount: Double? = null,
+    val verificationMode: String? = null,
+    val maxUses: Int? = null,
+    val returnUrl: String? = null
 )
 
 @Serializable

@@ -1,6 +1,7 @@
 package com.orbitsaas.payment.ui.orders
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -24,6 +25,9 @@ import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.ShoppingBag
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -59,6 +63,9 @@ import com.orbitsaas.payment.R
 import com.orbitsaas.payment.data.remote.MerchantOrderDto
 import com.orbitsaas.payment.ui.EmptyOrdersStateCard
 import com.orbitsaas.payment.ui.OrdersLoadingCard
+import com.orbitsaas.payment.ui.components.MediumTagChip
+import com.orbitsaas.payment.ui.components.OrbitSnackbarHost
+import com.orbitsaas.payment.ui.components.ProjectTagChip
 import com.orbitsaas.payment.ui.components.SegmentedPillTabs
 import com.orbitsaas.payment.ui.components.StatusPill
 import com.orbitsaas.payment.ui.components.formatBdtAmount
@@ -66,6 +73,7 @@ import com.orbitsaas.payment.ui.components.formatBusinessOrderHeadline
 import com.orbitsaas.payment.ui.components.formatBusinessOrderSubRef
 import com.orbitsaas.payment.ui.components.formatShortTimestamp
 import com.orbitsaas.payment.ui.components.isDeliveryOrder
+import com.orbitsaas.payment.ui.components.isPaymentLinkOrder
 import com.orbitsaas.payment.ui.components.parseIsoEpochMs
 import com.orbitsaas.payment.ui.theme.OrbitSemanticColors
 import com.orbitsaas.payment.ui.theme.StatusAmberBg
@@ -81,7 +89,8 @@ fun OrdersScreen(
     state: DashboardUiState,
     onRefreshOrders: () -> Unit,
     onOrderAction: (externalOrderId: String, action: String) -> Unit,
-    onClearFeedback: () -> Unit
+    onClearFeedback: () -> Unit,
+    onSearchClick: () -> Unit = {}
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     var filterTab by rememberSaveable { mutableIntStateOf(0) } // 0 = All, 1 = Needs Action, 2 = COD
@@ -127,6 +136,16 @@ fun OrdersScreen(
                 },
                 actions = {
                     IconButton(
+                        onClick = onSearchClick,
+                        modifier = Modifier.size(48.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = stringResource(R.string.search_action_cd),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    IconButton(
                         onClick = onRefreshOrders,
                         enabled = !state.isOrdersLoading,
                         modifier = Modifier.size(48.dp)
@@ -150,7 +169,7 @@ fun OrdersScreen(
                 )
             )
         },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        snackbarHost = { OrbitSnackbarHost(snackbarHostState) },
         containerColor = MaterialTheme.colorScheme.background
     ) { innerPadding ->
         Column(
@@ -201,7 +220,7 @@ private fun MerchantOrderCard(
     onAction: (String) -> Unit
 ) {
     val context = LocalContext.current
-    val cardShape = RoundedCornerShape(16.dp)
+    val cardShape = RoundedCornerShape(18.dp)
     val normalizedOrder = order.orderStatus.uppercase(Locale.US)
     val normalizedPay = order.paymentStatus.uppercase(Locale.US)
     val normalizedMethod = order.paymentMethod.uppercase(Locale.US)
@@ -256,13 +275,32 @@ private fun MerchantOrderCard(
             .fillMaxWidth()
             .border(1.dp, MaterialTheme.colorScheme.outline, cardShape),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         shape = cardShape
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            val isLink = isPaymentLinkOrder(order)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                order.projectName?.takeIf { it.isNotBlank() }?.let { proj ->
+                    ProjectTagChip(projectName = proj)
+                }
+                MediumTagChip(
+                    label = stringResource(if (isLink) R.string.medium_payment_link else R.string.medium_storefront_checkout),
+                    icon = if (isLink) Icons.Default.Link else Icons.Default.ShoppingBag
+                )
+            }
+            HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outline.copy(alpha = 0.7f))
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -421,6 +459,7 @@ private fun MerchantOrderCard(
                         }
                     }
                 }
+            }
             }
         }
     }

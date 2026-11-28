@@ -17,8 +17,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.FactCheck
 import androidx.compose.material.icons.filled.AccountBalanceWallet
-import androidx.compose.material.icons.filled.FactCheck
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.ShoppingBag
@@ -57,6 +57,7 @@ import com.orbitsaas.payment.ui.diagnostics.DiagnosticsScreen
 import com.orbitsaas.payment.ui.history.HistoryScreen
 import com.orbitsaas.payment.ui.links.PaymentLinksScreen
 import com.orbitsaas.payment.ui.orders.OrdersScreen
+import com.orbitsaas.payment.ui.search.UniversalSearchScreen
 import com.orbitsaas.payment.ui.theme.OrbitPaymentTheme
 import com.orbitsaas.payment.ui.update.AppUpdateDialog
 import com.orbitsaas.payment.ui.verify.VerifyScreen
@@ -170,6 +171,7 @@ sealed class Screen(val route: String) {
     data object Onboarding : Screen("onboarding")
     data object Login : Screen("login")
     data object Settings : Screen("settings")
+    data object Search : Screen("search")
 }
 
 private data class BottomNavDestination(
@@ -180,7 +182,7 @@ private data class BottomNavDestination(
 
 private val bottomNavDestinations = listOf(
     BottomNavDestination(Screen.Dashboard.route, R.string.nav_overview, Icons.Default.Home),
-    BottomNavDestination(Screen.Verify.route, R.string.nav_payments, Icons.Default.FactCheck),
+    BottomNavDestination(Screen.Verify.route, R.string.nav_payments, Icons.AutoMirrored.Filled.FactCheck),
     BottomNavDestination(Screen.Links.route, R.string.nav_links, Icons.Default.Link),
     BottomNavDestination(Screen.Orders.route, R.string.nav_orders, Icons.Default.ShoppingBag),
     BottomNavDestination(Screen.Wallets.route, R.string.nav_sim_pool, Icons.Default.AccountBalanceWallet)
@@ -261,6 +263,12 @@ fun OrbitPaymentApp(
 
     val navigateToDiagnostics: () -> Unit = {
         navController.navigate(Screen.Diagnostics.route) {
+            launchSingleTop = true
+        }
+    }
+
+    val navigateToSearch: () -> Unit = {
+        navController.navigate(Screen.Search.route) {
             launchSingleTop = true
         }
     }
@@ -353,20 +361,56 @@ fun OrbitPaymentApp(
                     },
                     onRefreshIntents = { viewModel.refreshPaymentIntents() },
                     onClearFocusedIntent = { viewModel.clearFocusedPaymentIntent() },
-                    onOpenDiagnostics = navigateToDiagnostics
+                    onOpenDiagnostics = navigateToDiagnostics,
+                    onSearchClick = navigateToSearch
                 )
             }
 
             composable(Screen.Verify.route) {
-                VerifyScreen()
+                VerifyScreen(onSearchClick = navigateToSearch)
             }
 
             composable(Screen.Links.route) {
                 PaymentLinksScreen(
                     state = uiState,
-                    onRefresh = { viewModel.refreshPaymentLinks() },
-                    onCreateLink = { title, desc, amountType, fixedAmt, minAmt, maxAmt, onDone ->
-                        viewModel.createPaymentLink(title, desc, amountType, fixedAmt, minAmt, maxAmt, onDone)
+                    onRefresh = {
+                        viewModel.refreshPaymentLinks()
+                        viewModel.refreshProjects()
+                    },
+                    onCreateLink = { title, desc, amountType, fixedAmt, minAmt, maxAmt, projectId, vertical, slug, verMode, maxUses, returnUrl, onDone ->
+                        viewModel.createPaymentLink(
+                            title = title,
+                            description = desc,
+                            amountType = amountType,
+                            fixedAmount = fixedAmt,
+                            minAmount = minAmt,
+                            maxAmount = maxAmt,
+                            projectId = projectId,
+                            vertical = vertical,
+                            slug = slug,
+                            verificationMode = verMode,
+                            maxUses = maxUses,
+                            returnUrl = returnUrl,
+                            onDone = onDone
+                        )
+                    },
+                    onUpdateLink = { linkId, title, desc, amountType, fixedAmt, minAmt, maxAmt, projectId, vertical, slug, verMode, maxUses, returnUrl, onDone ->
+                        viewModel.updatePaymentLinkDetails(
+                            linkId = linkId,
+                            title = title,
+                            description = desc,
+                            amountType = amountType,
+                            fixedAmount = fixedAmt,
+                            minAmount = minAmt,
+                            maxAmount = maxAmt,
+                            projectId = projectId,
+                            vertical = vertical,
+                            slug = slug,
+                            verificationMode = verMode,
+                            maxUses = maxUses,
+                            returnUrl = returnUrl,
+                            onDone = onDone
+                        )
                     },
                     onToggleActive = { linkId, isActive ->
                         viewModel.togglePaymentLinkActive(linkId, isActive)
@@ -374,7 +418,8 @@ fun OrbitPaymentApp(
                     onDeleteLink = { linkId ->
                         viewModel.deletePaymentLink(linkId)
                     },
-                    onClearFeedback = { viewModel.clearFeedbackMessage() }
+                    onClearFeedback = { viewModel.clearFeedbackMessage() },
+                    onSearchClick = navigateToSearch
                 )
             }
 
@@ -385,7 +430,8 @@ fun OrbitPaymentApp(
                     onOrderAction = { externalOrderId, action ->
                         viewModel.performOrderAction(externalOrderId, action)
                     },
-                    onClearFeedback = { viewModel.clearFeedbackMessage() }
+                    onClearFeedback = { viewModel.clearFeedbackMessage() },
+                    onSearchClick = navigateToSearch
                 )
             }
 
@@ -407,6 +453,32 @@ fun OrbitPaymentApp(
                     },
                     onDeleteWallet = { walletId ->
                         viewModel.deleteWallet(walletId)
+                    },
+                    onClearFeedback = { viewModel.clearFeedbackMessage() },
+                    onSearchClick = navigateToSearch
+                )
+            }
+
+            composable(Screen.Search.route) {
+                UniversalSearchScreen(
+                    dashboardState = uiState,
+                    onBackClick = { navController.popBackStack() },
+                    onResolveIntent = { intentId, decision, expectedStateVersion, reason ->
+                        viewModel.resolvePaymentIntent(intentId, decision, expectedStateVersion, reason)
+                    },
+                    onTriggerIntentAction = { intentId, actionId, actionLabel ->
+                        viewModel.triggerPaymentIntentAction(intentId, actionId, actionLabel)
+                    },
+                    onOrderAction = { externalOrderId, action ->
+                        viewModel.performOrderAction(externalOrderId, action)
+                    },
+                    onOpenLinksTab = {
+                        navController.popBackStack()
+                        navigateTopLevel(Screen.Links.route)
+                    },
+                    onOpenSimPoolTab = {
+                        navController.popBackStack()
+                        navigateTopLevel(Screen.Wallets.route)
                     },
                     onClearFeedback = { viewModel.clearFeedbackMessage() }
                 )

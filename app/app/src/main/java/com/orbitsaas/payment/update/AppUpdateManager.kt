@@ -233,6 +233,27 @@ object AppUpdateManager {
             )
             return
         }
+        val normalizedUrl = target.downloadUrl.trim()
+        val isHttps = normalizedUrl.startsWith("https://", ignoreCase = true)
+        val isDevLocal = BuildConfig.DEBUG && (
+            normalizedUrl.startsWith("http://10.0.2.2", ignoreCase = true) ||
+                normalizedUrl.startsWith("http://localhost", ignoreCase = true) ||
+                normalizedUrl.startsWith("http://127.0.0.1", ignoreCase = true)
+            )
+        if (!isHttps && !isDevLocal) {
+            _state.value = _state.value.copy(
+                status = UpdateStatus.ERROR,
+                errorMessage = "Blocked insecure non-HTTPS APK update URL."
+            )
+            return
+        }
+        if (target.sha256.isBlank()) {
+            _state.value = _state.value.copy(
+                status = UpdateStatus.ERROR,
+                errorMessage = "Missing SHA-256 checksum for OTA update verification."
+            )
+            return
+        }
 
         val appContext = context.applicationContext
         downloadMutex.withLock {
@@ -325,7 +346,7 @@ object AppUpdateManager {
                         )
 
                         val computedSha = digest.digest().joinToString("") { "%02x".format(it) }
-                        if (target.sha256.isNotBlank() &&
+                        if (target.sha256.isBlank() ||
                             !computedSha.equals(target.sha256.trim(), ignoreCase = true)
                         ) {
                             tempApk.delete()

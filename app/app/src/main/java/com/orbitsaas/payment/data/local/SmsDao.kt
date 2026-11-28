@@ -67,6 +67,20 @@ interface SmsDao {
     """)
     fun searchFlow(query: String, status: String?, provider: String?): Flow<List<SmsEntity>>
 
+    @Query("""
+        SELECT * FROM local_sms
+        WHERE :query = ''
+           OR trxId LIKE '%' || :query || '%'
+           OR senderNumber LIKE '%' || :query || '%'
+           OR provider LIKE '%' || :query || '%'
+           OR COALESCE(externalOrderId, '') LIKE '%' || :query || '%'
+           OR rawSms LIKE '%' || :query || '%'
+           OR CAST(amount AS TEXT) LIKE '%' || :query || '%'
+        ORDER BY receivedAt DESC
+        LIMIT :limit
+    """)
+    suspend fun searchLocalSnapshot(query: String, limit: Int = 50): List<SmsEntity>
+
     @Query("SELECT * FROM local_sms WHERE status != 'VERIFIED' ORDER BY receivedAt DESC")
     fun unclaimedFlow(): Flow<List<SmsEntity>>
 

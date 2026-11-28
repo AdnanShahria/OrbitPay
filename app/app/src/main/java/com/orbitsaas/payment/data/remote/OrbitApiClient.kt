@@ -64,10 +64,12 @@ class OrbitApiClient(
         install(Logging) {
             logger = object : Logger {
                 override fun log(message: String) {
-                    Log.d(TAG, message)
+                    if (BuildConfig.DEBUG) {
+                        Log.d(TAG, message)
+                    }
                 }
             }
-            level = LogLevel.INFO
+            level = if (BuildConfig.DEBUG) LogLevel.INFO else LogLevel.NONE
         }
     }
 
@@ -186,13 +188,23 @@ class OrbitApiClient(
     /**
      * Fetches merchant orders and pending confirmation counts from ORBIT Central Hub.
      */
-    suspend fun fetchOrders(statusFilter: String? = null): Result<OrdersListData> {
+    suspend fun fetchOrders(
+        statusFilter: String? = null,
+        search: String? = null,
+        projectId: String? = null
+    ): Result<OrdersListData> {
         return runCatching {
             val url = "$baseUrl/api/v1/device/orders"
             val response: HttpResponse = client.get(url) {
                 applyAuthHeaders()
                 if (!statusFilter.isNullOrBlank()) {
                     parameter("orderStatus", statusFilter.trim())
+                }
+                if (!search.isNullOrBlank()) {
+                    parameter("search", search.trim())
+                }
+                if (!projectId.isNullOrBlank()) {
+                    parameter("projectId", projectId.trim())
                 }
             }
 
@@ -676,14 +688,40 @@ class OrbitApiClient(
     }
 
     /**
+     * Lists active sub-projects provisioned under the authenticated merchant.
+     */
+    suspend fun fetchProjects(): Result<List<MerchantProjectDto>> {
+        return runCatching {
+            val resolvedBaseUrl = PreferencesManager.normalizeServerUrl(baseUrl)
+            val url = "$resolvedBaseUrl/api/v1/projects"
+            val response: HttpResponse = client.get(url) {
+                applyAuthHeaders()
+            }
+            if (response.status.isSuccess()) {
+                val envelope = response.body<ApiEnvelope<List<MerchantProjectDto>>>()
+                if (envelope.success && envelope.data != null) {
+                    envelope.data
+                } else {
+                    throw Exception(envelope.error ?: envelope.message ?: "Failed to load projects")
+                }
+            } else {
+                throwHttpException(response)
+            }
+        }
+    }
+
+    /**
      * Lists shareable merchant Payment Links.
      */
-    suspend fun listPaymentLinks(): Result<List<PaymentLinkDto>> {
+    suspend fun listPaymentLinks(projectId: String? = null): Result<List<PaymentLinkDto>> {
         return runCatching {
             val resolvedBaseUrl = PreferencesManager.normalizeServerUrl(baseUrl)
             val url = "$resolvedBaseUrl/api/v1/payment-links"
             val response: HttpResponse = client.get(url) {
                 applyAuthHeaders()
+                if (!projectId.isNullOrBlank()) {
+                    parameter("projectId", projectId.trim())
+                }
             }
             if (response.status.isSuccess()) {
                 val envelope = response.body<ApiEnvelope<List<PaymentLinkDto>>>()

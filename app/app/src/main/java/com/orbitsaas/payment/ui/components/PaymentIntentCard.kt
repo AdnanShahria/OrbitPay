@@ -4,8 +4,11 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -18,10 +21,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.OpenInNew
-import androidx.compose.material.icons.filled.ReceiptLong
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -29,6 +33,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -44,9 +49,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -155,7 +163,8 @@ fun PaymentIntentCard(
     onDynamicActionClick: (DynamicPaymentActionDto) -> Unit
 ) {
     val context = LocalContext.current
-    val cardShape = RoundedCornerShape(16.dp)
+    val clipboard = LocalClipboardManager.current
+    val cardShape = RoundedCornerShape(20.dp)
     val borderColor = if (isHighlighted) {
         MaterialTheme.colorScheme.primary
     } else {
@@ -163,8 +172,8 @@ fun PaymentIntentCard(
     }
     val borderWidth = if (isHighlighted) 2.dp else 1.dp
 
-    val displayAppName = intent.display.appName?.takeIf { it.isNotBlank() }
-        ?: fallbackAppName.ifBlank { stringResource(R.string.app_name) }
+    val displayAppName = resolvePaymentProjectLabel(intent, fallbackAppName)
+    val (mediumLabel, mediumIcon) = resolvePaymentMediumLabel(intent)
     val displayTitle = formatBusinessIntentTitle(context, intent)
 
     val (statusLabel, statusFg, statusBg) = intentStatusBadgeColors(intent.status)
@@ -220,33 +229,28 @@ fun PaymentIntentCard(
             .fillMaxWidth()
             .border(borderWidth, borderColor, cardShape),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         shape = cardShape
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            modifier = Modifier.fillMaxWidth()
         ) {
-            // App Badge + Status Pill
+            // Top Context Strip: Project + Medium + Status
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                FlowRow(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Text(
-                        text = displayAppName,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    ProjectTagChip(projectName = displayAppName)
+                    MediumTagChip(label = mediumLabel, icon = mediumIcon)
                 }
 
                 Spacer(modifier = Modifier.size(8.dp))
@@ -258,88 +262,128 @@ fun PaymentIntentCard(
                 )
             }
 
-            // Title, Subtitle + Amount
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Top
+            HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outline.copy(alpha = 0.7f))
+
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                // Title, Subtitle + Hero Amount
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Top
                 ) {
-                    Text(
-                        text = displayTitle,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    if (subtitleText.isNotEmpty()) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
                         Text(
-                            text = subtitleText,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            text = displayTitle,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
-                    }
-                }
-
-                Spacer(modifier = Modifier.size(10.dp))
-
-                Text(
-                    text = formattedPrimaryAmount,
-                    style = MaterialTheme.typography.titleMedium.copy(fontFeatureSettings = "tnum"),
-                    fontWeight = FontWeight.Bold,
-                    color = if (normalizedStatus == "VERIFIED") StatusGreen else MaterialTheme.colorScheme.onSurface
-                )
-            }
-
-            // MFS Provider + TrxID + Sender
-            val hasMfsDetails = !intent.provider.isNullOrBlank() ||
-                !intent.trxId.isNullOrBlank() ||
-                !intent.senderNumber.isNullOrBlank()
-            if (hasMfsDetails) {
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    intent.provider?.takeIf { it.isNotBlank() }?.let { prov ->
-                        Row(
-                            modifier = Modifier.align(Alignment.CenterVertically),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            ProviderDot(provider = prov, size = 9.dp)
+                        if (subtitleText.isNotEmpty()) {
                             Text(
-                                text = providerDisplayName(prov),
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurface
+                                text = subtitleText,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        if (intent.externalRefId.isNotBlank() && !intent.externalRefId.startsWith("lnk_", ignoreCase = true)) {
+                            Text(
+                                text = "#${intent.externalRefId}",
+                                style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
-                    intent.trxId?.takeIf { it.isNotBlank() }?.let { trx ->
+
+                    Spacer(modifier = Modifier.size(12.dp))
+
+                    Column(horizontalAlignment = Alignment.End) {
                         Text(
-                            text = "TrxID: $trx",
-                            modifier = Modifier.align(Alignment.CenterVertically),
-                            style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum"),
-                            fontFamily = FontFamily.Monospace,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                    intent.senderNumber?.takeIf { it.isNotBlank() }?.let { sender ->
-                        Text(
-                            text = sender,
-                            modifier = Modifier.align(Alignment.CenterVertically),
-                            style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum"),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            text = formattedPrimaryAmount,
+                            style = MaterialTheme.typography.headlineSmall.copy(fontFeatureSettings = "tnum"),
+                            fontWeight = FontWeight.Bold,
+                            color = if (normalizedStatus == "VERIFIED") OrbitSemanticColors.statusGreen else MaterialTheme.colorScheme.onSurface
                         )
                     }
                 }
-            }
+
+                // MFS Provider + TrxID + Sender inside tonal strip
+                val hasMfsDetails = !intent.provider.isNullOrBlank() ||
+                    !intent.trxId.isNullOrBlank() ||
+                    !intent.senderNumber.isNullOrBlank()
+                if (hasMfsDetails) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.75f))
+                    ) {
+                        FlowRow(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            intent.provider?.takeIf { it.isNotBlank() }?.let { prov ->
+                                ProviderBadgeChip(
+                                    provider = prov,
+                                    modifier = Modifier.align(Alignment.CenterVertically)
+                                )
+                            }
+                            intent.trxId?.takeIf { it.isNotBlank() }?.let { trx ->
+                                Surface(
+                                    modifier = Modifier
+                                        .align(Alignment.CenterVertically)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable { clipboard.setText(AnnotatedString(trx)) },
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.surface,
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                    ) {
+                                        Text(
+                                            text = "TrxID: $trx",
+                                            style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Icon(
+                                            imageVector = Icons.Default.ContentCopy,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(12.dp)
+                                        )
+                                    }
+                                }
+                            }
+                            intent.senderNumber?.takeIf { it.isNotBlank() }?.let { sender ->
+                                Text(
+                                    text = sender,
+                                    modifier = Modifier.align(Alignment.CenterVertically),
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum"),
+                                    fontFamily = FontFamily.Monospace,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
 
             // Escalation Reason, Trust Flag, Device Offline, Receipt Badges
             val hasAlertBadges = !intent.escalationReason.isNullOrBlank() ||
@@ -400,7 +444,7 @@ fun PaymentIntentCard(
                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.ReceiptLong,
+                                    imageVector = Icons.AutoMirrored.Filled.ReceiptLong,
                                     contentDescription = null,
                                     tint = OrbitSemanticColors.statusGreen,
                                     modifier = Modifier.size(13.dp)
@@ -656,7 +700,7 @@ fun PaymentIntentCard(
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
                         ) {
-                            Icon(Icons.Default.ReceiptLong, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(Icons.AutoMirrored.Filled.ReceiptLong, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.size(6.dp))
                             Text(
                                 text = stringResource(R.string.intent_view_receipt),
@@ -674,7 +718,7 @@ fun PaymentIntentCard(
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
                         ) {
-                            Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.size(6.dp))
                             Text(
                                 text = stringResource(R.string.intent_open_admin),
@@ -683,6 +727,7 @@ fun PaymentIntentCard(
                         }
                     }
                 }
+            }
             }
         }
     }

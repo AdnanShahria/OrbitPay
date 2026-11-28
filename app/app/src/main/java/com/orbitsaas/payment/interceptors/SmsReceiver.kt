@@ -3,6 +3,7 @@ package com.orbitsaas.payment.interceptors
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.Bundle
 import android.provider.Telephony
 import android.util.Log
 import com.orbitsaas.payment.data.local.BlockedMessageEntity
@@ -111,30 +112,14 @@ class SmsReceiver : BroadcastReceiver() {
         prefs: PreferencesManager
     ): Pair<Int?, String?> {
         val extras = intent.extras
-        val subId = listOf(
-            "subscription",
-            "android.telephony.extra.SUBSCRIPTION_INDEX"
-        ).firstNotNullOfOrNull { key ->
-            val raw = extras?.get(key)
-            when (raw) {
-                is Int -> raw.takeIf { it >= 0 }
-                is Long -> raw.toInt().takeIf { it >= 0 }
-                else -> null
-            }
-        }
-
-        val rawSlot = listOf(
-            "android.telephony.extra.SLOT_INDEX",
-            "simSlot",
-            "slot"
-        ).firstNotNullOfOrNull { key ->
-            val raw = extras?.get(key)
-            when (raw) {
-                is Int -> raw.takeIf { it >= 0 }
-                is Long -> raw.toInt().takeIf { it >= 0 }
-                else -> null
-            }
-        }
+        val subId = readNonNegativeIntExtra(
+            extras,
+            listOf("subscription", "android.telephony.extra.SUBSCRIPTION_INDEX")
+        )
+        val rawSlot = readNonNegativeIntExtra(
+            extras,
+            listOf("android.telephony.extra.SLOT_INDEX", "simSlot", "slot")
+        )
 
         val simSlots = runCatching { SimSlotReader.readSimSlots(context, prefs) }.getOrDefault(emptyList())
         val matchedBySub = subId?.let { id -> simSlots.firstOrNull { it.subscriptionId == id } }
@@ -154,6 +139,18 @@ class SmsReceiver : BroadcastReceiver() {
         }
 
         return null to null
+    }
+
+    @Suppress("DEPRECATION")
+    private fun readNonNegativeIntExtra(extras: Bundle?, keys: List<String>): Int? {
+        if (extras == null) return null
+        return keys.firstNotNullOfOrNull { key ->
+            when (val raw = extras.get(key)) {
+                is Int -> raw.takeIf { it >= 0 }
+                is Long -> raw.toInt().takeIf { it >= 0 }
+                else -> null
+            }
+        }
     }
 
     companion object {

@@ -1,6 +1,7 @@
 package com.orbitsaas.payment.ui.verify
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -26,8 +27,11 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.ShoppingBag
 import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
@@ -77,7 +81,11 @@ import com.orbitsaas.payment.data.remote.LedgerDto
 import com.orbitsaas.payment.data.remote.MerchantOrderDto
 import com.orbitsaas.payment.data.remote.PaymentIntentDto
 import com.orbitsaas.payment.ui.components.ApproveIntentDialog
+import com.orbitsaas.payment.ui.components.MediumTagChip
+import com.orbitsaas.payment.ui.components.OrbitSnackbarHost
 import com.orbitsaas.payment.ui.components.PaymentIntentCard
+import com.orbitsaas.payment.ui.components.ProjectTagChip
+import com.orbitsaas.payment.ui.components.ProviderBadgeChip
 import com.orbitsaas.payment.ui.components.ProviderDot
 import com.orbitsaas.payment.ui.components.RejectIntentDialog
 import com.orbitsaas.payment.ui.components.SegmentedPillTabs
@@ -85,6 +93,7 @@ import com.orbitsaas.payment.ui.components.StatusPill
 import com.orbitsaas.payment.ui.components.TrustWarningBadge
 import com.orbitsaas.payment.ui.components.formatBdtAmount
 import com.orbitsaas.payment.ui.components.formatRelativeTime
+import com.orbitsaas.payment.ui.components.isPaymentLinkOrder
 import com.orbitsaas.payment.ui.components.parseIsoEpochMs
 import com.orbitsaas.payment.ui.components.providerDisplayName
 import com.orbitsaas.payment.ui.components.trustFlagDescription
@@ -111,6 +120,7 @@ private data class PendingMatchConfirmation(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VerifyScreen(
+    onSearchClick: () -> Unit = {},
     viewModel: VerifyViewModel = viewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
@@ -154,6 +164,16 @@ fun VerifyScreen(
                 },
                 actions = {
                     IconButton(
+                        onClick = onSearchClick,
+                        modifier = Modifier.size(48.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = stringResource(R.string.search_action_cd),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    IconButton(
                         onClick = { viewModel.refreshActiveTab() },
                         enabled = !isActiveTabLoading,
                         modifier = Modifier.size(48.dp)
@@ -177,7 +197,7 @@ fun VerifyScreen(
                 )
             )
         },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        snackbarHost = { OrbitSnackbarHost(snackbarHostState) },
         containerColor = MaterialTheme.colorScheme.background
     ) { innerPadding ->
         Column(
@@ -492,7 +512,7 @@ private fun UnclaimedSmsCard(
             .border(1.dp, MaterialTheme.colorScheme.outline, cardShape)
             .clickable(onClick = onClick),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         shape = cardShape
     ) {
         Column(
@@ -509,13 +529,7 @@ private fun UnclaimedSmsCard(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    ProviderDot(provider = sms.provider, size = 10.dp)
-                    Text(
-                        text = providerDisplayName(sms.provider),
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
+                    ProviderBadgeChip(provider = sms.provider)
                     Text(
                         text = sms.trxId,
                         style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum"),
@@ -531,7 +545,7 @@ private fun UnclaimedSmsCard(
                     text = formatBdtAmount(sms.amount),
                     style = MaterialTheme.typography.titleMedium.copy(fontFeatureSettings = "tnum"),
                     fontWeight = FontWeight.Bold,
-                    color = StatusGreen
+                    color = OrbitSemanticColors.statusGreen
                 )
             }
 
@@ -598,13 +612,35 @@ private fun VerifyOrderActionCard(
             .fillMaxWidth()
             .border(1.dp, MaterialTheme.colorScheme.outline, cardShape),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         shape = cardShape
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            if (!order.projectName.isNullOrBlank() || isPaymentLinkOrder(order)) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    order.projectName?.takeIf { it.isNotBlank() }?.let { proj ->
+                        ProjectTagChip(projectName = proj)
+                    }
+                    MediumTagChip(
+                        label = stringResource(
+                            if (isPaymentLinkOrder(order)) R.string.medium_payment_link else R.string.medium_storefront_checkout
+                        ),
+                        icon = if (isPaymentLinkOrder(order)) Icons.Default.Link else Icons.Default.ShoppingBag
+                    )
+                }
+                HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outline.copy(alpha = 0.7f))
+            }
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -737,6 +773,7 @@ private fun VerifyOrderActionCard(
                     }
                 }
             }
+        }
         }
     }
 }

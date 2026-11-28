@@ -27,6 +27,7 @@ import {
   incrementWalletVolume,
 } from '../wallets/wallets.service';
 import {
+  loadProjectById,
   resolveEffectiveProjectConfig,
   resolveProjectDispatchContext,
   resolveProjectRotatedWallets,
@@ -496,7 +497,9 @@ export async function listPaymentIntents(
         like(paymentIntents.id, term),
         like(paymentIntents.externalRefId, term),
         like(paymentIntents.trxId, upper),
-        like(paymentIntents.senderNumber, term)
+        like(paymentIntents.senderNumber, term),
+        like(paymentIntents.customerJson, term),
+        like(paymentIntents.displayJson, term)
       )!
     );
   }
@@ -558,7 +561,7 @@ export async function getPaymentIntentById(
     throw new NotFoundError(`Payment intent '${idOrRef}' not found`);
   }
 
-  const [queueRows, sessionRows] = await Promise.all([
+  const [queueRows, sessionRows, project] = await Promise.all([
     db
       .select()
       .from(verificationQueue)
@@ -581,10 +584,11 @@ export async function getPaymentIntentById(
       )
       .orderBy(desc(checkoutSessions.createdAt))
       .limit(1),
+    loadProjectById(db, merchant.id, intent.projectId),
   ]);
 
   return {
-    ...formatPaymentIntentView(intent, merchant.storeName),
+    ...formatPaymentIntentView(intent, merchant.storeName, project?.name ?? null),
     sessionId: sessionRows[0]?.id ?? null,
     queueStatus: queueRows[0]?.status ?? null,
   };
@@ -644,8 +648,9 @@ export async function resolvePaymentIntent(
 
   if (input.decision === 'APPROVE') {
     if (intent.status === 'VERIFIED') {
+      const resolvedProject = await loadProjectById(db, merchant.id, intent.projectId);
       return {
-        paymentIntent: formatPaymentIntentView(intent, merchant.storeName),
+        paymentIntent: formatPaymentIntentView(intent, merchant.storeName, resolvedProject?.name ?? null),
         alreadyResolved: true,
       };
     }
@@ -945,15 +950,20 @@ export async function resolvePaymentIntent(
     );
 
     return {
-      paymentIntent: formatPaymentIntentView(updatedIntent, merchant.storeName),
+      paymentIntent: formatPaymentIntentView(
+        updatedIntent,
+        merchant.storeName,
+        dispatchCtx.project?.name ?? null
+      ),
       alreadyResolved: false,
     };
   }
 
   // REJECT decision
   if (intent.status === 'REJECTED') {
+    const resolvedProject = await loadProjectById(db, merchant.id, intent.projectId);
     return {
-      paymentIntent: formatPaymentIntentView(intent, merchant.storeName),
+      paymentIntent: formatPaymentIntentView(intent, merchant.storeName, resolvedProject?.name ?? null),
       alreadyResolved: true,
     };
   }
@@ -1097,7 +1107,11 @@ export async function resolvePaymentIntent(
   );
 
   return {
-    paymentIntent: formatPaymentIntentView(updatedIntent, merchant.storeName),
+    paymentIntent: formatPaymentIntentView(
+      updatedIntent,
+      merchant.storeName,
+      dispatchCtx.project?.name ?? null
+    ),
     alreadyResolved: false,
   };
 }

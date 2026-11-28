@@ -93,7 +93,7 @@ export const createPaymentLinkSchema = z
   );
 
 export const updatePaymentLinkSchema = z.object({
-  projectId: z.string().trim().min(1).max(80).optional().nullable(),
+  projectId: z.string().trim().max(80).optional().nullable(),
   slug: z
     .string()
     .trim()

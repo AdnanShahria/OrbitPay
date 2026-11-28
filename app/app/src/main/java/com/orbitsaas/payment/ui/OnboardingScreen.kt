@@ -30,11 +30,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Message
 import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.Message
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Security
@@ -432,7 +432,7 @@ private fun StepPermissionsWhyWeNeed(
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             PermissionReasonRow(
-                icon = Icons.Default.Message,
+                icon = Icons.AutoMirrored.Filled.Message,
                 title = stringResource(R.string.onboarding_perm_sms_title),
                 reason = stringResource(R.string.onboarding_perm_sms_reason),
                 granted = smsGranted

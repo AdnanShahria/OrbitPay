@@ -1,6 +1,11 @@
 package com.orbitsaas.payment.ui.components
 
 import android.content.Context
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -8,23 +13,38 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.ShoppingBag
+import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -32,9 +52,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import com.orbitsaas.payment.R
 import com.orbitsaas.payment.data.remote.MerchantOrderDto
 import com.orbitsaas.payment.data.remote.PaymentIntentDto
+import com.orbitsaas.payment.ui.theme.OrbitSemanticColors
+import kotlinx.coroutines.delay
 import com.orbitsaas.payment.ui.theme.ColorBkash
 import com.orbitsaas.payment.ui.theme.ColorCellfin
 import com.orbitsaas.payment.ui.theme.ColorNagad
@@ -404,6 +427,316 @@ fun SegmentedPillTabs(
                     }
                 }
             }
+        }
+    }
+}
+
+enum class FloatingToastTone {
+    SUCCESS,
+    ERROR,
+    INFO
+}
+
+@Composable
+fun OrbitFloatingToast(
+    visible: Boolean,
+    message: String,
+    tone: FloatingToastTone = FloatingToastTone.INFO,
+    onDismiss: () -> Unit,
+    autoDismissMs: Long = 3800L,
+    modifier: Modifier = Modifier
+) {
+    LaunchedEffect(visible, message) {
+        if (visible && message.isNotBlank() && autoDismissMs > 0L) {
+            delay(autoDismissMs)
+            onDismiss()
+        }
+    }
+
+    AnimatedVisibility(
+        visible = visible && message.isNotBlank(),
+        enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
+        exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
+        modifier = modifier
+            .fillMaxWidth()
+            .zIndex(20f)
+            .padding(horizontal = 16.dp, vertical = 10.dp)
+    ) {
+        val (accentColor, icon) = when (tone) {
+            FloatingToastTone.SUCCESS -> OrbitSemanticColors.statusGreen to Icons.Default.CheckCircle
+            FloatingToastTone.ERROR -> OrbitSemanticColors.statusRed to Icons.Default.Error
+            FloatingToastTone.INFO -> MaterialTheme.colorScheme.primary to Icons.Default.Info
+        }
+        val bgColor = when (tone) {
+            FloatingToastTone.SUCCESS -> MaterialTheme.colorScheme.surface
+            FloatingToastTone.ERROR -> MaterialTheme.colorScheme.surface
+            FloatingToastTone.INFO -> MaterialTheme.colorScheme.surface
+        }
+
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 520.dp)
+                .clickable(onClick = onDismiss),
+            shape = RoundedCornerShape(16.dp),
+            color = bgColor,
+            shadowElevation = 10.dp,
+            tonalElevation = 2.dp,
+            border = BorderStroke(1.dp, accentColor.copy(alpha = 0.45f))
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(30.dp)
+                        .clip(CircleShape)
+                        .background(accentColor.copy(alpha = 0.14f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = accentColor,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+                Text(
+                    text = message,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis
+                )
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = stringResource(R.string.common_close),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun OrbitSnackbarHost(
+    hostState: SnackbarHostState,
+    modifier: Modifier = Modifier
+) {
+    SnackbarHost(
+        hostState = hostState,
+        modifier = modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+    ) { data ->
+        val msg = data.visuals.message
+        val lower = msg.lowercase(Locale.US)
+        val isError = lower.contains("failed") ||
+            lower.contains("error") ||
+            lower.contains("mismatch") ||
+            lower.contains("unable") ||
+            lower.contains("invalid")
+        val isSuccess = lower.contains("approved") ||
+            lower.contains("verified") ||
+            lower.contains("created") ||
+            lower.contains("updated") ||
+            lower.contains("copied") ||
+            lower.contains("saved") ||
+            lower.contains("added") ||
+            lower.contains("synced") ||
+            lower.contains("confirmed") ||
+            lower.contains("paid")
+
+        val accent = when {
+            isError -> OrbitSemanticColors.statusRed
+            isSuccess -> OrbitSemanticColors.statusGreen
+            else -> MaterialTheme.colorScheme.primary
+        }
+        val icon = when {
+            isError -> Icons.Default.Error
+            isSuccess -> Icons.Default.CheckCircle
+            else -> Icons.Default.Info
+        }
+
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp),
+            color = MaterialTheme.colorScheme.surface,
+            shadowElevation = 8.dp,
+            tonalElevation = 2.dp,
+            border = BorderStroke(1.dp, accent.copy(alpha = 0.4f))
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = accent,
+                    modifier = Modifier.size(18.dp)
+                )
+                Text(
+                    text = msg,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+fun isLinkPaymentIntent(intent: PaymentIntentDto): Boolean {
+    if (intent.externalRefId.trim().startsWith("lnk_", ignoreCase = true)) return true
+    if (intent.display.referenceLabel.equals("Link", ignoreCase = true)) return true
+    return intent.metadata?.containsKey("paymentLinkId") == true
+}
+
+fun resolvePaymentProjectLabel(intent: PaymentIntentDto, fallbackAppName: String): String {
+    return intent.projectName?.trim()?.takeIf { it.isNotBlank() }
+        ?: intent.display.appName?.trim()?.takeIf { it.isNotBlank() }
+        ?: fallbackAppName.trim().ifBlank { "ORBIT" }
+}
+
+@Composable
+fun verticalDisplayName(vertical: String?): String {
+    return when (vertical?.trim()?.lowercase(Locale.US)) {
+        "invoice_b2b" -> stringResource(R.string.vertical_invoice_b2b)
+        "ecommerce" -> stringResource(R.string.vertical_ecommerce)
+        "lms_course" -> stringResource(R.string.vertical_lms_course)
+        "saas_subscription" -> stringResource(R.string.vertical_saas_subscription)
+        "booking_appointment" -> stringResource(R.string.vertical_booking_appointment)
+        "donation" -> stringResource(R.string.vertical_donation)
+        "digital_topup" -> stringResource(R.string.vertical_digital_topup)
+        "custom", null, "" -> stringResource(R.string.vertical_custom)
+        else -> vertical.replace("_", " ").replaceFirstChar {
+            if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString()
+        }
+    }
+}
+
+@Composable
+fun resolvePaymentMediumLabel(intent: PaymentIntentDto): Pair<String, ImageVector> {
+    return if (isLinkPaymentIntent(intent)) {
+        stringResource(R.string.medium_payment_link) to Icons.Default.Link
+    } else if (intent.vertical.equals("ecommerce", ignoreCase = true)) {
+        stringResource(R.string.medium_storefront_checkout) to Icons.Default.ShoppingBag
+    } else {
+        verticalDisplayName(intent.vertical) to Icons.Default.Storefront
+    }
+}
+
+@Composable
+fun ProjectTagChip(
+    projectName: String,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.FolderOpen,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(12.dp)
+            )
+            Text(
+                text = projectName,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+fun MediumTagChip(
+    label: String,
+    icon: ImageVector,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.22f))
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(12.dp)
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+fun ProviderBadgeChip(
+    provider: String,
+    modifier: Modifier = Modifier
+) {
+    val brandColor = OrbitSemanticColors.providerColor(provider)
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(8.dp),
+        color = brandColor.copy(alpha = 0.12f),
+        border = BorderStroke(1.dp, brandColor.copy(alpha = 0.30f))
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            ProviderDot(provider = provider, size = 8.dp)
+            Text(
+                text = providerDisplayName(provider),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = brandColor,
+                maxLines = 1
+            )
         }
     }
 }

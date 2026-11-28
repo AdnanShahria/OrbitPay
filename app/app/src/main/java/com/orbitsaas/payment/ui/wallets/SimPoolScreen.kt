@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SimCard
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarOutline
@@ -73,6 +74,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.orbitsaas.payment.R
 import com.orbitsaas.payment.data.remote.WalletRotationDto
+import com.orbitsaas.payment.ui.components.OrbitSnackbarHost
+import com.orbitsaas.payment.ui.components.ProviderBadgeChip
 import com.orbitsaas.payment.ui.components.ProviderDot
 import com.orbitsaas.payment.ui.components.StatusPill
 import com.orbitsaas.payment.ui.components.formatBdtAmount
@@ -113,7 +116,8 @@ fun SimPoolScreen(
     onToggleActive: (walletId: String, isActive: Boolean) -> Unit,
     onSetPrimary: (walletId: String) -> Unit,
     onDeleteWallet: (walletId: String) -> Unit,
-    onClearFeedback: () -> Unit
+    onClearFeedback: () -> Unit,
+    onSearchClick: () -> Unit = {}
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     var showAddDialog by remember { mutableStateOf(false) }
@@ -148,6 +152,16 @@ fun SimPoolScreen(
                     }
                 },
                 actions = {
+                    IconButton(
+                        onClick = onSearchClick,
+                        modifier = Modifier.size(48.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = stringResource(R.string.search_action_cd),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     IconButton(
                         onClick = onRefresh,
                         enabled = !state.isWalletsLoading,
@@ -184,7 +198,7 @@ fun SimPoolScreen(
                 )
             }
         },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        snackbarHost = { OrbitSnackbarHost(snackbarHostState) },
         containerColor = MaterialTheme.colorScheme.background
     ) { innerPadding ->
         LazyColumn(
@@ -397,7 +411,7 @@ private fun SimPoolWalletCard(
             .fillMaxWidth()
             .border(1.dp, MaterialTheme.colorScheme.outline, cardShape),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         shape = cardShape
     ) {
         Column(
@@ -412,12 +426,12 @@ private fun SimPoolWalletCard(
                 Row(
                     modifier = Modifier.weight(1f),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    ProviderDot(provider = wallet.provider, size = 10.dp)
+                    ProviderBadgeChip(provider = wallet.provider)
                     Column {
                         Text(
-                            text = "${providerDisplayName(wallet.provider)} · ${wallet.walletNumber}",
+                            text = wallet.walletNumber,
                             style = MaterialTheme.typography.titleMedium.copy(fontFeatureSettings = "tnum"),
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold

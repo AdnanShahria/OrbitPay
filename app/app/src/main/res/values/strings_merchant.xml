@@ -137,4 +137,51 @@
     <string name="sim_pool_field_provider">Select Wallet / MFS</string>
     <string name="sim_pool_field_label">Label (optional, e.g. Shop Counter)</string>
     <string name="sim_pool_add_submit">Add SIM</string>
+
+    <!-- Verticals, Payment Mediums & Link Project Dropdowns -->
+    <string name="vertical_custom">Custom / Personal</string>
+    <string name="vertical_invoice_b2b">Corporate / B2B Invoice</string>
+    <string name="vertical_ecommerce">E-Commerce</string>
+    <string name="vertical_lms_course">Course / LMS</string>
+    <string name="vertical_saas_subscription">SaaS Subscription</string>
+    <string name="vertical_booking_appointment">Event / Booking</string>
+    <string name="vertical_donation">Donation / Charity</string>
+    <string name="vertical_digital_topup">Digital Topup</string>
+    <string name="medium_payment_link">Payment Link</string>
+    <string name="medium_storefront_checkout">Storefront Checkout</string>
+
+    <string name="links_filter_all_projects">All Projects</string>
+    <string name="links_project_merchant_default_short">Merchant Default</string>
+    <string name="links_project_merchant_default">Merchant Default (Common SIM Pool)</string>
+    <string name="links_project_specific_sims">%1$d Specific SIMs</string>
+    <string name="links_project_common_sims">Common SIMs</string>
+    <string name="links_project_mode_standalone">Standalone</string>
+    <string name="links_project_mode_connected">Connected</string>
+    <string name="links_edit_title">Edit Payment Link</string>
+    <string name="links_field_project">Receive Payment Under Project</string>
+    <string name="links_field_category">Payment Type / Category</string>
+    <string name="links_more_options">More options (Verification, Slug, Limits)</string>
+    <string name="links_ver_mode_default">Use Merchant / Project Default</string>
+    <string name="links_ver_mode_auto">AUTO (SMS + Fallback)</string>
+    <string name="links_ver_mode_manual">PURE MANUAL (Admin Review)</string>
+    <string name="links_field_verification_mode">Verification Mode</string>
+    <string name="links_field_slug">Custom Slug (optional)</string>
+    <string name="links_field_max_uses">Max Uses</string>
+    <string name="links_field_return_url">Return URL (optional)</string>
+    <string name="links_save_submit">Save Changes</string>
+
+    <!-- Universal Global Search -->
+    <string name="search_action_cd">Search everything</string>
+    <string name="search_bar_placeholder">Search payments, orders, TrxID, links, SMS, SIMs…</string>
+    <string name="search_cat_all">All</string>
+    <string name="search_cat_payments">Payments</string>
+    <string name="search_cat_orders">Orders</string>
+    <string name="search_cat_links">Links</string>
+    <string name="search_cat_sms">SMS</string>
+    <string name="search_cat_sims">SIMs</string>
+    <string name="search_cat_projects">Projects</string>
+    <string name="search_recent_title">Recent searches</string>
+    <string name="search_suggestions_title">Quick filters</string>
+    <string name="search_empty_title">No results for "%1$s"</string>
+    <string name="search_empty_desc">Try searching by TrxID, phone number, customer name, project name, amount, or payment link title.</string>
 </resources>

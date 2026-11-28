@@ -26,13 +26,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Error
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Store
+import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
@@ -85,15 +84,10 @@ fun LoginScreen(
     val focusManager = LocalFocusManager.current
     val redFg = OrbitSemanticColors.statusRed
 
-    var serverUrl by rememberSaveable(state.serverUrl) {
-        mutableStateOf(
-            if (state.serverUrl.isBlank()) "https://payment.orbitsaas.cloud" else state.serverUrl
-        )
-    }
+    val serverUrl = state.serverUrl.ifBlank { "https://payment.orbitsaas.cloud" }
     var email by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
     var passwordVisible by rememberSaveable { mutableStateOf(false) }
-    var showServerField by rememberSaveable { mutableStateOf(false) }
 
     val cardShape = RoundedCornerShape(16.dp)
     val fieldShape = RoundedCornerShape(12.dp)
@@ -231,22 +225,18 @@ fun LoginScreen(
                         modifier = Modifier.padding(24.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        // Collapsible Server URL pill (>= 48dp touch target)
+                        // Locked ORBIT Cloud badge (non-editable)
                         Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .heightIn(min = 48.dp)
-                                .clip(fieldShape)
-                                .border(1.dp, MaterialTheme.colorScheme.outline, fieldShape)
-                                .clickable { showServerField = !showServerField },
+                                .border(1.dp, MaterialTheme.colorScheme.outline, fieldShape),
                             color = MaterialTheme.colorScheme.surfaceVariant,
                             shape = fieldShape
                         ) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .heightIn(min = 48.dp)
-                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                    .padding(horizontal = 14.dp, vertical = 12.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
@@ -258,53 +248,25 @@ fun LoginScreen(
                                     Icon(
                                         imageVector = Icons.Default.Language,
                                         contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        tint = MaterialTheme.colorScheme.primary,
                                         modifier = Modifier.size(16.dp)
                                     )
                                     Text(
                                         text = serverUrl.removePrefix("https://").removePrefix("http://"),
                                         style = MaterialTheme.typography.labelMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.onSurface,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
                                 }
                                 Icon(
-                                    imageVector = if (showServerField) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                                    contentDescription = stringResource(R.string.cd_edit_server_url),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(18.dp)
+                                    imageVector = Icons.Default.VerifiedUser,
+                                    contentDescription = null,
+                                    tint = OrbitSemanticColors.statusGreen,
+                                    modifier = Modifier.size(16.dp)
                                 )
                             }
-                        }
-
-                        AnimatedVisibility(visible = showServerField) {
-                            OutlinedTextField(
-                                value = serverUrl,
-                                onValueChange = {
-                                    serverUrl = it
-                                    if (state.loginError != null) onClearError()
-                                },
-                                label = { Text(stringResource(R.string.login_server_url_label)) },
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = Icons.Default.Language,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(
-                                    keyboardType = KeyboardType.Uri,
-                                    imeAction = ImeAction.Next
-                                ),
-                                keyboardActions = KeyboardActions(
-                                    onNext = { focusManager.moveFocus(FocusDirection.Down) }
-                                ),
-                                shape = fieldShape,
-                                colors = textFieldColors
-                            )
                         }
 
                         // Email Field

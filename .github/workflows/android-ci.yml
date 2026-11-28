@@ -1,0 +1,90 @@
+name: Orbit Payment CI (Android + Web + Security)
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      run_web_build:
+        description: "Run frontend & backend TypeScript/Vite checks"
+        type: boolean
+        default: true
+      run_android_ci:
+        description: "Run Android unit tests, Lint, Release Kotlin compile & /claude-red AppSec scan"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web-and-backend:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_web_build }}
+    name: Web & Backend Typecheck + Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Frontend & Typecheck Backend
+        run: npm run build
+
+  android-security-and-ci:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_android_ci }}
+    name: Android App Checks (Tests, Lint, Release Compile & /claude-red AppSec)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Setup Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Run /claude-red Mobile AppSec Static Audit
+        run: node scripts/app-check.mjs --security
+
+      - name: Grant execute permission for Gradle wrapper
+        run: chmod +x app/gradlew
+
+      - name: Run Android Unit Tests, Lint & Kotlin Release Compile
+        working-directory: app
+        run: ./gradlew testDebugUnitTest lintDebug compileReleaseKotlin --no-daemon
+
+      - name: Upload Android Lint & Test Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-check-reports
+          if-no-files-found: ignore
+          retention-days: 14
+          path: |
+            app/app/build/reports/lint-results-debug.html
+            app/app/build/reports/lint-results-debug.xml
+            app/app/build/reports/tests/testDebugUnitTest/
+

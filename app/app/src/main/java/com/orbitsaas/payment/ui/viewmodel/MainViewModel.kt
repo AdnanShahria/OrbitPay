@@ -21,6 +21,7 @@ import com.orbitsaas.payment.data.remote.CreateWalletRequest
 import com.orbitsaas.payment.data.remote.DevicePreflightData
 import com.orbitsaas.payment.data.remote.IngestSmsItem
 import com.orbitsaas.payment.data.remote.MerchantOrderDto
+import com.orbitsaas.payment.data.remote.MerchantProjectDto
 import com.orbitsaas.payment.data.remote.OrbitApiClient
 import com.orbitsaas.payment.data.remote.PaymentIntentDto
 import com.orbitsaas.payment.data.remote.PaymentLinkDto
@@ -83,7 +84,9 @@ data class DashboardUiState(
     val isWalletMutating: Boolean = false,
     val paymentLinks: List<PaymentLinkDto> = emptyList(),
     val isLinksLoading: Boolean = false,
-    val isLinkMutating: Boolean = false
+    val isLinkMutating: Boolean = false,
+    val projects: List<MerchantProjectDto> = emptyList(),
+    val isProjectsLoading: Boolean = false
 )
 
 private data class DeviceTelemetryBundle(
@@ -99,7 +102,9 @@ private data class MerchantModulesBundle(
     val isWalletMutating: Boolean,
     val paymentLinks: List<PaymentLinkDto>,
     val isLinksLoading: Boolean,
-    val isLinkMutating: Boolean
+    val isLinkMutating: Boolean,
+    val projects: List<MerchantProjectDto>,
+    val isProjectsLoading: Boolean
 )
 
 private data class CoreStatusBundle(
@@ -174,11 +179,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _paymentLinks = MutableStateFlow<List<PaymentLinkDto>>(emptyList())
     private val _isLinksLoading = MutableStateFlow(false)
     private val _isLinkMutating = MutableStateFlow(false)
+    private val _projects = MutableStateFlow<List<MerchantProjectDto>>(emptyList())
+    private val _isProjectsLoading = MutableStateFlow(false)
 
     private var lastStatsFetchMs = 0L
     private var lastOrdersFetchMs = 0L
     private var lastIntentsFetchMs = 0L
     private var lastLinksFetchMs = 0L
+    private var lastProjectsFetchMs = 0L
     private var lastWalletsFetchMs = 0L
     private var lastPreflightFetchMs = 0L
     private var isStatsRefreshing = false
@@ -262,15 +270,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val merchantModulesBundleFlow = combine(
         combine(_walletSummary, _isWalletsLoading, _isWalletMutating, ::Triple),
-        combine(_paymentLinks, _isLinksLoading, _isLinkMutating, ::Triple)
-    ) { (summary, wLoading, wMutating), (links, lLoading, lMutating) ->
+        combine(_paymentLinks, _isLinksLoading, _isLinkMutating, ::Triple),
+        combine(_projects, _isProjectsLoading, ::Pair)
+    ) { (summary, wLoading, wMutating), (links, lLoading, lMutating), (projects, pLoading) ->
         MerchantModulesBundle(
             walletSummary = summary,
             isWalletsLoading = wLoading,
             isWalletMutating = wMutating,
             paymentLinks = links,
             isLinksLoading = lLoading,
-            isLinkMutating = lMutating
+            isLinkMutating = lMutating,
+            projects = projects,
+            isProjectsLoading = pLoading
         )
     }
 
@@ -327,7 +338,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             isWalletMutating = modules.isWalletMutating,
             paymentLinks = modules.paymentLinks,
             isLinksLoading = modules.isLinksLoading,
-            isLinkMutating = modules.isLinkMutating
+            isLinkMutating = modules.isLinkMutating,
+            projects = modules.projects,
+            isProjectsLoading = modules.isProjectsLoading
         )
     }.stateIn(
         viewModelScope,
@@ -351,6 +364,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         refreshOrders()
         refreshPaymentIntents()
         refreshPaymentLinks()
+        refreshProjects()
         refreshWalletsOverview()
         refreshPreflight()
         observePushRefreshEvents()
@@ -465,6 +479,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 refreshOrders()
                 refreshPaymentIntents()
                 refreshPaymentLinks()
+                refreshProjects()
                 refreshWalletsOverview()
                 refreshPreflight()
                 onSuccess()
@@ -502,6 +517,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _wallets.value = emptyList()
         _walletSummary.value = WalletsOverviewSummaryDto()
         _paymentLinks.value = emptyList()
+        _projects.value = emptyList()
         _loginError.value = null
         _feedbackMessage.value = "Signed out of ORBIT Hub."
         PendingPaymentsWidgetProvider.saveAndRefresh(getApplication(), emptyList(), "")
@@ -531,6 +547,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _wallets.value = emptyList()
         _walletSummary.value = WalletsOverviewSummaryDto()
         _paymentLinks.value = emptyList()
+        _projects.value = emptyList()
         PendingPaymentsWidgetProvider.saveAndRefresh(getApplication(), emptyList(), "")
         _loginError.value = message?.takeIf { it.isNotBlank() }
             ?: "Session expired or revoked. Please sign in again."
@@ -541,6 +558,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         refreshOrders(force = force)
         refreshPaymentIntents(force = force)
         refreshPaymentLinks(force)
+        refreshProjects(force)
         refreshWalletsOverview(force)
         refreshPreflight(force)
     }
@@ -614,7 +632,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (err is UnauthorizedException) {
                     handleUnauthorized(err.message)
                 } else {
-                    _feedbackMessage.value = "Resolve failed: ${err.message ?: "Unknown error"}"
+                    val rawMessage = err.message.orEmpty()
+                    val isVersionConflict = rawMessage.contains("State version mismatch", ignoreCase = true) ||
+                        rawMessage.contains("concurrently", ignoreCase = true) ||
+                        rawMessage.contains("already", ignoreCase = true)
+                    _feedbackMessage.value = if (isVersionConflict) {
+                        "This payment was already updated on the server. Refreshed latest status."
+                    } else {
+                        "Resolve failed: ${rawMessage.ifBlank { "Unknown error" }}"
+                    }
+                    if (isVersionConflict) {
+                        refreshPaymentIntents()
+                        refreshOrders()
+                    }
                 }
             }
 
@@ -961,6 +991,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         preferences.isDarkTheme = enabled
     }
 
+    fun refreshProjects(force: Boolean = true) {
+        if (!preferences.isLoggedIn() || _isProjectsLoading.value) return
+        val now = System.currentTimeMillis()
+        if (!force && now - lastProjectsFetchMs < REFRESH_COOLDOWN_MS) return
+        lastProjectsFetchMs = now
+
+        viewModelScope.launch {
+            _isProjectsLoading.value = true
+            val result = withContext(Dispatchers.IO) {
+                apiClient.fetchProjects()
+            }
+            result.onSuccess { items ->
+                _projects.value = items
+            }.onFailure { err ->
+                if (err is UnauthorizedException) {
+                    handleUnauthorized(err.message)
+                } else {
+                    Log.w(TAG, "Failed to load projects: ${err.message}")
+                }
+            }
+            _isProjectsLoading.value = false
+        }
+    }
+
     fun refreshPaymentLinks(force: Boolean = true) {
         if (!preferences.isLoggedIn() || _isLinksLoading.value) return
         val now = System.currentTimeMillis()
@@ -992,6 +1046,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         fixedAmount: Double?,
         minAmount: Double?,
         maxAmount: Double?,
+        projectId: String? = null,
+        vertical: String = "custom",
+        slug: String? = null,
+        verificationMode: String? = null,
+        maxUses: Int? = null,
+        returnUrl: String? = null,
         onDone: (Boolean) -> Unit = {}
     ) {
         if (_isLinkMutating.value) return
@@ -1000,12 +1060,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val result = withContext(Dispatchers.IO) {
                 apiClient.createPaymentLink(
                     CreatePaymentLinkRequest(
+                        projectId = projectId?.trim()?.ifBlank { null },
+                        slug = slug?.trim()?.ifBlank { null },
                         title = title.trim(),
                         description = description?.trim()?.ifBlank { null },
+                        vertical = vertical.trim().ifBlank { "custom" },
                         amountType = amountType,
                         fixedAmount = if (amountType == "FIXED") fixedAmount else null,
                         minAmount = if (amountType == "OPEN") minAmount else null,
-                        maxAmount = if (amountType == "OPEN") maxAmount else null
+                        maxAmount = if (amountType == "OPEN") maxAmount else null,
+                        verificationMode = verificationMode?.trim()?.ifBlank { null },
+                        maxUses = maxUses,
+                        returnUrl = returnUrl?.trim()?.ifBlank { null }
                     )
                 )
             }
@@ -1018,6 +1084,60 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     handleUnauthorized(err.message)
                 } else {
                     _feedbackMessage.value = err.message ?: "Failed to create payment link"
+                }
+                onDone(false)
+            }
+            _isLinkMutating.value = false
+        }
+    }
+
+    fun updatePaymentLinkDetails(
+        linkId: String,
+        title: String,
+        description: String?,
+        amountType: String,
+        fixedAmount: Double?,
+        minAmount: Double?,
+        maxAmount: Double?,
+        projectId: String?,
+        vertical: String,
+        slug: String?,
+        verificationMode: String?,
+        maxUses: Int?,
+        returnUrl: String?,
+        onDone: (Boolean) -> Unit = {}
+    ) {
+        if (_isLinkMutating.value) return
+        viewModelScope.launch {
+            _isLinkMutating.value = true
+            val result = withContext(Dispatchers.IO) {
+                apiClient.updatePaymentLink(
+                    linkId,
+                    UpdatePaymentLinkRequest(
+                        projectId = projectId?.trim()?.ifBlank { null },
+                        slug = slug?.trim()?.ifBlank { null },
+                        title = title.trim(),
+                        description = description?.trim()?.ifBlank { null },
+                        vertical = vertical.trim().ifBlank { "custom" },
+                        amountType = amountType,
+                        fixedAmount = if (amountType == "FIXED") fixedAmount else null,
+                        minAmount = if (amountType == "OPEN") minAmount else null,
+                        maxAmount = if (amountType == "OPEN") maxAmount else null,
+                        verificationMode = verificationMode?.trim()?.ifBlank { null },
+                        maxUses = maxUses,
+                        returnUrl = returnUrl?.trim()?.ifBlank { null }
+                    )
+                )
+            }
+            result.onSuccess { updated ->
+                _paymentLinks.value = _paymentLinks.value.map { if (it.id == updated.id) updated else it }
+                _feedbackMessage.value = "Payment link updated"
+                onDone(true)
+            }.onFailure { err ->
+                if (err is UnauthorizedException) {
+                    handleUnauthorized(err.message)
+                } else {
+                    _feedbackMessage.value = err.message ?: "Failed to update payment link"
                 }
                 onDone(false)
             }

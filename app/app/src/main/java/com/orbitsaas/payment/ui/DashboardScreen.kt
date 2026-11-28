@@ -27,6 +27,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
@@ -35,9 +36,10 @@ import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material.icons.filled.Payments
-import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -83,7 +85,10 @@ import com.orbitsaas.payment.data.remote.MerchantOrderDto
 import com.orbitsaas.payment.data.remote.PaymentIntentDto
 import com.orbitsaas.payment.data.remote.WalletRotationDto
 import com.orbitsaas.payment.ui.components.ApproveIntentDialog
+import com.orbitsaas.payment.ui.components.MediumTagChip
+import com.orbitsaas.payment.ui.components.OrbitSnackbarHost
 import com.orbitsaas.payment.ui.components.PaymentIntentCard
+import com.orbitsaas.payment.ui.components.ProjectTagChip
 import com.orbitsaas.payment.ui.components.ProviderDot
 import com.orbitsaas.payment.ui.components.RejectIntentDialog
 import com.orbitsaas.payment.ui.components.formatBusinessIntentTitle
@@ -93,8 +98,11 @@ import com.orbitsaas.payment.ui.components.formatFullTimestamp
 import com.orbitsaas.payment.ui.components.formatShortTimestamp
 import com.orbitsaas.payment.ui.components.intentStatusBadgeColors
 import com.orbitsaas.payment.ui.components.isDeliveryOrder
+import com.orbitsaas.payment.ui.components.isPaymentLinkOrder
 import com.orbitsaas.payment.ui.components.parseIsoEpochMs
 import com.orbitsaas.payment.ui.components.providerDisplayName
+import com.orbitsaas.payment.ui.components.resolvePaymentMediumLabel
+import com.orbitsaas.payment.ui.components.resolvePaymentProjectLabel
 import com.orbitsaas.payment.ui.theme.OrbitSemanticColors
 import com.orbitsaas.payment.ui.theme.StatusAmber
 import com.orbitsaas.payment.ui.theme.StatusGreen
@@ -120,7 +128,8 @@ fun DashboardScreen(
     onTriggerIntentAction: (intentId: String, actionId: String, actionLabel: String) -> Unit = { _, _, _ -> },
     onRefreshIntents: () -> Unit = {},
     onClearFocusedIntent: () -> Unit = {},
-    onOpenDiagnostics: () -> Unit = {}
+    onOpenDiagnostics: () -> Unit = {},
+    onSearchClick: () -> Unit = {}
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     var selectedFeedTab by rememberSaveable { mutableIntStateOf(0) }
@@ -192,6 +201,17 @@ fun DashboardScreen(
                 },
                 actions = {
                     IconButton(
+                        onClick = onSearchClick,
+                        modifier = Modifier.size(48.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = stringResource(R.string.search_action_cd),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    IconButton(
                         onClick = onToggleTheme,
                         modifier = Modifier.size(48.dp)
                     ) {
@@ -241,7 +261,7 @@ fun DashboardScreen(
                 )
             )
         },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        snackbarHost = { OrbitSnackbarHost(snackbarHostState) },
         containerColor = MaterialTheme.colorScheme.background
     ) { innerPadding ->
         LazyColumn(
@@ -252,6 +272,44 @@ fun DashboardScreen(
             contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            // 0. Quick Global Search Bar
+            item {
+                val searchShape = RoundedCornerShape(14.dp)
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .clip(searchShape)
+                        .border(1.dp, MaterialTheme.colorScheme.outline, searchShape)
+                        .clickable(onClick = onSearchClick),
+                    color = MaterialTheme.colorScheme.surface,
+                    shadowElevation = 1.dp,
+                    shape = searchShape
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = stringResource(R.string.search_bar_placeholder),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            }
             // Optional quiet 1-line setup warning only when preflight requires action
             val preflight = state.preflightState
             if (preflight != null && !preflight.overallStatus.equals("READY", ignoreCase = true)) {
@@ -895,6 +953,7 @@ fun FeedSegmentedToggle(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun CompactPaymentIntentRow(
     intent: PaymentIntentDto,
@@ -903,13 +962,13 @@ private fun CompactPaymentIntentRow(
     onClick: () -> Unit
 ) {
     val context = LocalContext.current
-    val cardShape = RoundedCornerShape(14.dp)
+    val cardShape = RoundedCornerShape(16.dp)
     val borderColor = if (isHighlighted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
     val borderWidth = if (isHighlighted) 1.5.dp else 1.dp
 
     val displayTitle = remember(intent) { formatBusinessIntentTitle(context, intent) }
-    val displayApp = intent.display.appName?.takeIf { it.isNotBlank() }
-        ?: fallbackAppName.takeIf { it.isNotBlank() }
+    val displayApp = resolvePaymentProjectLabel(intent, fallbackAppName)
+    val (mediumLabel, mediumIcon) = resolvePaymentMediumLabel(intent)
 
     val (statusLabel, statusFg, statusBg) = intentStatusBadgeColors(intent.status)
     val primaryAmount = intent.paidAmount ?: intent.uniqueAmount
@@ -961,12 +1020,21 @@ private fun CompactPaymentIntentRow(
             .border(borderWidth, borderColor, cardShape)
             .clickable(onClick = onClick),
         color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 1.dp,
         shape = cardShape
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                ProjectTagChip(projectName = displayApp)
+                MediumTagChip(label = mediumLabel, icon = mediumIcon)
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1028,13 +1096,14 @@ private fun CompactPaymentIntentRow(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun CompactOrderRow(
     order: MerchantOrderDto,
     onClick: () -> Unit
 ) {
     val context = LocalContext.current
-    val cardShape = RoundedCornerShape(14.dp)
+    val cardShape = RoundedCornerShape(16.dp)
     val normalizedMethod = order.paymentMethod.uppercase(Locale.US)
     val normalizedOrderStatus = order.orderStatus.uppercase(Locale.US)
     val headline = remember(order) { formatBusinessOrderHeadline(context, order) }
@@ -1084,12 +1153,28 @@ private fun CompactOrderRow(
             .border(1.dp, MaterialTheme.colorScheme.outline, cardShape)
             .clickable(onClick = onClick),
         color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 1.dp,
         shape = cardShape
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            if (!order.projectName.isNullOrBlank() || isPaymentLinkOrder(order)) {
+                val isLink = isPaymentLinkOrder(order)
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    order.projectName?.takeIf { it.isNotBlank() }?.let { proj ->
+                        ProjectTagChip(projectName = proj)
+                    }
+                    MediumTagChip(
+                        label = stringResource(if (isLink) R.string.medium_payment_link else R.string.medium_storefront_checkout),
+                        icon = if (isLink) Icons.Default.Link else Icons.Default.LocalShipping
+                    )
+                }
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1164,7 +1249,7 @@ private fun CompactSmsRow(
     sms: SmsEntity,
     onClick: () -> Unit
 ) {
-    val cardShape = RoundedCornerShape(14.dp)
+    val cardShape = RoundedCornerShape(16.dp)
     val timeFormatter = remember { SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault()) }
     val formattedTime = remember(sms.receivedAt) { timeFormatter.format(Date(sms.receivedAt)) }
 
@@ -1194,6 +1279,7 @@ private fun CompactSmsRow(
             .border(1.dp, MaterialTheme.colorScheme.outline, cardShape)
             .clickable(onClick = onClick),
         color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 1.dp,
         shape = cardShape
     ) {
         Column(
@@ -1846,7 +1932,7 @@ fun EmptyOrdersStateCard(onRefresh: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Icon(
-                imageVector = Icons.Default.ReceiptLong,
+                imageVector = Icons.AutoMirrored.Filled.ReceiptLong,
                 contentDescription = stringResource(R.string.cd_empty_orders),
                 tint = MaterialTheme.colorScheme.outlineVariant,
                 modifier = Modifier.size(32.dp)

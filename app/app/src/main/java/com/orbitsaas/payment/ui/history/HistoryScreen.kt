@@ -25,10 +25,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Error
-import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
@@ -77,6 +77,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.orbitsaas.payment.R
 import com.orbitsaas.payment.data.local.SmsEntity
+import com.orbitsaas.payment.ui.components.OrbitSnackbarHost
+import com.orbitsaas.payment.ui.components.ProviderBadgeChip
 import com.orbitsaas.payment.ui.components.ProviderDot
 import com.orbitsaas.payment.ui.components.SegmentedPillTabs
 import com.orbitsaas.payment.ui.components.TransactionStatusBadge
@@ -175,7 +177,7 @@ fun HistoryScreen(
                 )
             )
         },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        snackbarHost = { OrbitSnackbarHost(snackbarHostState) },
         containerColor = MaterialTheme.colorScheme.background
     ) { innerPadding ->
         Column(
@@ -407,7 +409,7 @@ private fun HistoryTransactionRow(
             .border(1.dp, MaterialTheme.colorScheme.outline, cardShape)
             .clickable(onClick = onClick),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         shape = cardShape
     ) {
         Column(
@@ -424,13 +426,7 @@ private fun HistoryTransactionRow(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    ProviderDot(provider = item.provider, size = 10.dp)
-                    Text(
-                        text = providerDisplayName(item.provider),
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
+                    ProviderBadgeChip(provider = item.provider)
                     Text(
                         text = item.trxId,
                         style = MaterialTheme.typography.bodyMedium.copy(
@@ -797,7 +793,7 @@ private fun HistoryEmptyCard(isLocal: Boolean) {
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Icon(
-                imageVector = Icons.Default.ReceiptLong,
+                imageVector = Icons.AutoMirrored.Filled.ReceiptLong,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(34.dp)

@@ -137,4 +137,51 @@
     <string name="sim_pool_field_provider">ওয়ালেট / মাধ্যম নির্বাচন করুন</string>
     <string name="sim_pool_field_label">পরিচিতি নাম (ঐচ্ছিক, যেমন: দোকানের মূল সিম)</string>
     <string name="sim_pool_add_submit">সিম যোগ করুন</string>
+
+    <!-- Verticals, Payment Mediums & Link Project Dropdowns -->
+    <string name="vertical_custom">পার্সোনাল / সাধারণ</string>
+    <string name="vertical_invoice_b2b">কর্পোরেট / B2B ইনভয়েস</string>
+    <string name="vertical_ecommerce">ই-কমার্স</string>
+    <string name="vertical_lms_course">কোর্স / LMS</string>
+    <string name="vertical_saas_subscription">SaaS সাবস্ক্রিপশন</string>
+    <string name="vertical_booking_appointment">ইভেন্ট / বুকিং</string>
+    <string name="vertical_donation">অনুদান / চ্যারিটি</string>
+    <string name="vertical_digital_topup">ডিজিটাল টপ-আপ</string>
+    <string name="medium_payment_link">পেমেন্ট লিংক</string>
+    <string name="medium_storefront_checkout">ওয়েব চেকআউট</string>
+
+    <string name="links_filter_all_projects">সব প্রজেক্ট</string>
+    <string name="links_project_merchant_default_short">মার্চেন্ট ডিফল্ট</string>
+    <string name="links_project_merchant_default">মার্চেন্ট ডিফল্ট (কমন সিম পুল)</string>
+    <string name="links_project_specific_sims">%1$dটি নির্দিষ্ট সিম</string>
+    <string name="links_project_common_sims">কমন সিম</string>
+    <string name="links_project_mode_standalone">স্ট্যান্ডঅ্যালোন</string>
+    <string name="links_project_mode_connected">সংযুক্ত</string>
+    <string name="links_edit_title">পেমেন্ট লিংক সম্পাদনা করুন</string>
+    <string name="links_field_project">কোন প্রজেক্টে পেমেন্ট নেবেন</string>
+    <string name="links_field_category">পেমেন্টের ধরন / ক্যাটাগরি</string>
+    <string name="links_more_options">আরও অপশন (যাচাই মোড, স্লাগ, লিমিট)</string>
+    <string name="links_ver_mode_default">মার্চেন্ট / প্রজেক্ট ডিফল্ট</string>
+    <string name="links_ver_mode_auto">AUTO (স্বয়ংক্রিয় SMS যাচাই)</string>
+    <string name="links_ver_mode_manual">PURE MANUAL (ম্যানুয়াল অনুমোদন)</string>
+    <string name="links_field_verification_mode">যাচাই মোড</string>
+    <string name="links_field_slug">কাস্টম স্লাগ (ঐচ্ছিক)</string>
+    <string name="links_field_max_uses">সর্বোচ্চ ব্যবহার</string>
+    <string name="links_field_return_url">রিটার্ন URL (ঐচ্ছিক)</string>
+    <string name="links_save_submit">পরিবর্তন সংরক্ষণ করুন</string>
+
+    <!-- Universal Global Search -->
+    <string name="search_action_cd">সবকিছু খুঁজুন</string>
+    <string name="search_bar_placeholder">পেমেন্ট, অর্ডার, TrxID, লিংক, SMS বা সিম খুঁজুন…</string>
+    <string name="search_cat_all">সব</string>
+    <string name="search_cat_payments">পেমেন্ট</string>
+    <string name="search_cat_orders">অর্ডার</string>
+    <string name="search_cat_links">লিংক</string>
+    <string name="search_cat_sms">SMS</string>
+    <string name="search_cat_sims">সিম</string>
+    <string name="search_cat_projects">প্রজেক্ট</string>
+    <string name="search_recent_title">সাম্প্রতিক অনুসন্ধান</string>
+    <string name="search_suggestions_title">দ্রুত ফিল্টার</string>
+    <string name="search_empty_title">"%1$s"-এর কোনো ফলাফল পাওয়া যায়নি</string>
+    <string name="search_empty_desc">TrxID, মোবাইল নম্বর, গ্রাহকের নাম, প্রজেক্টের নাম, টাকার পরিমাণ বা পেমেন্ট লিংকের নাম দিয়ে খুঁজে দেখুন।</string>
 </resources>
