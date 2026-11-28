@@ -228,7 +228,9 @@ export async function createPaymentIntent(
   }
 
   if (wallets.length === 0) {
-    throw new BadRequestError('No active SIM wallets configured for this merchant');
+    throw new BadRequestError(
+      'Merchant has not configured an active MFS receiving number yet. Please add a number in SIM Pool.'
+    );
   }
 
   const now = new Date();
@@ -607,10 +609,15 @@ export async function resolvePaymentIntent(
         alreadyResolved: true,
       };
     }
+    if (intent.status === 'REFUNDED' || intent.status === 'EXPIRED') {
+      throw new ConflictError(`Cannot approve payment intent in '${intent.status}' status`);
+    }
 
     const normalizedTrxId = (input.trxId || intent.trxId || '').trim().toUpperCase() || null;
     let smsReconciliationState = intent.smsReconciliationState || 'NONE';
     let smsLedgerId = intent.smsLedgerId;
+    let matchedLedgerId: string | null = null;
+    let needsConsumedInsert = false;
 
     if (normalizedTrxId) {
       const existingConsumed = await db
@@ -633,6 +640,7 @@ export async function resolvePaymentIntent(
           `Transaction ID '${normalizedTrxId}' is already consumed by another payment`
         );
       }
+      needsConsumedInsert = !existingConsumed[0];
 
       const ledgerRows = await db
         .select()
@@ -652,33 +660,11 @@ export async function resolvePaymentIntent(
           );
         }
 
-        await db
-          .update(smsLedger)
-          .set({
-            status: 'MANUAL_VERIFIED',
-            matchType: 'MANUAL_VERIFIED',
-            externalOrderId: intent.externalRefId,
-            paymentIntentId: intent.id,
-            verifiedAt: now,
-          })
-          .where(eq(smsLedger.id, ledger.id));
-
+        matchedLedgerId = ledger.id;
         smsLedgerId = ledger.id;
         smsReconciliationState = 'RECONCILED';
       } else {
         smsReconciliationState = 'PENDING_LATE_SMS';
-      }
-
-      if (!existingConsumed[0]) {
-        await db.insert(consumedTrxIds).values({
-          merchantId: merchant.id,
-          trxId: normalizedTrxId,
-          provider: intent.provider ?? 'BKASH',
-          paymentIntentId: intent.id,
-          externalRefId: intent.externalRefId,
-          resolutionSource,
-          consumedAt: now,
-        });
       }
     }
 
@@ -686,6 +672,7 @@ export async function resolvePaymentIntent(
       eq(paymentIntents.id, intent.id),
       eq(paymentIntents.merchantId, merchant.id),
       eq(paymentIntents.stateVersion, intent.stateVersion),
+      inArray(paymentIntents.status, ['OPEN', 'WAITING_FOR_SMS', 'MANUAL_REVIEW_REQUIRED', 'REJECTED']),
     ];
 
     const updatedRows = await db
@@ -710,6 +697,34 @@ export async function resolvePaymentIntent(
     const updatedIntent = updatedRows[0];
     if (!updatedIntent) {
       throw new ConflictError('Payment intent was updated concurrently');
+    }
+
+    if (matchedLedgerId) {
+      await db
+        .update(smsLedger)
+        .set({
+          status: 'MANUAL_VERIFIED',
+          matchType: 'MANUAL_VERIFIED',
+          externalOrderId: intent.externalRefId,
+          paymentIntentId: intent.id,
+          verifiedAt: now,
+        })
+        .where(eq(smsLedger.id, matchedLedgerId));
+    }
+
+    if (normalizedTrxId && needsConsumedInsert) {
+      await db
+        .insert(consumedTrxIds)
+        .values({
+          merchantId: merchant.id,
+          trxId: normalizedTrxId,
+          provider: intent.provider ?? 'BKASH',
+          paymentIntentId: intent.id,
+          externalRefId: intent.externalRefId,
+          resolutionSource,
+          consumedAt: now,
+        })
+        .onConflictDoNothing();
     }
 
     await db
@@ -878,6 +893,9 @@ export async function resolvePaymentIntent(
       alreadyResolved: true,
     };
   }
+  if (intent.status === 'VERIFIED' || intent.status === 'REFUNDED' || intent.status === 'EXPIRED') {
+    throw new ConflictError(`Cannot reject payment intent in '${intent.status}' status`);
+  }
 
   const updatedRows = await db
     .update(paymentIntents)
@@ -894,7 +912,8 @@ export async function resolvePaymentIntent(
       and(
         eq(paymentIntents.id, intent.id),
         eq(paymentIntents.merchantId, merchant.id),
-        eq(paymentIntents.stateVersion, intent.stateVersion)
+        eq(paymentIntents.stateVersion, intent.stateVersion),
+        inArray(paymentIntents.status, ['OPEN', 'WAITING_FOR_SMS', 'MANUAL_REVIEW_REQUIRED'])
       )
     )
     .returning();

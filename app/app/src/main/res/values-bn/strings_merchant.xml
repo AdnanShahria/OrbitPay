@@ -131,8 +131,8 @@
     <string name="sim_pool_limit_pair">%1$s সেফ / %2$s সর্বোচ্চ</string>
     <string name="sim_pool_is_primary">প্রধান সিম</string>
     <string name="sim_pool_make_primary">প্রধান করুন</string>
-    <string name="sim_pool_empty_title">কোনো সিম নম্বর যোগ করা হয়নি</string>
-    <string name="sim_pool_empty_desc">গ্রাহকরা যেন আপনার বিকাশ, নগদ, রকেট, উপায় বা সেলফিন নম্বরে টাকা পাঠাতে পারেন, সেজন্য সিম নম্বর যোগ করুন।</string>
+    <string name="sim_pool_empty_title">আপনার প্রথম MFS রিসিভিং নম্বর যোগ করুন</string>
+    <string name="sim_pool_empty_desc">পেমেন্ট লিংক ও স্টোরফ্রন্টের মাধ্যমে টাকা গ্রহণ শুরু করতে আপনার বিকাশ, নগদ, রকেট, উপায় বা সেলফিন নম্বর যোগ করুন।</string>
     <string name="sim_pool_add_title">পেমেন্ট সিম যোগ করুন</string>
     <string name="sim_pool_field_provider">ওয়ালেট / মাধ্যম নির্বাচন করুন</string>
     <string name="sim_pool_field_label">পরিচিতি নাম (ঐচ্ছিক, যেমন: দোকানের মূল সিম)</string>

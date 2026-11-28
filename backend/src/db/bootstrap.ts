@@ -351,6 +351,11 @@ const ALTER_COLUMN_STATEMENTS: readonly string[] = [
   `ALTER TABLE \`merchant_devices\` ADD COLUMN \`app_version\` text`,
   `ALTER TABLE \`merchant_devices\` ADD COLUMN \`sms_permission\` integer`,
   `ALTER TABLE \`merchant_devices\` ADD COLUMN \`listener_enabled\` integer`,
+
+  // 0009_dual_mode_and_wallet_source
+  `ALTER TABLE \`merchants\` ADD COLUMN \`account_mode\` text DEFAULT 'WEBHOOK_CONNECTED' NOT NULL`,
+  `ALTER TABLE \`merchants\` ADD COLUMN \`ignore_storefront_sync\` integer DEFAULT 0 NOT NULL`,
+  `ALTER TABLE \`merchant_wallets\` ADD COLUMN \`source\` text DEFAULT 'PERSONAL' NOT NULL`,
 ];
 
 const POST_ALTER_INDEX_STATEMENTS: readonly string[] = [

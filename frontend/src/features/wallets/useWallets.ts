@@ -81,6 +81,18 @@ export interface AddWalletDTO {
   isPrimary?: boolean;
 }
 
+export interface UpdateWalletDTO {
+  walletNumber?: string;
+  accountType?: AccountType;
+  label?: string | null;
+  deviceId?: string | null;
+  simSlotIndex?: number | null;
+  safeVolumeLimit?: number;
+  monthlyVolumeLimit?: number;
+  isPrimary?: boolean;
+  isActive?: boolean;
+}
+
 export function useWallets(merchantId?: string) {
   return useQuery<Wallet[]>({
     queryKey: ['wallets', merchantId || 'me'],
@@ -133,6 +145,27 @@ export function useAddWalletMutation() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['wallets'] });
       queryClient.invalidateQueries({ queryKey: ['wallets', 'overview'] });
+    },
+  });
+}
+
+export function useUpdateWalletMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ id, updates }: { id: string; updates: UpdateWalletDTO }) => {
+      const res = await authFetch(`/api/v1/wallets/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      });
+
+      return unwrapApiResponse<Wallet>(res, 'Failed to update wallet');
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['wallets'] });
+      queryClient.invalidateQueries({ queryKey: ['wallets', 'overview'] });
+      queryClient.invalidateQueries({ queryKey: ['device'] });
     },
   });
 }

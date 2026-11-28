@@ -233,7 +233,9 @@ data class AuthMerchantDto(
     val storeName: String = "",
     val webhookUrl: String = "",
     val gracePeriodMinutes: Int = 60,
-    val isActive: Boolean = true
+    val isActive: Boolean = true,
+    val accountMode: String = "WEBHOOK_CONNECTED",
+    val ignoreStorefrontSync: Boolean = false
 )
 
 @Serializable
@@ -445,7 +447,9 @@ data class PreflightMerchantDto(
     val storeName: String = "",
     val verificationMode: String = "AUTO",
     val webhookConfigured: Boolean = false,
-    val webhookUrl: String? = null
+    val webhookUrl: String? = null,
+    val accountMode: String = "WEBHOOK_CONNECTED",
+    val ignoreStorefrontSync: Boolean = false
 )
 
 @Serializable
@@ -571,6 +575,8 @@ data class CreateWalletRequest(
 
 @Serializable
 data class UpdateWalletRequest(
+    val walletNumber: String? = null,
+    val accountType: String? = null,
     val isActive: Boolean? = null,
     val isPrimary: Boolean? = null,
     val label: String? = null,

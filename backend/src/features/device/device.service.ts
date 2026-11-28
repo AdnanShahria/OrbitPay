@@ -13,6 +13,7 @@ import {
   type MerchantRecord,
   type MerchantOrderRecord,
   type MfsProvider,
+  type AccountMode,
   type AccountType,
   type SmsLedgerRecord,
   type VerificationMode,
@@ -887,9 +888,8 @@ export async function getSyncPayload(
 export type PreflightOverallStatus = 'READY' | 'ACTION_REQUIRED' | 'ERROR';
 
 export type ProfileMatchStatus =
+  | 'READY'
   | 'MATCHED'
-  | 'MISMATCH'
-  | 'SIM_NUMBER_UNAVAILABLE'
   | 'PLACEHOLDER_NUMBER';
 
 export interface PreflightWalletItem {
@@ -922,6 +922,8 @@ export interface DevicePreflightResult {
   merchant: {
     id: string;
     storeName: string;
+    accountMode: AccountMode;
+    ignoreStorefrontSync: boolean;
     verificationMode: VerificationMode;
     webhookConfigured: boolean;
     webhookUrl: string;
@@ -1004,23 +1006,6 @@ export async function getDevicePreflight(
       continue;
     }
 
-    if (validDeviceSims.length === 0) {
-      profileMatches.push({
-        walletId: w.id,
-        provider: w.provider,
-        walletNumber: w.walletNumber,
-        accountType: w.accountType,
-        isPrimary: w.isPrimary,
-        isActive: w.isActive,
-        isPlaceholder: false,
-        status: 'SIM_NUMBER_UNAVAILABLE',
-        matchedSimSlot: null,
-        matchedCarrier: null,
-        message: 'Device SIM number hidden by carrier or not confirmed yet.',
-      });
-      continue;
-    }
-
     const normalizedWallet = sanitizePhoneNumber(w.walletNumber, w.provider);
     const matchedSim = validDeviceSims.find(
       (sim) => sanitizePhoneNumber(sim.phoneNumber, w.provider) === normalizedWallet
@@ -1049,10 +1034,10 @@ export async function getDevicePreflight(
         isPrimary: w.isPrimary,
         isActive: w.isActive,
         isPlaceholder: false,
-        status: 'MISMATCH',
+        status: 'READY',
         matchedSimSlot: null,
         matchedCarrier: null,
-        message: 'Configured wallet does not match detected phone SIM numbers.',
+        message: 'Active receiving wallet (no SIM match required)',
       });
     }
   }
@@ -1060,19 +1045,17 @@ export async function getDevicePreflight(
   const webhookConfigured = Boolean(
     merchant.webhookUrl && merchant.webhookUrl.trim().startsWith('https://')
   );
-
-  const hasMismatch = profileMatches.some((m) => m.status === 'MISMATCH');
-  const hasSimUnavailable = profileMatches.some((m) => m.status === 'SIM_NUMBER_UNAVAILABLE');
+  const isStandalone = merchant.accountMode === 'STANDALONE';
+  const isManualMode = merchant.verificationMode === 'PURE_MANUAL';
+  const needsWebhook = !isStandalone && !webhookConfigured;
+  const needsSmsPermission = !isManualMode && input?.smsPermission === false;
 
   let overallStatus: PreflightOverallStatus = 'READY';
-  if (activeWallets.length === 0) {
-    overallStatus = 'ERROR';
-  } else if (
+  if (
+    activeWallets.length === 0 ||
     hasPlaceholderWallets ||
-    hasMismatch ||
-    hasSimUnavailable ||
-    !webhookConfigured ||
-    input?.smsPermission === false
+    needsWebhook ||
+    needsSmsPermission
   ) {
     overallStatus = 'ACTION_REQUIRED';
   }
@@ -1080,7 +1063,7 @@ export async function getDevicePreflight(
   const recommendations: string[] = [];
   if (activeWallets.length === 0) {
     recommendations.push(
-      'No active real MFS wallets configured. Add or activate a bKash, Nagad, Rocket, or Upay SIM wallet in ORBIT Hub or sync from your storefront.'
+      'No active MFS receiving wallets configured. Add a bKash, Nagad, Rocket, or Upay number in SIM Pool.'
     );
   }
   if (hasPlaceholderWallets) {
@@ -1088,35 +1071,27 @@ export async function getDevicePreflight(
       'Seeded placeholder wallet numbers (01700000000 / 01800000000) detected. Replace them with your real MFS SIM numbers.'
     );
   }
-  if (hasSimUnavailable) {
-    recommendations.push(
-      'Device SIM numbers could not be read automatically. Grant phone permissions or confirm SIM 1 / SIM 2 numbers locally.'
-    );
-  }
-  if (hasMismatch) {
-    recommendations.push(
-      'One or more active ORBIT wallets do not match the SIM numbers on this phone. Insert the matching SIM or update your storefront/ORBIT wallet numbers.'
-    );
-  }
-  if (!webhookConfigured) {
+  if (needsWebhook) {
     recommendations.push(
       'Storefront HTTPS webhook URL is missing or invalid. Configure an https:// webhook URL in ORBIT Storefront & Webhook settings.'
     );
   }
-  if (input?.smsPermission === false) {
-    recommendations.push(
-      'SMS permission is disabled. Grant SMS permission so ORBIT Companion can auto-reconcile incoming payments.'
-    );
-  }
-  if (input?.listenerEnabled === false) {
-    recommendations.push(
-      'Notification Listener access is disabled. Enable ORBIT Notification Listener for backup MFS notification capture.'
-    );
-  }
-  if (input?.batteryOptimizationIgnored === false) {
-    recommendations.push(
-      'Battery optimization is active. Exempt ORBIT Companion from battery restrictions to keep background capture running.'
-    );
+  if (!isManualMode) {
+    if (input?.smsPermission === false) {
+      recommendations.push(
+        'SMS permission is disabled. Grant SMS permission so ORBIT Companion can auto-reconcile incoming payments.'
+      );
+    }
+    if (input?.listenerEnabled === false) {
+      recommendations.push(
+        'Notification Listener access is disabled. Enable ORBIT Notification Listener for backup MFS notification capture.'
+      );
+    }
+    if (input?.batteryOptimizationIgnored === false) {
+      recommendations.push(
+        'Battery optimization is active. Exempt ORBIT Companion from battery restrictions to keep background capture running.'
+      );
+    }
   }
 
   return {
@@ -1125,6 +1100,8 @@ export async function getDevicePreflight(
     merchant: {
       id: merchant.id,
       storeName: merchant.storeName,
+      accountMode: merchant.accountMode,
+      ignoreStorefrontSync: merchant.ignoreStorefrontSync,
       verificationMode: merchant.verificationMode,
       webhookConfigured,
       webhookUrl: merchant.webhookUrl,

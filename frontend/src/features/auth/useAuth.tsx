@@ -31,6 +31,8 @@ export interface AuthMerchant {
   slug?: string;
   webhookUrl: string;
   gracePeriodMinutes: number;
+  accountMode?: 'STANDALONE' | 'WEBHOOK_CONNECTED';
+  ignoreStorefrontSync?: boolean;
   isActive: boolean;
 }
 

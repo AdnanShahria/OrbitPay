@@ -1,4 +1,4 @@
-import { eq, desc, sql, and, isNull, asc } from 'drizzle-orm';
+import { eq, desc, sql, and, isNull, asc, inArray } from 'drizzle-orm';
 import { ensureRuntimeSchema } from '../../db/bootstrap';
 import type { AppDb } from '../../db/client';
 import {
@@ -17,7 +17,10 @@ import {
   consumedTrxIds,
   otpCodes,
   mediaAssets,
+  type AccountMode,
   type MerchantRecord,
+  type MfsProvider,
+  type VerificationMode,
 } from '../../db/schema';
 import {
   generateMerchantApiKey,
@@ -27,7 +30,8 @@ import {
   hashPassword,
   hashSha256,
 } from '../../shared/crypto';
-import { ConflictError, NotFoundError } from '../../shared/errors';
+import { BadRequestError, ConflictError, NotFoundError } from '../../shared/errors';
+import { sanitizePhoneNumber } from '../../shared/parsers/mfs';
 import {
   ensureUniqueMerchantSlug,
   resolveAndPersistMerchantSlug,
@@ -35,6 +39,7 @@ import {
 } from '../../shared/slug';
 import { getMerchantPushHubStatus } from '../../router/push-hub';
 import type { Env } from '../../shared/types';
+import { formatPaymentIntentView } from '../payments/payments.service';
 import { recordAdminAudit, type AdminActor } from './admin-auth.service';
 import type {
   CreateProjectDTO,
@@ -65,10 +70,14 @@ export interface AdminProjectSummary {
   webhookSecret: string;
   gracePeriodMinutes: number;
   isActive: boolean;
+  accountMode: AccountMode;
+  verificationMode: VerificationMode;
+  ignoreStorefrontSync: boolean;
   lastSeenAt: Date | null;
   createdAt: Date;
   isOnline: boolean;
   walletsCount: number;
+  paymentLinksCount: number;
   totalVolume: number;
   verifiedCount: number;
   unclaimedCount: number;
@@ -175,11 +184,15 @@ export async function getAdminProjects(db: AppDb, env?: Env): Promise<AdminProje
         ? now - m.lastSeenAt.getTime() < onlineThresholdMs
         : false;
 
-      const [wallets, stats, slug, pushStatus] = await Promise.all([
+      const [wallets, linksCount, stats, slug, pushStatus] = await Promise.all([
         db
           .select({ count: sql<number>`count(*)` })
           .from(merchantWallets)
           .where(and(eq(merchantWallets.merchantId, m.id), eq(merchantWallets.isActive, true))),
+        db
+          .select({ count: sql<number>`count(*)` })
+          .from(paymentLinks)
+          .where(eq(paymentLinks.merchantId, m.id)),
         db
           .select({
             verifiedCount: sql<number>`sum(case when status in ('VERIFIED', 'MANUAL_VERIFIED') then 1 else 0 end)`,
@@ -205,10 +218,14 @@ export async function getAdminProjects(db: AppDb, env?: Env): Promise<AdminProje
         webhookSecret: m.webhookSecret,
         gracePeriodMinutes: m.gracePeriodMinutes,
         isActive: m.isActive,
+        accountMode: m.accountMode,
+        verificationMode: m.verificationMode,
+        ignoreStorefrontSync: m.ignoreStorefrontSync,
         lastSeenAt: m.lastSeenAt,
         createdAt: m.createdAt,
         isOnline: recentHeartbeat || hasLiveAndroidSocket,
         walletsCount: Number(wallets[0]?.count) || 0,
+        paymentLinksCount: Number(linksCount[0]?.count) || 0,
         totalVolume: Number(s.totalVolume) || 0,
         verifiedCount: Number(s.verifiedCount) || 0,
         unclaimedCount: Number(s.unclaimedCount) || 0,
@@ -223,9 +240,32 @@ export async function getAdminProjects(db: AppDb, env?: Env): Promise<AdminProje
 export async function createAdminProject(
   db: AppDb,
   input: CreateProjectDTO,
-  pepper: string
+  pepper: string,
+  origin = 'https://payment.orbitsaas.cloud'
 ) {
   await ensureRuntimeSchema(db);
+
+  const accountMode: AccountMode = input.accountMode ?? 'WEBHOOK_CONNECTED';
+  const verificationMode: VerificationMode = input.verificationMode ?? 'AUTO';
+  const gracePeriodMinutes = input.gracePeriodMinutes ?? 60;
+  const ignoreStorefrontSync = input.ignoreStorefrontSync ?? accountMode === 'STANDALONE';
+  const enabledModulesJson = JSON.stringify({
+    ecommerce_fulfillment: accountMode === 'WEBHOOK_CONNECTED',
+    phone_otp: false,
+    telegram_alerts: false,
+  });
+
+  const shouldCreateStarterLink =
+    Boolean(input.createStarterPaymentLink) ||
+    (accountMode === 'STANDALONE' && input.createStarterPaymentLink !== false);
+  const starterAmountType = input.starterLinkAmountType || 'OPEN';
+  if (
+    shouldCreateStarterLink &&
+    starterAmountType === 'FIXED' &&
+    (!input.starterLinkAmount || input.starterLinkAmount <= 0)
+  ) {
+    throw new BadRequestError('Starter payment link fixed amount must be greater than 0');
+  }
 
   const merchantId = input.id || `mer_live_${generateSecureToken(8).toLowerCase()}`;
   const rawDeviceKey = `dev_key_${generateSecureToken(24)}`;
@@ -267,45 +307,118 @@ export async function createAdminProject(
     id: merchantId,
     storeName: input.storeName,
     slug: merchantSlug,
-    webhookUrl: input.webhookUrl,
+    webhookUrl: input.webhookUrl || '',
     webhookSecret,
     deviceApiKeyHash: deviceKeyHash,
     apiKeyHash,
     apiKeyPrefix,
     publishableKey,
-    gracePeriodMinutes: input.gracePeriodMinutes,
+    gracePeriodMinutes,
+    accountMode,
+    ignoreStorefrontSync,
+    verificationMode,
+    enabledModulesJson,
     isActive: true,
     createdAt: now,
     updatedAt: now,
   });
 
-  // Seed sample bKash and Nagad wallets as inactive until merchant configures real wallet numbers
-  const walletsInsert = db.insert(merchantWallets).values([
-    {
-      id: `wlt_${generateSecureToken(12)}`,
-      merchantId,
-      provider: 'BKASH',
-      accountType: 'PERSONAL',
-      walletNumber: '01700000000',
-      monthlyVolumeLimit: 300000,
-      currentMonthVolume: 0,
-      isPrimary: true,
-      isActive: false,
-      priorityOrder: 1,
-    },
-    {
-      id: `wlt_${generateSecureToken(12)}`,
-      merchantId,
-      provider: 'NAGAD',
-      accountType: 'PERSONAL',
-      walletNumber: '01800000000',
-      monthlyVolumeLimit: 300000,
-      currentMonthVolume: 0,
-      isPrimary: false,
-      isActive: false,
-      priorityOrder: 2,
-    },
-  ]);
+  const extraBatchItems: Array<
+    | ReturnType<typeof db.insert<typeof merchantWallets>>
+    | ReturnType<typeof db.insert<typeof paymentLinks>>
+    | ReturnType<typeof db.insert<typeof merchantUsers>>
+  > = [];
+
+  if (input.initialWallets && input.initialWallets.length > 0) {
+    const explicitPrimaryProviders = new Set<MfsProvider>();
+    for (const w of input.initialWallets) {
+      if (w.isPrimary) explicitPrimaryProviders.add(w.provider);
+    }
+    const assignedPrimaryProviders = new Set<MfsProvider>();
+
+    const initialWalletRows = input.initialWallets.map((w, idx) => {
+      let isPrimary = false;
+      if (explicitPrimaryProviders.has(w.provider)) {
+        if (w.isPrimary && !assignedPrimaryProviders.has(w.provider)) {
+          isPrimary = true;
+          assignedPrimaryProviders.add(w.provider);
+        }
+      } else if (!assignedPrimaryProviders.has(w.provider)) {
+        isPrimary = true;
+        assignedPrimaryProviders.add(w.provider);
+      }
+
+      return {
+        id: `wal_${generateSecureToken(16)}`,
+        merchantId,
+        provider: w.provider,
+        accountType: w.accountType ?? ('PERSONAL' as const),
+        walletNumber: sanitizePhoneNumber(w.walletNumber, w.provider),
+        label: w.label ?? null,
+        safeVolumeLimit: 250000,
+        monthlyVolumeLimit: 300000,
+        currentMonthVolume: 0,
+        isPrimary,
+        isActive: true,
+        source: 'PERSONAL' as const,
+        priorityOrder: idx + 1,
+      };
+    });
+
+    extraBatchItems.push(db.insert(merchantWallets).values(initialWalletRows) as any);
+  }
+
+  let starterPaymentLink:
+    | {
+        id: string;
+        slug: string;
+        title: string;
+        sharePath: string;
+        shareUrl: string;
+      }
+    | undefined;
+
+  if (shouldCreateStarterLink) {
+    const linkId = `lnk_${generateSecureToken(14)}`;
+    const linkSlug = 'pay';
+    const linkTitle = input.starterLinkTitle?.trim() || `${input.storeName} Pay`;
+    const fixedAmount = starterAmountType === 'FIXED' ? input.starterLinkAmount! : null;
+    const minAmount = starterAmountType === 'OPEN' ? 10 : null;
+    const cleanOrigin = origin.replace(/\/+$/, '');
+    const sharePath = `/${merchantSlug}/${linkSlug}`;
+    const shareUrl = `${cleanOrigin}${sharePath}`;
+
+    extraBatchItems.push(
+      db.insert(paymentLinks).values({
+        id: linkId,
+        merchantId,
+        slug: linkSlug,
+        title: linkTitle,
+        vertical: 'custom',
+        amountType: starterAmountType,
+        fixedAmount,
+        minAmount,
+        currency: 'BDT',
+        displayJson: JSON.stringify({
+          appName: input.storeName,
+          category: 'custom',
+          title: linkTitle,
+        }),
+        isActive: true,
+        usedCount: 0,
+        createdAt: now,
+        updatedAt: now,
+      }) as any
+    );
+
+    starterPaymentLink = {
+      id: linkId,
+      slug: linkSlug,
+      title: linkTitle,
+      sharePath,
+      shareUrl,
+    };
+  }
 
   let ownerAccount:
     | { id: string; email: string; fullName: string; password: string; role: 'MERCHANT_OWNER' }
@@ -319,19 +432,19 @@ export async function createAdminProject(
       const ownerId = `usr_${generateSecureToken(12)}`;
       const passwordHash = await hashPassword(ownerPassword);
 
-      const userInsert = db.insert(merchantUsers).values({
-        id: ownerId,
-        merchantId,
-        email: ownerEmail,
-        fullName: ownerName,
-        passwordHash,
-        role: 'MERCHANT_OWNER',
-        isActive: true,
-        createdAt: now,
-        updatedAt: now,
-      });
-
-      await db.batch([merchantInsert, walletsInsert, userInsert]);
+      extraBatchItems.push(
+        db.insert(merchantUsers).values({
+          id: ownerId,
+          merchantId,
+          email: ownerEmail,
+          fullName: ownerName,
+          passwordHash,
+          role: 'MERCHANT_OWNER',
+          isActive: true,
+          createdAt: now,
+          updatedAt: now,
+        }) as any
+      );
 
       ownerAccount = {
         id: ownerId,
@@ -340,9 +453,9 @@ export async function createAdminProject(
         password: ownerPassword,
         role: 'MERCHANT_OWNER',
       };
-    } else {
-      await db.batch([merchantInsert, walletsInsert]);
     }
+
+    await db.batch([merchantInsert, ...(extraBatchItems as any[])]);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (msg.includes('UNIQUE constraint failed: merchants.id')) {
@@ -358,12 +471,16 @@ export async function createAdminProject(
     id: merchantId,
     storeName: input.storeName,
     slug: merchantSlug,
-    webhookUrl: input.webhookUrl,
+    webhookUrl: input.webhookUrl || '',
     webhookSecret,
     apiKey: rawApiKey,
     publishableKey,
     deviceKey: rawDeviceKey,
-    gracePeriodMinutes: input.gracePeriodMinutes,
+    gracePeriodMinutes,
+    accountMode,
+    verificationMode,
+    ignoreStorefrontSync,
+    ...(starterPaymentLink ? { starterPaymentLink } : {}),
     ...(ownerAccount ? { ownerAccount } : {}),
   };
 }
@@ -376,6 +493,12 @@ export async function updateAdminProject(
   id: string,
   input: UpdateProjectDTO
 ) {
+  const existingRows = await db.select().from(merchants).where(eq(merchants.id, id)).limit(1);
+  const existing = existingRows[0];
+  if (!existing) {
+    throw new NotFoundError(`Project '${id}' not found`);
+  }
+
   const updateData: Partial<MerchantRecord> = {
     updatedAt: new Date(),
   };
@@ -387,6 +510,30 @@ export async function updateAdminProject(
   if (input.webhookUrl !== undefined) updateData.webhookUrl = input.webhookUrl;
   if (input.gracePeriodMinutes !== undefined) updateData.gracePeriodMinutes = input.gracePeriodMinutes;
   if (input.isActive !== undefined) updateData.isActive = input.isActive;
+  if (input.accountMode !== undefined) updateData.accountMode = input.accountMode;
+  if (input.verificationMode !== undefined) updateData.verificationMode = input.verificationMode;
+  if (input.ignoreStorefrontSync !== undefined) {
+    updateData.ignoreStorefrontSync = input.ignoreStorefrontSync;
+  }
+  if (input.ecommerceEnabled !== undefined) {
+    let modules: Record<string, boolean> = {
+      ecommerce_fulfillment: true,
+      phone_otp: false,
+      telegram_alerts: false,
+    };
+    try {
+      const parsed = existing.enabledModulesJson ? JSON.parse(existing.enabledModulesJson) : {};
+      modules = {
+        ecommerce_fulfillment: parsed.ecommerce_fulfillment !== false,
+        phone_otp: Boolean(parsed.phone_otp),
+        telegram_alerts: Boolean(parsed.telegram_alerts),
+      };
+    } catch {
+      // keep default
+    }
+    modules.ecommerce_fulfillment = input.ecommerceEnabled;
+    updateData.enabledModulesJson = JSON.stringify(modules);
+  }
 
   await db.update(merchants).set(updateData).where(eq(merchants.id, id));
 
@@ -656,36 +803,66 @@ export async function inspectAdminProject(db: AppDb, projectId: string) {
   }
 
   const { deviceApiKeyHash: _deviceHash, apiKeyHash: _apiKeyHash, ...safeProject } = merchant;
+  const merchantSlug = await resolveAndPersistMerchantSlug(db, merchant);
 
-  const [wallets, recentTransactions, recentOrders, recentQueue] = await Promise.all([
-    db
-      .select()
-      .from(merchantWallets)
-      .where(eq(merchantWallets.merchantId, projectId))
-      .orderBy(asc(merchantWallets.priorityOrder)),
-    db
-      .select()
-      .from(smsLedger)
-      .where(eq(smsLedger.merchantId, projectId))
-      .orderBy(desc(smsLedger.smsReceivedAt))
-      .limit(20),
-    db
-      .select()
-      .from(merchantOrders)
-      .where(eq(merchantOrders.merchantId, projectId))
-      .orderBy(desc(merchantOrders.createdAt))
-      .limit(15),
-    db
-      .select()
-      .from(verificationQueue)
-      .where(eq(verificationQueue.merchantId, projectId))
-      .orderBy(desc(verificationQueue.createdAt))
-      .limit(15),
-  ]);
+  const [wallets, links, pendingIntentRows, recentTransactions, recentOrders, recentQueue] =
+    await Promise.all([
+      db
+        .select()
+        .from(merchantWallets)
+        .where(eq(merchantWallets.merchantId, projectId))
+        .orderBy(asc(merchantWallets.priorityOrder)),
+      db
+        .select()
+        .from(paymentLinks)
+        .where(eq(paymentLinks.merchantId, projectId))
+        .orderBy(desc(paymentLinks.createdAt))
+        .limit(50),
+      db
+        .select()
+        .from(paymentIntents)
+        .where(
+          and(
+            eq(paymentIntents.merchantId, projectId),
+            inArray(paymentIntents.status, ['MANUAL_REVIEW_REQUIRED', 'WAITING_FOR_SMS', 'OPEN'])
+          )
+        )
+        .orderBy(desc(paymentIntents.createdAt))
+        .limit(30),
+      db
+        .select()
+        .from(smsLedger)
+        .where(eq(smsLedger.merchantId, projectId))
+        .orderBy(desc(smsLedger.smsReceivedAt))
+        .limit(20),
+      db
+        .select()
+        .from(merchantOrders)
+        .where(eq(merchantOrders.merchantId, projectId))
+        .orderBy(desc(merchantOrders.createdAt))
+        .limit(15),
+      db
+        .select()
+        .from(verificationQueue)
+        .where(eq(verificationQueue.merchantId, projectId))
+        .orderBy(desc(verificationQueue.createdAt))
+        .limit(15),
+    ]);
 
   return {
-    project: safeProject,
+    project: {
+      ...safeProject,
+      slug: merchantSlug,
+    },
     wallets,
+    paymentLinks: links.map((link) => ({
+      ...link,
+      merchantSlug,
+      sharePath: `/${merchantSlug}/${link.slug}`,
+    })),
+    pendingIntents: pendingIntentRows.map((intent) =>
+      formatPaymentIntentView(intent, merchant.storeName)
+    ),
     recentTransactions,
     recentOrders,
     recentQueue,

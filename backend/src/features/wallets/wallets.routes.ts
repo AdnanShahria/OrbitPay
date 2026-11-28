@@ -70,14 +70,16 @@ router.post('/sync', requireOwnerRoleMiddleware, async (c) => {
   const merchant = c.get('merchant')!;
   const body = await c.req.json();
   const input = syncWalletsSchema.parse(body);
-  const data = await syncMerchantWallets(db, merchant.id, input, c.env);
-  emitMerchantRealtimeEvent(
-    c.env,
-    'WALLET_SYNCED',
-    { merchantId: merchant.id, action: 'synced' },
-    merchant.id,
-    c
-  );
+  const data = await syncMerchantWallets(db, merchant.id, input, c.env, merchant);
+  if (!data.ignored) {
+    emitMerchantRealtimeEvent(
+      c.env,
+      'WALLET_SYNCED',
+      { merchantId: merchant.id, action: 'synced' },
+      merchant.id,
+      c
+    );
+  }
   return c.json({ success: true, data }, 200);
 });
 

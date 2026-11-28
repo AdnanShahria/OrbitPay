@@ -169,4 +169,19 @@
     <string name="diag_parser_result_rejected_provider">মাধ্যম: %1$s</string>
     <string name="diag_parser_result_not_payment">পেমেন্ট নয় · এটি প্রযোজ্য MFS ক্রেডিট এসএমএস নয়</string>
     <string name="diag_parser_hint_enter">লাইভ ফলাফল দেখতে উপরে একটি নমুনা এসএমএস লিখুন।</string>
+
+    <!-- SIM Pool Edit & Dual-Mode Diagnostics -->
+    <string name="sim_pool_edit_button">পরিবর্তন</string>
+    <string name="sim_pool_edit_title">%1$s নম্বর পরিবর্তন করুন</string>
+    <string name="sim_pool_edit_submit">পরিবর্তন সংরক্ষণ করুন</string>
+    <string name="diag_preflight_mode_standalone">মোড: স্ট্যান্ডঅ্যালোন</string>
+    <string name="diag_preflight_sims_optional_hint">ঐচ্ছিক সহায়ক তথ্য · ব্যক্তিগত বা অন্য ফোনের MFS নম্বরও ব্যবহার করা যাবে</string>
+    <string name="diag_preflight_sim_copy">কপি</string>
+    <string name="diag_preflight_sim_copied">%1$s কপি হয়েছে</string>
+    <string name="diag_preflight_wallets_title">কনফিগারকৃত রিসিভিং ওয়ালেট</string>
+    <string name="diag_preflight_wallets_empty">এখনো কোনো রিসিভিং MFS নম্বর যোগ করা হয়নি। সিম পুল থেকে বিকাশ, নগদ, রকেট বা উপায় নম্বর যোগ করুন।</string>
+    <string name="diag_preflight_wallet_ready">প্রস্তুত</string>
+    <string name="diag_preflight_wallet_paused">বিরতি</string>
+    <string name="diag_preflight_wallet_placeholder">প্লেসহোল্ডার</string>
+    <string name="diag_preflight_manage_wallets_button">MFS নম্বর যোগ / পরিচালনা করুন</string>
 </resources>

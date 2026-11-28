@@ -396,6 +396,9 @@ fun OrbitPaymentApp(
                     onCreateWallet = { provider, number, accountType, label, slotIdx, isPrimary, onDone ->
                         viewModel.createWallet(provider, number, accountType, label, slotIdx, isPrimary, onDone)
                     },
+                    onUpdateWallet = { walletId, walletNumber, accountType, label, isPrimary, onDone ->
+                        viewModel.updateWallet(walletId, walletNumber, accountType, label, isPrimary, onDone)
+                    },
                     onToggleActive = { walletId, isActive ->
                         viewModel.toggleWalletActive(walletId, isActive)
                     },
@@ -419,6 +422,9 @@ fun OrbitPaymentApp(
                         if (!navController.popBackStack()) {
                             navigateTopLevel(Screen.Dashboard.route)
                         }
+                    },
+                    onOpenSimPool = {
+                        navigateTopLevel(Screen.Wallets.route)
                     }
                 )
             }

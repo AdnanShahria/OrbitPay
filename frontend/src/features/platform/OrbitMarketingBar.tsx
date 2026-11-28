@@ -23,12 +23,14 @@ export function WhatsAppGlyph({ className }: { className?: string }) {
 export interface OrbitMarketingBarProps {
   initialConfig?: PlatformPublicConfig | null;
   compact?: boolean;
+  embedded?: boolean;
   className?: string;
 }
 
 export function OrbitMarketingBar({
   initialConfig,
   compact = false,
+  embedded = false,
   className,
 }: OrbitMarketingBarProps) {
   const { data } = usePlatformConfig(initialConfig);
@@ -51,8 +53,13 @@ export function OrbitMarketingBar({
   return (
     <div
       className={cx(
-        'w-full rounded-2xl border border-separator-border bg-background-primary-default/80 backdrop-blur-md transition-colors',
-        compact ? 'px-3.5 py-2.5' : 'px-4 py-3.5',
+        'w-full transition-colors',
+        embedded
+          ? 'pt-3 border-t border-separator-border bg-transparent px-0 py-0'
+          : cx(
+              'rounded-2xl border border-separator-border bg-background-primary-default/80 backdrop-blur-md',
+              compact ? 'px-3.5 py-2.5' : 'px-4 py-3.5',
+            ),
         className,
       )}
     >

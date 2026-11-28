@@ -153,8 +153,9 @@ function AppRouter() {
   const paramOrigin = urlParams.get('origin') || undefined;
   const paramTheme = urlParams.get('theme');
 
+  const isIframeEmbedded = urlParams.get('embedded') === 'true';
   const isEmbedded =
-    urlParams.get('embedded') === 'true' ||
+    isIframeEmbedded ||
     window.location.hash === '#checkout' ||
     pathname.startsWith('/checkout');
 
@@ -254,6 +255,7 @@ function AppRouter() {
 
     return (
       <EmbeddedCheckoutView
+        embedded={isIframeEmbedded}
         config={{
           sessionId: resolvedSessionId,
           sessionToken: resolvedSessionToken,
@@ -303,10 +305,18 @@ function AuthenticatedMerchantPortal({ onEnterAdmin }: { onEnterAdmin: () => voi
   const merchantId = merchant!.id;
   const { data: merchantProfile } = useMerchant(merchantId);
   const storeName = merchantProfile?.storeName || merchant!.storeName;
-  const storeHost = extractHost(merchantProfile?.webhookUrl || merchant!.webhookUrl);
+  const accountMode = merchantProfile?.accountMode ?? merchant?.accountMode;
+  const isStandaloneAccount = accountMode === 'STANDALONE';
+  const rawWebhookUrl = merchantProfile?.webhookUrl || merchant!.webhookUrl;
+  const storeHost = rawWebhookUrl
+    ? extractHost(rawWebhookUrl)
+    : isStandaloneAccount
+      ? 'Standalone Hub'
+      : 'orbit-storefront';
 
-  const ecommerceEnabled =
-    merchantProfile?.enabledModules?.ecommerce_fulfillment !== false;
+  const ecommerceEnabled = isStandaloneAccount
+    ? merchantProfile?.enabledModules?.ecommerce_fulfillment === true
+    : merchantProfile?.enabledModules?.ecommerce_fulfillment !== false;
 
   const navItems = ALL_NAV_ITEMS.filter(
     (item) => !item.requiresEcommerceModule || ecommerceEnabled,
@@ -734,7 +744,13 @@ function AuthenticatedMerchantPortal({ onEnterAdmin }: { onEnterAdmin: () => voi
 // -------------------------------------------------------------
 // Standalone Embedded Checkout Container for iframe / hosted URL
 // -------------------------------------------------------------
-function EmbeddedCheckoutView({ config }: { config: CheckoutConfig }) {
+function EmbeddedCheckoutView({
+  config,
+  embedded = false,
+}: {
+  config: CheckoutConfig;
+  embedded?: boolean;
+}) {
   const {
     currentStep,
     preferredStepperStep,
@@ -785,7 +801,96 @@ function EmbeddedCheckoutView({ config }: { config: CheckoutConfig }) {
     markVerified,
     handlePollStateChange,
     emitClose,
+    emitStepChanged,
   } = useCheckout(config);
+
+  const checkoutBody =
+    currentStep === 'POLLING' || currentStep === 'SUCCESS' ? (
+      <PollingStatus
+        orderId={orderId || config.orderId || ''}
+        expectedAmount={verifiedData?.amount ?? (baseAmount > 0 ? baseAmount : uniqueAmount)}
+        provider={selectedProvider}
+        trxId={verifiedData?.trxId || trxId}
+        senderNumber={senderNumber}
+        merchantId={merchantId}
+        customerEmail={customerEmail}
+        storeName={storeName}
+        baseAmount={baseAmount}
+        offsetCents={offsetCents}
+        initialVerified={currentStep === 'SUCCESS'}
+        initialMatchType={verifiedData?.matchType ?? null}
+        initialStatus={pollingStatus}
+        initialEscalationReason={escalationReason}
+        receiptUrl={receiptUrl}
+        returnUrl={returnUrl}
+        cancelUrl={cancelUrl}
+        graceExpiresAt={graceExpiresAt}
+        submitAttempts={submitAttempts}
+        maxSubmitAttempts={maxSubmitAttempts}
+        onEditSubmission={editSubmission}
+        onStatusChange={handlePollStateChange}
+        onVerified={markVerified}
+        onClose={emitClose}
+      />
+    ) : (
+      <CheckoutStepper
+        initialStep={preferredStepperStep}
+        baseAmount={baseAmount}
+        uniqueAmount={uniqueAmount}
+        offsetCents={offsetCents}
+        orderId={orderId || config.orderId || ''}
+        expiresAt={expiresAt}
+        selectedProvider={selectedProvider}
+        onSelectProvider={setSelectedProvider}
+        activeWallet={activeWallet}
+        activeWallets={activeWallets}
+        senderNumber={senderNumber}
+        onChangeSenderNumber={setSenderNumber}
+        paidAmount={paidAmount}
+        onChangePaidAmount={setPaidAmount}
+        trxId={trxId}
+        onChangeTrxId={setTrxId}
+        customerEmail={customerEmail}
+        onChangeCustomerEmail={setCustomerEmail}
+        verificationMode={verificationMode}
+        receiptPolicy={receiptPolicy}
+        deviceStatus={deviceStatus}
+        sessionToken={sessionToken}
+        receiptUrl={receiptUrl}
+        receiptUploadCount={receiptUploadCount}
+        receiptMaxUploads={receiptMaxUploads}
+        isUploadingReceipt={isUploadingReceipt}
+        receiptError={receiptError}
+        onUploadReceipt={uploadReceipt}
+        submitAttempts={submitAttempts}
+        maxSubmitAttempts={maxSubmitAttempts}
+        onStepChange={emitStepChanged}
+        onSubmit={submitPayment}
+        isSubmitting={isSubmitting}
+        isSessionLoading={isSessionLoading}
+        errorMessage={errorMessage}
+      />
+    );
+
+  // When rendered inside an iframe (?embedded=true), the parent OrbitPayModal already
+  // provides the single outer card shell and Order/Amount header — render one unified surface.
+  if (embedded) {
+    return (
+      <div className="min-h-screen bg-background-primary-default flex flex-col justify-between antialiased">
+        <div className="w-full p-4 sm:p-6 flex-1">{checkoutBody}</div>
+
+        <div className="px-4 sm:px-6 pb-4 pt-3 border-t border-separator-border space-y-3 bg-background-primary-default">
+          <div className="flex items-center justify-center text-caption-2-medium text-text-tertiary">
+            <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+              <RiShieldCheckLine className="size-3.5 text-status-lime-text shrink-0" aria-hidden />
+              <span>ORBIT Pay Hub · 0% gateway fee</span>
+            </span>
+          </div>
+          <OrbitMarketingBar compact embedded />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background-full flex flex-col items-center justify-center p-4 sm:p-6 antialiased">
@@ -805,71 +910,7 @@ function EmbeddedCheckoutView({ config }: { config: CheckoutConfig }) {
               />
             </div>
 
-            {currentStep === 'POLLING' || currentStep === 'SUCCESS' ? (
-              <PollingStatus
-                orderId={orderId || config.orderId || ''}
-                expectedAmount={verifiedData?.amount ?? (baseAmount > 0 ? baseAmount : uniqueAmount)}
-                provider={selectedProvider}
-                trxId={verifiedData?.trxId || trxId}
-                senderNumber={senderNumber}
-                merchantId={merchantId}
-                customerEmail={customerEmail}
-                storeName={storeName}
-                baseAmount={baseAmount}
-                offsetCents={offsetCents}
-                initialVerified={currentStep === 'SUCCESS'}
-                initialMatchType={verifiedData?.matchType ?? null}
-                initialStatus={pollingStatus}
-                initialEscalationReason={escalationReason}
-                receiptUrl={receiptUrl}
-                returnUrl={returnUrl}
-                cancelUrl={cancelUrl}
-                graceExpiresAt={graceExpiresAt}
-                submitAttempts={submitAttempts}
-                maxSubmitAttempts={maxSubmitAttempts}
-                onEditSubmission={editSubmission}
-                onStatusChange={handlePollStateChange}
-                onVerified={markVerified}
-                onClose={emitClose}
-              />
-            ) : (
-              <CheckoutStepper
-                initialStep={preferredStepperStep}
-                baseAmount={baseAmount}
-                uniqueAmount={uniqueAmount}
-                offsetCents={offsetCents}
-                orderId={orderId || config.orderId || ''}
-                expiresAt={expiresAt}
-                selectedProvider={selectedProvider}
-                onSelectProvider={setSelectedProvider}
-                activeWallet={activeWallet}
-                activeWallets={activeWallets}
-                senderNumber={senderNumber}
-                onChangeSenderNumber={setSenderNumber}
-                paidAmount={paidAmount}
-                onChangePaidAmount={setPaidAmount}
-                trxId={trxId}
-                onChangeTrxId={setTrxId}
-                customerEmail={customerEmail}
-                onChangeCustomerEmail={setCustomerEmail}
-                verificationMode={verificationMode}
-                receiptPolicy={receiptPolicy}
-                deviceStatus={deviceStatus}
-                sessionToken={sessionToken}
-                receiptUrl={receiptUrl}
-                receiptUploadCount={receiptUploadCount}
-                receiptMaxUploads={receiptMaxUploads}
-                isUploadingReceipt={isUploadingReceipt}
-                receiptError={receiptError}
-                onUploadReceipt={uploadReceipt}
-                submitAttempts={submitAttempts}
-                maxSubmitAttempts={maxSubmitAttempts}
-                onSubmit={submitPayment}
-                isSubmitting={isSubmitting}
-                isSessionLoading={isSessionLoading}
-                errorMessage={errorMessage}
-              />
-            )}
+            {checkoutBody}
 
             <div className="pt-4 border-t border-separator-border flex items-center justify-center text-caption-2-medium text-text-tertiary">
               <span className="inline-flex items-center gap-1.5 whitespace-nowrap">

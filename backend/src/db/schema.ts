@@ -64,6 +64,12 @@ export type WebhookStatus = (typeof WEBHOOK_STATUSES)[number];
 export const VERIFICATION_MODES = ['AUTO', 'PURE_MANUAL'] as const;
 export type VerificationMode = (typeof VERIFICATION_MODES)[number];
 
+export const ACCOUNT_MODES = ['STANDALONE', 'WEBHOOK_CONNECTED'] as const;
+export type AccountMode = (typeof ACCOUNT_MODES)[number];
+
+export const WALLET_SOURCES = ['PERSONAL', 'STOREFRONT_SYNC'] as const;
+export type WalletSource = (typeof WALLET_SOURCES)[number];
+
 export const VERTICAL_PROFILES = [
   'ecommerce',
   'saas_subscription',
@@ -128,6 +134,8 @@ export const merchants = sqliteTable('merchants', {
   fcmToken: text('fcm_token'),
   lastSeenAt: integer('last_seen_at', { mode: 'timestamp' }),
   isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
+  accountMode: text('account_mode', { enum: ACCOUNT_MODES }).notNull().default('WEBHOOK_CONNECTED'),
+  ignoreStorefrontSync: integer('ignore_storefront_sync', { mode: 'boolean' }).notNull().default(false),
   verificationMode: text('verification_mode', { enum: VERIFICATION_MODES }).notNull().default('AUTO'),
   allowBaseAmountFallback: integer('allow_base_amount_fallback', { mode: 'boolean' }).notNull().default(true),
   receiptPolicy: text('receipt_policy', { enum: RECEIPT_POLICIES }).notNull().default('OFFLINE_OPTIONAL'),
@@ -163,6 +171,7 @@ export const merchantWallets = sqliteTable('merchant_wallets', {
   currentMonthVolume: real('current_month_volume').default(0).notNull(),
   isPrimary: integer('is_primary', { mode: 'boolean' }).default(false).notNull(),
   isActive: integer('is_active', { mode: 'boolean' }).default(true).notNull(),
+  source: text('source', { enum: WALLET_SOURCES }).notNull().default('PERSONAL'),
   priorityOrder: integer('priority_order').default(0).notNull(),
   lastRotatedAt: integer('last_rotated_at', { mode: 'timestamp' }),
   createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()).notNull(),

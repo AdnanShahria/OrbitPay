@@ -131,8 +131,8 @@
     <string name="sim_pool_limit_pair">%1$s safe / %2$s max</string>
     <string name="sim_pool_is_primary">Primary SIM</string>
     <string name="sim_pool_make_primary">Set as Primary</string>
-    <string name="sim_pool_empty_title">No SIM numbers added</string>
-    <string name="sim_pool_empty_desc">Add your bKash, Nagad, Rocket, Upay, or CellFin SIM numbers so customers know where to pay.</string>
+    <string name="sim_pool_empty_title">Add your first MFS receiving number</string>
+    <string name="sim_pool_empty_desc">Add your bKash, Nagad, Rocket, Upay, or CellFin number to start receiving payments via Payment Links and storefronts.</string>
     <string name="sim_pool_add_title">Add Payment SIM</string>
     <string name="sim_pool_field_provider">Select Wallet / MFS</string>
     <string name="sim_pool_field_label">Label (optional, e.g. Shop Counter)</string>

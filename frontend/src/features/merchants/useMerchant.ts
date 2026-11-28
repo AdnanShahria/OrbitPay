@@ -15,6 +15,8 @@ export interface EnabledModulesConfig {
   telegram_alerts: boolean;
 }
 
+export type MerchantAccountMode = 'STANDALONE' | 'WEBHOOK_CONNECTED';
+
 export interface MerchantProfile {
   id: string;
   storeName: string;
@@ -22,6 +24,8 @@ export interface MerchantProfile {
   webhookUrl: string;
   webhookSecret: string;
   gracePeriodMinutes: number;
+  accountMode?: MerchantAccountMode;
+  ignoreStorefrontSync?: boolean;
   deviceApiKeyHash?: string;
   fcmToken?: string | null;
   lastSeenAt?: string | null;
@@ -45,6 +49,8 @@ export interface UpdateMerchantSettingsDTO {
   slug?: string;
   webhookUrl?: string;
   gracePeriodMinutes?: number;
+  accountMode?: MerchantAccountMode;
+  ignoreStorefrontSync?: boolean;
   verificationMode?: VerificationMode;
   allowBaseAmountFallback?: boolean;
   receiptPolicy?: MerchantReceiptPolicy;

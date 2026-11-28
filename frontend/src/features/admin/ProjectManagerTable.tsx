@@ -23,6 +23,8 @@ import { StatusDot } from '@/components/base/badges/status-dot';
 import { Button } from '@/components/base/buttons/button';
 import { Card } from '@/components/base/card/card';
 import { Input } from '@/components/base/input/input';
+import { Select, SelectItem } from '@/components/base/select/select';
+import { Switch } from '@/components/base/switch/switch';
 import {
   AlertDialog,
   Modal,
@@ -46,7 +48,9 @@ import { AddProjectModal } from './AddProjectModal';
 import { ProjectInspectDrawer } from './ProjectInspectDrawer';
 import { ProjectUsersModal } from './ProjectUsersModal';
 import {
+  type AdminAccountMode,
   type AdminProjectSummary,
+  type AdminVerificationMode,
   useDeleteProjectMutation,
   useSeedDemoProjectsMutation,
   useUpdateProjectMutation,
@@ -73,6 +77,9 @@ export function ProjectManagerTable({
   const [editSlug, setEditSlug] = useState('');
   const [editWebhookUrl, setEditWebhookUrl] = useState('');
   const [editGracePeriod, setEditGracePeriod] = useState('60');
+  const [editAccountMode, setEditAccountMode] = useState<AdminAccountMode>('WEBHOOK_CONNECTED');
+  const [editVerificationMode, setEditVerificationMode] = useState<AdminVerificationMode>('AUTO');
+  const [editIgnoreStorefrontSync, setEditIgnoreStorefrontSync] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
 
   // Delete confirmation state
@@ -112,6 +119,9 @@ export function ProjectManagerTable({
     setEditSlug(p.slug || '');
     setEditWebhookUrl(p.webhookUrl || '');
     setEditGracePeriod(String(p.gracePeriodMinutes || 60));
+    setEditAccountMode(p.accountMode ?? 'WEBHOOK_CONNECTED');
+    setEditVerificationMode(p.verificationMode ?? 'AUTO');
+    setEditIgnoreStorefrontSync(Boolean(p.ignoreStorefrontSync));
     setEditError(null);
   };
 
@@ -141,6 +151,9 @@ export function ProjectManagerTable({
           ...(editSlug.trim() ? { slug: editSlug.trim().toLowerCase() } : {}),
           webhookUrl: trimmedWebhook,
           gracePeriodMinutes: parsedGrace,
+          accountMode: editAccountMode,
+          verificationMode: editVerificationMode,
+          ignoreStorefrontSync: editIgnoreStorefrontSync,
         },
       });
       toast.success(`Updated ${trimmedName}`);
@@ -306,9 +319,19 @@ export function ProjectManagerTable({
                   </TableCell>
 
                   <TableCell>
-                    <Chip variant="bold" color={p.isActive ? 'lime' : 'neutral'}>
-                      {p.isActive ? 'Active' : 'Paused'}
-                    </Chip>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <Chip variant="bold" color={p.isActive ? 'lime' : 'neutral'}>
+                        {p.isActive ? 'Active' : 'Paused'}
+                      </Chip>
+                      <Chip variant="caption" color={p.accountMode === 'STANDALONE' ? 'cyan' : 'soft'}>
+                        {p.accountMode === 'STANDALONE' ? 'Standalone' : 'Webhook'}
+                      </Chip>
+                      {p.verificationMode === 'PURE_MANUAL' && (
+                        <Chip variant="caption" color="yellow">
+                          Manual
+                        </Chip>
+                      )}
+                    </div>
                   </TableCell>
 
                   <TableCell>
@@ -365,7 +388,7 @@ export function ProjectManagerTable({
                       </div>
                     ) : (
                       <span className="text-caption-1-regular text-text-tertiary whitespace-nowrap">
-                        Not configured
+                        {p.accountMode === 'STANDALONE' ? 'Standalone (no webhook)' : 'Not configured'}
                       </span>
                     )}
                     <span className="text-caption-2-regular text-text-tertiary block mt-0.5 whitespace-nowrap tabular-nums tnum">
@@ -479,6 +502,38 @@ export function ProjectManagerTable({
               icon={RiEditLine}
             />
             <ModalBody className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <Select
+                  label="Account Mode"
+                  selectedKey={editAccountMode}
+                  onSelectionChange={(key) => {
+                    if (key != null) setEditAccountMode(String(key) as AdminAccountMode);
+                  }}
+                >
+                  <SelectItem id="STANDALONE" textValue="Standalone / Payment Link">
+                    Standalone / Payment Link
+                  </SelectItem>
+                  <SelectItem id="WEBHOOK_CONNECTED" textValue="Webhook-Connected Website">
+                    Webhook-Connected Website
+                  </SelectItem>
+                </Select>
+
+                <Select
+                  label="Verification Mode"
+                  selectedKey={editVerificationMode}
+                  onSelectionChange={(key) => {
+                    if (key != null) setEditVerificationMode(String(key) as AdminVerificationMode);
+                  }}
+                >
+                  <SelectItem id="AUTO" textValue="AUTO (SMS + Fallback)">
+                    AUTO (SMS + Fallback)
+                  </SelectItem>
+                  <SelectItem id="PURE_MANUAL" textValue="PURE_MANUAL (Admin Review)">
+                    PURE_MANUAL (Admin Review)
+                  </SelectItem>
+                </Select>
+              </div>
+
               <Input
                 label="Storefront Name"
                 value={editStoreName}
@@ -495,7 +550,7 @@ export function ProjectManagerTable({
                 inputClassName="font-mono"
               />
               <Input
-                label="Store Webhook Callback URL"
+                label={editAccountMode === 'STANDALONE' ? 'Webhook Callback URL (Optional)' : 'Store Webhook Callback URL'}
                 type="url"
                 placeholder="https://client-store.com/payment/v1"
                 value={editWebhookUrl}
@@ -513,6 +568,23 @@ export function ProjectManagerTable({
                 inputClassName="font-mono tabular-nums"
                 hint="Accepted range: 5 to 1440 minutes."
               />
+
+              <div className="p-3.5 rounded-2xl border border-separator-border bg-background-secondary-default flex items-center justify-between gap-3">
+                <div className="space-y-0.5 min-w-0">
+                  <span className="text-body-medium text-text-primary block">
+                    Ignore Storefront Wallet Sync
+                  </span>
+                  <span className="text-caption-2-regular text-text-secondary block">
+                    Prevent external storefront listing syncs from overwriting Hub/App wallets.
+                  </span>
+                </div>
+                <Switch
+                  size="sm"
+                  isSelected={editIgnoreStorefrontSync}
+                  onChange={setEditIgnoreStorefrontSync}
+                  aria-label="Ignore Storefront Wallet Sync"
+                />
+              </div>
 
               {editError && (
                 <div

@@ -7,6 +7,7 @@ import { PollingStatus } from '@/features/checkout/PollingStatus';
 import { ThemeToggle } from '@/components/application/theme/theme-toggle';
 import { Button } from '@/components/base/buttons/button';
 import { Input } from '@/components/base/input/input';
+import { Notification } from '@/components/base/notification/notification';
 import { Spinner } from '@/components/base/spinner/spinner';
 import { toast } from '@/components/base/toast/toast';
 import { cx } from '@/utils/cx';
@@ -88,6 +89,8 @@ export function PublicPaymentLinkPage({ slug, merchantSlug }: PublicPaymentLinkP
     );
   }
 
+  const hasNoActiveWallets =
+    link.hasActiveWallets === false || link.activeWallets.length === 0;
   const uniqueProviders = Array.from(new Set(link.activeWallets.map((w) => w.provider)));
   const effectiveProvider = selectedProvider || uniqueProviders[0] || 'BKASH';
   const displayStoreName = link.display?.appName || link.storeName;
@@ -101,6 +104,9 @@ export function PublicPaymentLinkPage({ slug, merchantSlug }: PublicPaymentLinkP
 
   const handleProceed = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (hasNoActiveWallets) {
+      return;
+    }
     const trimmedName = customerName.trim();
     if (trimmedName.length < 2) {
       toast.error('Please enter your name');
@@ -184,6 +190,16 @@ export function PublicPaymentLinkPage({ slug, merchantSlug }: PublicPaymentLinkP
           </div>
 
           <form onSubmit={handleProceed} className="p-6 space-y-5">
+            {hasNoActiveWallets && (
+              <Notification
+                status="information"
+                dismissible={false}
+                title="Payments not active yet"
+                description="Receiving MFS numbers are not configured yet. Please contact the merchant to activate payments."
+                className="shadow-none pe-4 bg-background-secondary-default"
+              />
+            )}
+
             {link.amountType === 'OPEN' && (
               <Input
                 label="Amount (BDT)"
@@ -256,6 +272,7 @@ export function PublicPaymentLinkPage({ slug, merchantSlug }: PublicPaymentLinkP
               type="submit"
               variant="primary"
               size="medium"
+              disabled={hasNoActiveWallets}
               isLoading={payMutation.isPending}
               trailingIcon={RiArrowRightLine}
               className="w-full min-h-11 rounded-2xl"

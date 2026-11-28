@@ -1,14 +1,18 @@
 import { useState, type FormEvent } from 'react';
 import {
+  RiArrowDownSLine,
   RiCheckLine,
   RiErrorWarningLine,
+  RiExternalLinkLine,
   RiFileCopyLine,
   RiGlobalLine,
   RiHashtag,
   RiKey2Line,
+  RiLinksLine,
   RiMailLine,
   RiRefreshLine,
   RiShieldCheckLine,
+  RiSmartphoneLine,
   RiStore2Line,
   RiTimeLine,
   RiUserLine,
@@ -22,9 +26,16 @@ import {
   ModalHeader,
 } from '@/components/base/modal/modal';
 import { Chip } from '@/components/base/badges/chip';
+import { Select, SelectItem } from '@/components/base/select/select';
+import { Switch } from '@/components/base/switch/switch';
 import { toast } from '@/components/base/toast/toast';
+import { cx } from '@/utils/cx';
+import { formatBDT, MFS_METADATA } from '@/shared/utils/format';
 import {
   useCreateProjectMutation,
+  type AdminAccountMode,
+  type AdminInitialWalletPayload,
+  type AdminVerificationMode,
   type CreateProjectResponseData,
 } from './useAdmin';
 
@@ -40,11 +51,32 @@ function generateStrongPassword(): string {
   return Array.from(bytes, (b) => chars[b % chars.length]).join('');
 }
 
+function cleanBdNumber(raw: string): string {
+  return raw.trim().replace(/^\+88/, '').replace(/\s+/g, '');
+}
+
 export function AddProjectModal({ isOpen, onClose }: AddProjectModalProps) {
+  const [accountMode, setAccountMode] = useState<AdminAccountMode>('STANDALONE');
+  const [verificationMode, setVerificationMode] = useState<AdminVerificationMode>('AUTO');
+
   const [storeName, setStoreName] = useState('');
   const [projectId, setProjectId] = useState('');
   const [webhookUrl, setWebhookUrl] = useState('');
+  const [showOptionalWebhook, setShowOptionalWebhook] = useState(false);
   const [gracePeriod, setGracePeriod] = useState('60');
+
+  // Optional initial MFS wallets
+  const [showInitialWallets, setShowInitialWallets] = useState(false);
+  const [bkashNumber, setBkashNumber] = useState('');
+  const [nagadNumber, setNagadNumber] = useState('');
+
+  // Optional starter Payment Link
+  const [createStarterPaymentLink, setCreateStarterPaymentLink] = useState(true);
+  const [starterLinkTitle, setStarterLinkTitle] = useState('');
+  const [starterLinkAmountType, setStarterLinkAmountType] = useState<'FIXED' | 'OPEN'>('OPEN');
+  const [starterLinkAmount, setStarterLinkAmount] = useState('');
+
+  // Client owner login
   const [ownerEmail, setOwnerEmail] = useState('');
   const [ownerName, setOwnerName] = useState('');
   const [ownerPassword, setOwnerPassword] = useState('');
@@ -55,6 +87,14 @@ export function AddProjectModal({ isOpen, onClose }: AddProjectModalProps) {
 
   const createMutation = useCreateProjectMutation();
 
+  const handleSelectAccountMode = (mode: AdminAccountMode) => {
+    setAccountMode(mode);
+    setCreateStarterPaymentLink(mode === 'STANDALONE');
+    if (mode === 'WEBHOOK_CONNECTED') {
+      setShowOptionalWebhook(true);
+    }
+  };
+
   const handleCopy = (text: string, keyId: string, label: string) => {
     navigator.clipboard.writeText(text);
     setCopiedKey(keyId);
@@ -64,10 +104,20 @@ export function AddProjectModal({ isOpen, onClose }: AddProjectModalProps) {
 
   const handleClose = () => {
     setCreatedResult(null);
+    setAccountMode('STANDALONE');
+    setVerificationMode('AUTO');
     setStoreName('');
     setProjectId('');
     setWebhookUrl('');
+    setShowOptionalWebhook(false);
     setGracePeriod('60');
+    setShowInitialWallets(false);
+    setBkashNumber('');
+    setNagadNumber('');
+    setCreateStarterPaymentLink(true);
+    setStarterLinkTitle('');
+    setStarterLinkAmountType('OPEN');
+    setStarterLinkAmount('');
     setOwnerEmail('');
     setOwnerName('');
     setOwnerPassword('');
@@ -89,7 +139,7 @@ export function AddProjectModal({ isOpen, onClose }: AddProjectModalProps) {
     const parsedGrace = gracePeriod.trim() === '' ? 60 : Number(gracePeriod);
 
     if (trimmedStore.length < 2) {
-      setValidationError('Storefront name must be at least 2 characters.');
+      setValidationError('Account / storefront name must be at least 2 characters.');
       return;
     }
     if (trimmedId && (trimmedId.length < 3 || !/^[a-z0-9_-]+$/i.test(trimmedId))) {
@@ -100,6 +150,45 @@ export function AddProjectModal({ isOpen, onClose }: AddProjectModalProps) {
       setValidationError('Grace period must be a whole number between 5 and 1440 minutes.');
       return;
     }
+
+    const initialWallets: AdminInitialWalletPayload[] = [];
+    const cleanBkash = cleanBdNumber(bkashNumber);
+    const cleanNagad = cleanBdNumber(nagadNumber);
+
+    if (cleanBkash) {
+      if (!/^01[3-9]\d{8}$/.test(cleanBkash)) {
+        setValidationError('bKash number must be 11 digits starting with 01.');
+        return;
+      }
+      initialWallets.push({
+        provider: 'BKASH',
+        walletNumber: cleanBkash,
+        accountType: 'PERSONAL',
+        isPrimary: true,
+      });
+    }
+    if (cleanNagad) {
+      if (!/^01[3-9]\d{8}$/.test(cleanNagad)) {
+        setValidationError('Nagad number must be 11 digits starting with 01.');
+        return;
+      }
+      initialWallets.push({
+        provider: 'NAGAD',
+        walletNumber: cleanNagad,
+        accountType: 'PERSONAL',
+        isPrimary: initialWallets.length === 0,
+      });
+    }
+
+    let parsedStarterAmount: number | undefined;
+    if (createStarterPaymentLink && starterLinkAmountType === 'FIXED') {
+      parsedStarterAmount = Number(starterLinkAmount);
+      if (!Number.isFinite(parsedStarterAmount) || parsedStarterAmount <= 0) {
+        setValidationError('Enter a positive fixed amount for the starter Payment Link.');
+        return;
+      }
+    }
+
     if ((trimmedOwnerName || trimmedPassword) && !trimmedEmail) {
       setValidationError('Client Owner Email is required when providing an owner name or password.');
       return;
@@ -117,16 +206,31 @@ export function AddProjectModal({ isOpen, onClose }: AddProjectModalProps) {
         storeName: trimmedStore,
         webhookUrl: trimmedWebhook || undefined,
         gracePeriodMinutes: parsedGrace,
+        accountMode,
+        verificationMode,
+        ignoreStorefrontSync: accountMode === 'STANDALONE',
+        initialWallets: initialWallets.length > 0 ? initialWallets : undefined,
+        createStarterPaymentLink,
+        starterLinkTitle: createStarterPaymentLink && starterLinkTitle.trim() ? starterLinkTitle.trim() : undefined,
+        starterLinkAmountType: createStarterPaymentLink ? starterLinkAmountType : undefined,
+        starterLinkAmount: parsedStarterAmount,
         ownerEmail: trimmedEmail || undefined,
         ownerName: trimmedOwnerName || undefined,
         ownerPassword: trimmedPassword || undefined,
       });
       setCreatedResult(res.data);
-      toast.success(`Storefront ${res.data.storeName} onboarded`);
+      toast.success(`${res.data.storeName} onboarded`);
     } catch {
       // Error surfaced via createMutation.isError banner
     }
   };
+
+  const origin =
+    typeof window !== 'undefined' ? window.location.origin : 'https://payment.orbitsaas.cloud';
+  const starterLinkUrl = createdResult?.starterPaymentLink
+    ? createdResult.starterPaymentLink.shareUrl ||
+      `${origin}${createdResult.starterPaymentLink.sharePath}`
+    : null;
 
   return (
     <Modal
@@ -137,13 +241,13 @@ export function AddProjectModal({ isOpen, onClose }: AddProjectModalProps) {
       <ModalHeader
         title={
           createdResult
-            ? 'Storefront & Client Credentials Created'
-            : 'Connect New Client Project'
+            ? 'Client Account & Credentials Created'
+            : 'Connect New Client Account'
         }
         description={
           createdResult
-            ? 'Deliver these credentials securely to the merchant. Passwords and secrets are shown once.'
-            : 'Onboard a new client e-commerce storefront and provision its merchant owner login.'
+            ? 'Deliver these credentials securely to the client. Passwords and secrets are shown once.'
+            : 'Onboard a Standalone Payment Link account or a Webhook-Connected e-commerce storefront.'
         }
         icon={createdResult ? RiShieldCheckLine : RiStore2Line}
       />
@@ -151,13 +255,72 @@ export function AddProjectModal({ isOpen, onClose }: AddProjectModalProps) {
       {createdResult ? (
         <>
           <ModalBody className="space-y-4">
-            <div className="p-3.5 rounded-2xl bg-notification-success-background text-notification-success-foreground text-caption-1-medium flex items-center gap-2.5">
-              <RiShieldCheckLine className="size-5 shrink-0" aria-hidden />
-              <span>
-                Storefront <strong>{createdResult.storeName}</strong> registered
-                and ready for merchant sign-in.
-              </span>
+            <div className="p-3.5 rounded-2xl bg-notification-success-background text-notification-success-foreground text-caption-1-medium flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5">
+                <RiShieldCheckLine className="size-5 shrink-0" aria-hidden />
+                <span>
+                  Account <strong>{createdResult.storeName}</strong> registered and ready for sign-in.
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <Chip variant="caption" color={createdResult.accountMode === 'STANDALONE' ? 'cyan' : 'neutral'}>
+                  {createdResult.accountMode === 'STANDALONE' ? 'Standalone' : 'Webhook'}
+                </Chip>
+                {createdResult.verificationMode === 'PURE_MANUAL' && (
+                  <Chip variant="caption" color="yellow">Manual</Chip>
+                )}
+              </div>
             </div>
+
+            {createdResult.starterPaymentLink && starterLinkUrl && (
+              <div className="p-4 rounded-2xl bg-background-secondary-default border border-border-button-active/40 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <RiLinksLine className="size-4 text-foreground-icon-primary shrink-0" aria-hidden />
+                    <span className="text-body-medium text-text-primary truncate">
+                      Starter Payment Link: {createdResult.starterPaymentLink.title}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <Chip variant="caption" color="lime">Live URL</Chip>
+                    {createdResult.starterPaymentLink.amountType === 'FIXED' &&
+                      createdResult.starterPaymentLink.fixedAmount != null && (
+                        <Chip variant="caption" color="soft" className="font-mono tabular-nums">
+                          {formatBDT(createdResult.starterPaymentLink.fixedAmount)}
+                        </Chip>
+                      )}
+                  </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row sm:items-end gap-2">
+                  <Input
+                    label="Shareable Payment Link"
+                    isReadOnly
+                    value={starterLinkUrl}
+                    className="flex-1"
+                    inputClassName="font-mono text-caption-1-regular"
+                  />
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Button
+                      variant="secondary"
+                      size="medium"
+                      onClick={() => handleCopy(starterLinkUrl, 'starterLink', 'Payment link')}
+                      leadingIcon={copiedKey === 'starterLink' ? RiCheckLine : RiFileCopyLine}
+                    >
+                      {copiedKey === 'starterLink' ? 'Copied' : 'Copy'}
+                    </Button>
+                    <Button
+                      variant="primary"
+                      size="medium"
+                      onClick={() => window.open(starterLinkUrl, '_blank', 'noopener,noreferrer')}
+                      leadingIcon={RiExternalLinkLine}
+                    >
+                      Open
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {createdResult.ownerAccount && (
               <div className="p-4 rounded-2xl bg-background-secondary-default border border-border-button-default space-y-3">
@@ -349,9 +512,67 @@ export function AddProjectModal({ isOpen, onClose }: AddProjectModalProps) {
           className="flex min-h-0 flex-1 flex-col gap-4"
         >
           <ModalBody className="space-y-4">
+            {/* Account Mode 2-Card Selector */}
+            <div className="space-y-2">
+              <span className="text-body-medium text-text-primary block">
+                Account Mode
+              </span>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  aria-pressed={accountMode === 'STANDALONE'}
+                  onClick={() => handleSelectAccountMode('STANDALONE')}
+                  className={cx(
+                    'min-h-11 p-3.5 rounded-2xl border text-start transition-colors cursor-pointer space-y-1 outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring',
+                    accountMode === 'STANDALONE'
+                      ? 'border-2 border-text-primary bg-background-secondary-default shadow-card'
+                      : 'border-border-button-default bg-background-primary-default hover:border-border-button-hover',
+                  )}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="flex items-center gap-1.5 text-body-medium text-text-primary">
+                      <RiLinksLine className="size-4 text-status-cyan-text shrink-0" aria-hidden />
+                      <span>Standalone / Payment Link</span>
+                    </span>
+                    <Chip variant="caption" color={accountMode === 'STANDALONE' ? 'cyan' : 'neutral'}>
+                      {accountMode === 'STANDALONE' ? 'Selected' : 'No site'}
+                    </Chip>
+                  </div>
+                  <p className="text-caption-2-regular text-text-secondary">
+                    Personal, SaaS, Event, or non-ecommerce accounts. No website webhook required; auto-creates a starter Payment Link.
+                  </p>
+                </button>
+
+                <button
+                  type="button"
+                  aria-pressed={accountMode === 'WEBHOOK_CONNECTED'}
+                  onClick={() => handleSelectAccountMode('WEBHOOK_CONNECTED')}
+                  className={cx(
+                    'min-h-11 p-3.5 rounded-2xl border text-start transition-colors cursor-pointer space-y-1 outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring',
+                    accountMode === 'WEBHOOK_CONNECTED'
+                      ? 'border-2 border-text-primary bg-background-secondary-default shadow-card'
+                      : 'border-border-button-default bg-background-primary-default hover:border-border-button-hover',
+                  )}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="flex items-center gap-1.5 text-body-medium text-text-primary">
+                      <RiGlobalLine className="size-4 text-status-lime-text shrink-0" aria-hidden />
+                      <span>Webhook-Connected Website</span>
+                    </span>
+                    <Chip variant="caption" color={accountMode === 'WEBHOOK_CONNECTED' ? 'lime' : 'neutral'}>
+                      {accountMode === 'WEBHOOK_CONNECTED' ? 'Selected' : 'E-Comm'}
+                    </Chip>
+                  </div>
+                  <p className="text-caption-2-regular text-text-secondary">
+                    E-Commerce storefront with webhook callbacks &amp; storefront wallet sync.
+                  </p>
+                </button>
+              </div>
+            </div>
+
             <Input
-              label="Storefront / Client Name"
-              placeholder="e.g. Aurelia Lifestyle, NewznBD, Gadget Hub"
+              label={accountMode === 'STANDALONE' ? 'Account / Brand Name' : 'Storefront / Client Name'}
+              placeholder="e.g. Aurelia Lifestyle, Summit Events, Personal Hub"
               value={storeName}
               onChange={setStoreName}
               isRequired
@@ -380,16 +601,178 @@ export function AddProjectModal({ isOpen, onClose }: AddProjectModalProps) {
               />
             </div>
 
-            <Input
-              label="Store Webhook Callback URL (Optional)"
-              placeholder="https://client-store.com/payment/v1"
-              value={webhookUrl}
-              onChange={setWebhookUrl}
-              type="url"
-              hint="Optional while testing. Leave blank if you only want to verify payments in the portal."
-              leadingIcon={RiGlobalLine}
-              inputClassName="font-mono"
-            />
+            {/* Verification Mode Toggle */}
+            <div className="p-3.5 rounded-2xl border border-separator-border bg-background-secondary-default flex items-center justify-between gap-4">
+              <div className="space-y-0.5 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-body-medium text-text-primary">
+                    Manual Dashboard Verification (No Android App)
+                  </span>
+                  <Chip variant="caption" color={verificationMode === 'PURE_MANUAL' ? 'yellow' : 'lime'}>
+                    {verificationMode === 'PURE_MANUAL' ? 'PURE_MANUAL' : 'AUTO'}
+                  </Chip>
+                </div>
+                <span className="text-caption-2-regular text-text-secondary block">
+                  Enable for clients who won&apos;t install the Android app — payments route straight to Admin Review.
+                </span>
+              </div>
+              <Switch
+                size="md"
+                isSelected={verificationMode === 'PURE_MANUAL'}
+                onChange={(selected) => setVerificationMode(selected ? 'PURE_MANUAL' : 'AUTO')}
+                aria-label="Enable pure manual verification mode"
+              />
+            </div>
+
+            {/* Webhook Callback URL: Prominent in WEBHOOK_CONNECTED, collapsed in STANDALONE */}
+            {accountMode === 'WEBHOOK_CONNECTED' ? (
+              <Input
+                label="Store Webhook Callback URL"
+                placeholder="https://client-store.com/api/v1/webhooks/orbit-payment"
+                value={webhookUrl}
+                onChange={setWebhookUrl}
+                type="url"
+                hint="Receives signed payment.verified, order.*, and wallet.synced webhooks."
+                leadingIcon={RiGlobalLine}
+                inputClassName="font-mono"
+              />
+            ) : (
+              <div className="rounded-2xl border border-separator-border bg-background-secondary-default/40 overflow-hidden">
+                <button
+                  type="button"
+                  aria-expanded={showOptionalWebhook}
+                  onClick={() => setShowOptionalWebhook((prev) => !prev)}
+                  className="w-full min-h-10 px-4 py-2 flex items-center justify-between gap-2 text-caption-1-medium text-text-secondary hover:text-text-primary cursor-pointer"
+                >
+                  <span>Optional Webhook Callback URL (Not required for Standalone)</span>
+                  <RiArrowDownSLine
+                    className={cx(
+                      'size-4 transition-transform duration-200',
+                      showOptionalWebhook && 'rotate-180',
+                    )}
+                    aria-hidden
+                  />
+                </button>
+                {showOptionalWebhook && (
+                  <div className="px-4 pb-3.5 pt-2 border-t border-separator-border">
+                    <Input
+                      label="Webhook Callback URL (Optional)"
+                      placeholder="https://app.example.com/webhooks/orbit"
+                      value={webhookUrl}
+                      onChange={setWebhookUrl}
+                      type="url"
+                      leadingIcon={RiGlobalLine}
+                      inputClassName="font-mono"
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Optional Initial MFS Wallets */}
+            <div className="rounded-2xl border border-separator-border bg-background-secondary-default/40 overflow-hidden">
+              <button
+                type="button"
+                aria-expanded={showInitialWallets}
+                onClick={() => setShowInitialWallets((prev) => !prev)}
+                className="w-full min-h-11 px-4 py-2.5 flex items-center justify-between gap-2 text-start cursor-pointer hover:bg-background-secondary-hover/40"
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <RiSmartphoneLine className="size-4 text-foreground-icon-secondary shrink-0" aria-hidden />
+                  <span className="text-body-medium text-text-primary truncate">
+                    Initial MFS Wallets (Optional)
+                  </span>
+                  <Chip variant="caption" color="soft">Skip or add now</Chip>
+                </div>
+                <RiArrowDownSLine
+                  className={cx(
+                    'size-4 text-foreground-icon-secondary shrink-0 transition-transform duration-200',
+                    showInitialWallets && 'rotate-180',
+                  )}
+                  aria-hidden
+                />
+              </button>
+
+              {showInitialWallets && (
+                <div className="px-4 pb-4 pt-3 space-y-3 border-t border-separator-border">
+                  <p className="text-caption-2-regular text-text-tertiary">
+                    Leave blank to let the client add or change their own MFS numbers later in the portal or Android app.
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <Input
+                      label={`${MFS_METADATA.BKASH.name} Number (Optional)`}
+                      placeholder="017XXXXXXXX"
+                      value={bkashNumber}
+                      onChange={setBkashNumber}
+                      inputClassName="font-mono tabular-nums"
+                    />
+                    <Input
+                      label={`${MFS_METADATA.NAGAD.name} Number (Optional)`}
+                      placeholder="018XXXXXXXX"
+                      value={nagadNumber}
+                      onChange={setNagadNumber}
+                      inputClassName="font-mono tabular-nums"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Starter Payment Link Switch */}
+            <div className="p-4 rounded-2xl border border-separator-border bg-background-secondary-default space-y-3">
+              <div className="flex items-center justify-between gap-4">
+                <div className="space-y-0.5 min-w-0">
+                  <span className="text-body-medium text-text-primary block">
+                    Create Starter Payment Link
+                  </span>
+                  <span className="text-caption-2-regular text-text-secondary block">
+                    Generates a ready-to-share payment URL immediately on onboarding.
+                  </span>
+                </div>
+                <Switch
+                  size="md"
+                  isSelected={createStarterPaymentLink}
+                  onChange={setCreateStarterPaymentLink}
+                  aria-label="Create Starter Payment Link"
+                />
+              </div>
+
+              {createStarterPaymentLink && (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-separator-border">
+                  <Input
+                    label="Link Title (Optional)"
+                    placeholder="Quick Pay"
+                    value={starterLinkTitle}
+                    onChange={setStarterLinkTitle}
+                  />
+                  <Select
+                    label="Amount Mode"
+                    selectedKey={starterLinkAmountType}
+                    onSelectionChange={(key) => {
+                      if (key != null) setStarterLinkAmountType(String(key) as 'FIXED' | 'OPEN');
+                    }}
+                  >
+                    <SelectItem id="OPEN" textValue="Open (Buyer Enters)">
+                      Open (Buyer Enters)
+                    </SelectItem>
+                    <SelectItem id="FIXED" textValue="Fixed Amount">
+                      Fixed Amount
+                    </SelectItem>
+                  </Select>
+                  {starterLinkAmountType === 'FIXED' && (
+                    <Input
+                      label="Fixed Amount (BDT)"
+                      type="number"
+                      placeholder="500"
+                      value={starterLinkAmount}
+                      onChange={setStarterLinkAmount}
+                      inputClassName="font-mono tabular-nums"
+                      isRequired
+                    />
+                  )}
+                </div>
+              )}
+            </div>
 
             {/* Client Owner Account Provisioning */}
             <div className="p-4 rounded-2xl bg-background-secondary-default border border-separator-border space-y-3.5">

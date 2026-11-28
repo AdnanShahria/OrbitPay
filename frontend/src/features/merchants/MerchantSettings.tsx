@@ -161,6 +161,7 @@ export function MerchantSettings({
   const [merchantSlug, setMerchantSlug] = useState('');
   const [webhookUrl, setWebhookUrl] = useState('');
   const [gracePeriod, setGracePeriod] = useState(60);
+  const [ignoreStorefrontSync, setIgnoreStorefrontSync] = useState(false);
   const [verificationMode, setVerificationMode] = useState<VerificationMode>('AUTO');
   const [allowBaseAmountFallback, setAllowBaseAmountFallback] = useState(true);
   const [receiptPolicy, setReceiptPolicy] = useState<MerchantReceiptPolicy>('OFFLINE_OPTIONAL');
@@ -193,6 +194,7 @@ export function MerchantSettings({
       setMerchantSlug(merchant.slug || '');
       setWebhookUrl(merchant.webhookUrl);
       setGracePeriod(merchant.gracePeriodMinutes);
+      setIgnoreStorefrontSync(Boolean(merchant.ignoreStorefrontSync));
       setVerificationMode(merchant.verificationMode ?? 'AUTO');
       setAllowBaseAmountFallback(merchant.allowBaseAmountFallback ?? true);
       setReceiptPolicy(merchant.receiptPolicy ?? 'OFFLINE_OPTIONAL');
@@ -234,6 +236,7 @@ export function MerchantSettings({
         ...(merchantSlug.trim() ? { slug: merchantSlug.trim().toLowerCase() } : {}),
         webhookUrl,
         gracePeriodMinutes: Number(gracePeriod),
+        ignoreStorefrontSync,
         verificationMode,
         allowBaseAmountFallback,
         receiptPolicy,
@@ -392,10 +395,20 @@ export function MerchantSettings({
             <div className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-border-button-default bg-background-secondary-default text-foreground-icon-primary">
               <RiSettings3Line className="size-5" aria-hidden />
             </div>
-            <div className="space-y-0.5 min-w-0">
-              <h2 className="text-title-2-medium text-text-primary">
-                Storefront &amp; Webhook Settings
-              </h2>
+            <div className="space-y-1 min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-title-2-medium text-text-primary">
+                  Storefront &amp; Webhook Settings
+                </h2>
+                {merchant && (
+                  <Chip
+                    variant="caption"
+                    color={merchant.accountMode === 'STANDALONE' ? 'cyan' : 'lime'}
+                  >
+                    {merchant.accountMode === 'STANDALONE' ? 'Standalone' : 'Webhook-Connected'}
+                  </Chip>
+                )}
+              </div>
               <p className="text-body-regular text-text-secondary">
                 Verification engine, active modules, API credentials, and signed webhook delivery.
               </p>
@@ -602,6 +615,29 @@ export function MerchantSettings({
                     onChange={setLateSmsAutoApprove}
                   />
                 </div>
+              </div>
+
+              {/* Storefront Wallet Sync Preference */}
+              <div className="p-4 rounded-2xl border border-separator-border bg-background-secondary-default flex items-center justify-between gap-4">
+                <div className="space-y-0.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-body-medium text-text-primary">
+                      Storefront Wallet Sync (Ignore external listing pushes)
+                    </span>
+                    <Chip variant="caption" color={ignoreStorefrontSync ? 'cyan' : 'soft'}>
+                      {ignoreStorefrontSync ? 'Personal Hub only' : 'Sync enabled'}
+                    </Chip>
+                  </div>
+                  <span className="text-caption-1-regular text-text-secondary block">
+                    Ignore external storefront wallet listings and manage my numbers personally in ORBIT Hub.
+                  </span>
+                </div>
+                <Switch
+                  aria-label="Ignore external storefront wallet sync"
+                  isSelected={ignoreStorefrontSync}
+                  isDisabled={readOnlyLocked}
+                  onChange={setIgnoreStorefrontSync}
+                />
               </div>
 
               {/* Enabled Modules */}

@@ -1,11 +1,26 @@
 import { Hono } from 'hono';
+import type { AppDb } from '../../db/client';
 import type { AppContextEnv } from '../../shared/types';
 import {
   authenticateAdminJwt,
   authMasterAdminMiddleware,
   requireSuperAdminMiddleware,
   resolveMasterAdminKey,
+  safeWaitUntil,
 } from '../../shared/middleware';
+import { NotFoundError } from '../../shared/errors';
+import { emitMerchantRealtimeEvent } from '../realtime/realtime.service';
+import { createWalletSchema, updateWalletSchema } from '../wallets/wallets.schema';
+import {
+  createWallet,
+  updateWallet,
+  deleteWallet,
+  dispatchWalletSyncWebhook,
+} from '../wallets/wallets.service';
+import { createPaymentLinkSchema } from '../payment-links/payment-links.schema';
+import { createPaymentLink } from '../payment-links/payment-links.service';
+import { resolvePaymentSchema } from '../payments/payments.schema';
+import { resolvePaymentIntent, resolvePublicOrigin } from '../payments/payments.service';
 import { checkCoreTablesHealth, ensureRuntimeSchema } from '../../db/bootstrap';
 import {
   verifyAdminKeySchema,
@@ -320,7 +335,12 @@ router.post('/projects', requireAdminAuth, async (c) => {
   const body = await c.req.json();
   const input = createProjectSchema.parse(body);
 
-  const result = await createAdminProject(db, input, c.env.ENCRYPTION_PEPPER || '');
+  const result = await createAdminProject(
+    db,
+    input,
+    c.env.ENCRYPTION_PEPPER || '',
+    resolvePublicOrigin(c.req.url, c.env.PRODUCTION_DOMAIN)
+  );
   return c.json({ success: true, data: result }, 201);
 });
 
@@ -421,7 +441,11 @@ router.post('/seed-demo', requireAdminAuth, async (c) => {
   for (const p of demoProjects) {
     const existing = await db.select().from(merchants).where(eq(merchants.id, p.id)).limit(1);
     if (!existing[0]) {
-      const created = await createAdminProject(db, p, c.env.ENCRYPTION_PEPPER || '');
+      const created = await createAdminProject(
+        db,
+        createProjectSchema.parse(p),
+        c.env.ENCRYPTION_PEPPER || ''
+      );
       seeded.push(created);
     }
   }
@@ -476,6 +500,139 @@ router.delete('/sessions/:sessionId', requireAdminAuth, async (c) => {
   const db = c.get('db');
   const sessionId = c.req.param('sessionId');
   const result = await revokeAdminSession(db, sessionId);
+  return c.json({ success: true, data: result });
+});
+
+async function requireProjectMerchant(db: AppDb, projectId: string) {
+  const rows = await db.select().from(merchants).where(eq(merchants.id, projectId)).limit(1);
+  if (!rows[0]) {
+    throw new NotFoundError(`Project '${projectId}' not found`);
+  }
+  return rows[0];
+}
+
+/**
+ * POST /api/v1/admin/projects/:id/wallets
+ * Registers a new MFS wallet for a merchant project directly from Hub Admin.
+ */
+router.post('/projects/:id/wallets', requireAdminAuth, async (c) => {
+  const db = c.get('db');
+  const projectId = c.req.param('id');
+  const merchant = await requireProjectMerchant(db, projectId);
+  const body = await c.req.json();
+  const input = createWalletSchema.parse(body);
+
+  const created = await createWallet(db, merchant.id, input);
+  safeWaitUntil(c, dispatchWalletSyncWebhook(db, merchant, 'wallet.synced', c.env));
+  emitMerchantRealtimeEvent(
+    c.env,
+    'WALLET_SYNCED',
+    { merchantId: merchant.id, action: 'created' },
+    merchant.id,
+    c
+  );
+  return c.json({ success: true, data: created }, 201);
+});
+
+/**
+ * PATCH /api/v1/admin/projects/:id/wallets/:walletId
+ * Updates a merchant wallet number or status directly from Hub Admin.
+ */
+router.patch('/projects/:id/wallets/:walletId', requireAdminAuth, async (c) => {
+  const db = c.get('db');
+  const projectId = c.req.param('id');
+  const walletId = c.req.param('walletId');
+  const merchant = await requireProjectMerchant(db, projectId);
+  const body = await c.req.json();
+  const input = updateWalletSchema.parse(body);
+
+  const updated = await updateWallet(db, merchant.id, walletId, input);
+  safeWaitUntil(c, dispatchWalletSyncWebhook(db, merchant, 'wallet.synced', c.env));
+  emitMerchantRealtimeEvent(
+    c.env,
+    'WALLET_SYNCED',
+    { merchantId: merchant.id, action: 'updated' },
+    merchant.id,
+    c
+  );
+  return c.json({ success: true, data: updated });
+});
+
+/**
+ * DELETE /api/v1/admin/projects/:id/wallets/:walletId
+ * Deletes a wallet belonging to the specified merchant project.
+ */
+router.delete('/projects/:id/wallets/:walletId', requireAdminAuth, async (c) => {
+  const db = c.get('db');
+  const projectId = c.req.param('id');
+  const walletId = c.req.param('walletId');
+  const merchant = await requireProjectMerchant(db, projectId);
+
+  await deleteWallet(db, merchant.id, walletId);
+  safeWaitUntil(c, dispatchWalletSyncWebhook(db, merchant, 'wallet.synced', c.env));
+  emitMerchantRealtimeEvent(
+    c.env,
+    'WALLET_SYNCED',
+    { merchantId: merchant.id, action: 'deleted' },
+    merchant.id,
+    c
+  );
+  return c.json({ success: true, message: 'Wallet removed successfully' });
+});
+
+/**
+ * POST /api/v1/admin/projects/:id/payment-links
+ * Creates a hosted Payment Link for a merchant project directly from Hub Admin.
+ */
+router.post('/projects/:id/payment-links', requireAdminAuth, async (c) => {
+  const db = c.get('db');
+  const projectId = c.req.param('id');
+  const merchant = await requireProjectMerchant(db, projectId);
+  const body = await c.req.json();
+  const input = createPaymentLinkSchema.parse(body);
+  const origin = resolvePublicOrigin(c.req.url, c.env.PRODUCTION_DOMAIN);
+
+  const created = await createPaymentLink(db, merchant, input, origin);
+  emitMerchantRealtimeEvent(
+    c.env,
+    'PAYMENT_LINK_UPDATED',
+    { merchantId: merchant.id, action: 'created' },
+    merchant.id,
+    c
+  );
+  return c.json({ success: true, data: created }, 201);
+});
+
+/**
+ * POST /api/v1/admin/projects/:id/payments/:paymentIntentId/resolve
+ * Manually approves or rejects a pending payment intent for the specified merchant project.
+ */
+router.post('/projects/:id/payments/:paymentIntentId/resolve', requireAdminAuth, async (c) => {
+  const db = c.get('db');
+  const projectId = c.req.param('id');
+  const paymentIntentId = c.req.param('paymentIntentId');
+  const merchant = await requireProjectMerchant(db, projectId);
+  const body = await c.req.json();
+  const input = resolvePaymentSchema.parse(body);
+  const actor = extractAdminActor(c);
+
+  const result = await resolvePaymentIntent(
+    db,
+    c.env,
+    merchant,
+    paymentIntentId,
+    {
+      ...input,
+      resolutionSource: 'ORBIT_DASHBOARD',
+      resolvedBy: input.resolvedBy ?? {
+        id: actor.id ?? undefined,
+        email: actor.email ?? undefined,
+        role: 'MASTER_ADMIN',
+      },
+    },
+    { ctx: c }
+  );
+
   return c.json({ success: true, data: result });
 });
 

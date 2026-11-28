@@ -5,6 +5,7 @@ import {
   merchantUsers,
   authSessions,
   merchantDevices,
+  type AccountMode,
 } from '../../db/schema';
 import {
   verifyPassword,
@@ -42,6 +43,8 @@ export interface SafeMerchantView {
   fcmToken: string | null;
   lastSeenAt: Date | null;
   isActive: boolean;
+  accountMode: AccountMode;
+  ignoreStorefrontSync: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -69,6 +72,8 @@ function toSafeMerchant(m: typeof merchants.$inferSelect): SafeMerchantView {
     fcmToken: m.fcmToken,
     lastSeenAt: m.lastSeenAt,
     isActive: m.isActive,
+    accountMode: m.accountMode,
+    ignoreStorefrontSync: m.ignoreStorefrontSync,
     createdAt: m.createdAt,
     updatedAt: m.updatedAt,
   };

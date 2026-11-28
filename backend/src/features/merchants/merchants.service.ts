@@ -1,6 +1,6 @@
 import { and, desc, eq, sql } from 'drizzle-orm';
 import type { AppDb } from '../../db/client';
-import { merchants, webhookDeliveries, type MerchantRecord } from '../../db/schema';
+import { merchants, webhookDeliveries, type AccountMode, type MerchantRecord } from '../../db/schema';
 import {
   generateDeviceApiKey,
   generateMerchantApiKey,
@@ -36,6 +36,8 @@ export interface SafeMerchantProfile {
   fcmToken: string | null;
   lastSeenAt: Date | null;
   isActive: boolean;
+  accountMode: AccountMode;
+  ignoreStorefrontSync: boolean;
   verificationMode: string;
   allowBaseAmountFallback: boolean;
   receiptPolicy: string;
@@ -101,6 +103,8 @@ function toSafeMerchantProfile(m: MerchantRecord): SafeMerchantProfile {
     fcmToken: m.fcmToken,
     lastSeenAt: m.lastSeenAt,
     isActive: m.isActive,
+    accountMode: m.accountMode,
+    ignoreStorefrontSync: m.ignoreStorefrontSync,
     verificationMode: m.verificationMode,
     allowBaseAmountFallback: m.allowBaseAmountFallback,
     receiptPolicy: m.receiptPolicy,
@@ -189,6 +193,12 @@ export async function updateMerchantSettings(
       ...(settings.webhookUrl !== undefined && { webhookUrl: settings.webhookUrl }),
       ...(settings.gracePeriodMinutes !== undefined && {
         gracePeriodMinutes: settings.gracePeriodMinutes,
+      }),
+      ...(settings.accountMode !== undefined && {
+        accountMode: settings.accountMode,
+      }),
+      ...(settings.ignoreStorefrontSync !== undefined && {
+        ignoreStorefrontSync: settings.ignoreStorefrontSync,
       }),
       ...(settings.verificationMode !== undefined && {
         verificationMode: settings.verificationMode,

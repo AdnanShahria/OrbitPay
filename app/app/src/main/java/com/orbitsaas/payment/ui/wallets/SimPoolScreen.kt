@@ -26,6 +26,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SimCard
 import androidx.compose.material.icons.filled.Star
@@ -101,6 +102,14 @@ fun SimPoolScreen(
         isPrimary: Boolean,
         onDone: (Boolean) -> Unit
     ) -> Unit,
+    onUpdateWallet: (
+        walletId: String,
+        walletNumber: String,
+        accountType: String,
+        label: String?,
+        isPrimary: Boolean,
+        onDone: (Boolean) -> Unit
+    ) -> Unit,
     onToggleActive: (walletId: String, isActive: Boolean) -> Unit,
     onSetPrimary: (walletId: String) -> Unit,
     onDeleteWallet: (walletId: String) -> Unit,
@@ -108,6 +117,7 @@ fun SimPoolScreen(
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     var showAddDialog by remember { mutableStateOf(false) }
+    var editingWallet by remember { mutableStateOf<WalletRotationDto?>(null) }
     var pendingDeleteWallet by remember { mutableStateOf<WalletRotationDto?>(null) }
 
     LaunchedEffect(state.feedbackMessage) {
@@ -211,6 +221,7 @@ fun SimPoolScreen(
                         isMutating = state.isWalletMutating,
                         onToggleActive = { active -> onToggleActive(wallet.id, active) },
                         onSetPrimary = { onSetPrimary(wallet.id) },
+                        onEditClick = { editingWallet = wallet },
                         onDeleteClick = { pendingDeleteWallet = wallet }
                     )
                 }
@@ -225,6 +236,19 @@ fun SimPoolScreen(
             onAdd = { provider, number, accountType, label, slotIdx, isPrimary ->
                 onCreateWallet(provider, number, accountType, label, slotIdx, isPrimary) { ok ->
                     if (ok) showAddDialog = false
+                }
+            }
+        )
+    }
+
+    editingWallet?.let { wallet ->
+        EditSimWalletDialog(
+            wallet = wallet,
+            isSubmitting = state.isWalletMutating,
+            onDismiss = { if (!state.isWalletMutating) editingWallet = null },
+            onSave = { number, accountType, label, isPrimary ->
+                onUpdateWallet(wallet.id, number, accountType, label, isPrimary) { ok ->
+                    if (ok) editingWallet = null
                 }
             }
         )
@@ -321,6 +345,7 @@ private fun SimPoolWalletCard(
     isMutating: Boolean,
     onToggleActive: (Boolean) -> Unit,
     onSetPrimary: () -> Unit,
+    onEditClick: () -> Unit,
     onDeleteClick: () -> Unit
 ) {
     val cardShape = RoundedCornerShape(16.dp)
@@ -479,7 +504,8 @@ private fun SimPoolWalletCard(
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 OutlinedButton(
                     onClick = onSetPrimary,
@@ -488,6 +514,7 @@ private fun SimPoolWalletCard(
                         .weight(1f)
                         .heightIn(min = 48.dp),
                     shape = RoundedCornerShape(12.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
                 ) {
                     Icon(
@@ -502,7 +529,30 @@ private fun SimPoolWalletCard(
                         } else {
                             stringResource(R.string.sim_pool_make_primary)
                         },
-                        style = MaterialTheme.typography.labelLarge
+                        style = MaterialTheme.typography.labelLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                OutlinedButton(
+                    onClick = onEditClick,
+                    enabled = !isMutating,
+                    modifier = Modifier.heightIn(min = 48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Edit,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.size(6.dp))
+                    Text(
+                        text = stringResource(R.string.sim_pool_edit_button),
+                        style = MaterialTheme.typography.labelLarge,
+                        maxLines = 1
                     )
                 }
 
@@ -587,7 +637,7 @@ private fun AddSimWalletDialog(
     ) -> Unit
 ) {
     val providers = listOf("BKASH", "NAGAD", "ROCKET", "UPAY", "CELLFIN")
-    val accountTypes = listOf("PERSONAL", "AGENT", "MERCHANT")
+    val accountTypes = listOf("PERSONAL", "PRA", "MERCHANT")
     var selectedProvider by remember { mutableStateOf("BKASH") }
     var selectedAccountType by remember { mutableStateOf("PERSONAL") }
     var number by remember { mutableStateOf("") }
@@ -711,6 +761,138 @@ private fun AddSimWalletDialog(
                     )
                 } else {
                     Text(stringResource(R.string.sim_pool_add_submit))
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                enabled = !isSubmitting,
+                modifier = Modifier.heightIn(min = 48.dp)
+            ) {
+                Text(stringResource(R.string.common_cancel))
+            }
+        }
+    )
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun EditSimWalletDialog(
+    wallet: WalletRotationDto,
+    isSubmitting: Boolean,
+    onDismiss: () -> Unit,
+    onSave: (
+        walletNumber: String,
+        accountType: String,
+        label: String?,
+        isPrimary: Boolean
+    ) -> Unit
+) {
+    val accountTypes = listOf("PERSONAL", "PRA", "MERCHANT")
+    val initialType = when (wallet.accountType.uppercase(Locale.US)) {
+        "AGENT", "PRA" -> "PRA"
+        "MERCHANT" -> "MERCHANT"
+        else -> "PERSONAL"
+    }
+    var number by remember(wallet.id) { mutableStateOf(wallet.walletNumber) }
+    var selectedAccountType by remember(wallet.id) { mutableStateOf(initialType) }
+    var label by remember(wallet.id) { mutableStateOf(wallet.label.orEmpty()) }
+    var isPrimary by remember(wallet.id) { mutableStateOf(wallet.isPrimary) }
+    var localError by remember { mutableStateOf<String?>(null) }
+
+    val invalidNumberMsg = stringResource(R.string.diag_sim_invalid_number)
+    val fieldColors = OutlinedTextFieldDefaults.colors(
+        focusedBorderColor = MaterialTheme.colorScheme.primary,
+        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant
+    )
+
+    AlertDialog(
+        onDismissRequest = { if (!isSubmitting) onDismiss() },
+        containerColor = MaterialTheme.colorScheme.surface,
+        title = {
+            Text(
+                text = stringResource(R.string.sim_pool_edit_title, providerDisplayName(wallet.provider)),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = number,
+                    onValueChange = {
+                        number = it
+                        localError = null
+                    },
+                    label = { Text(stringResource(R.string.diag_preflight_sim_dialog_label)) },
+                    placeholder = { Text(stringResource(R.string.diag_preflight_sim_dialog_placeholder)) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = fieldColors,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    accountTypes.forEach { t ->
+                        FilterChip(
+                            selected = selectedAccountType == t,
+                            onClick = { selectedAccountType = t },
+                            label = { Text(t) }
+                        )
+                    }
+                }
+
+                FilterChip(
+                    selected = isPrimary,
+                    onClick = { isPrimary = !isPrimary },
+                    label = { Text(stringResource(R.string.sim_pool_primary_badge)) }
+                )
+
+                OutlinedTextField(
+                    value = label,
+                    onValueChange = { label = it },
+                    label = { Text(stringResource(R.string.sim_pool_field_label)) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = fieldColors,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                localError?.let { err ->
+                    Text(
+                        text = err,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = OrbitSemanticColors.statusRed
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val clean = number.replace(Regex("[^0-9]"), "")
+                    if (!clean.matches(Regex("^01[3-9]\\d{8,9}$"))) {
+                        localError = invalidNumberMsg
+                        return@Button
+                    }
+                    onSave(clean, selectedAccountType, label.ifBlank { null }, isPrimary)
+                },
+                enabled = !isSubmitting,
+                modifier = Modifier.heightIn(min = 48.dp),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                if (isSubmitting) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                } else {
+                    Text(stringResource(R.string.sim_pool_edit_submit))
                 }
             }
         },

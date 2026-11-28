@@ -30,6 +30,15 @@ export const paymentActionSchema = z.object({
   webhookEvent: z.string().trim().max(100).optional(),
 });
 
+const isHttpOrHttpsUrl = (value: string): boolean => {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+  } catch {
+    return false;
+  }
+};
+
 export const createPaymentIntentSchema = z.object({
   externalRefId: z.string().trim().min(1, 'externalRefId is required').max(128),
   vertical: z.enum(VERTICAL_PROFILES).optional().default('ecommerce'),
@@ -37,9 +46,24 @@ export const createPaymentIntentSchema = z.object({
   currency: z.string().trim().min(3).max(8).optional().default('BDT'),
   provider: z.enum(MFS_PROVIDERS).optional(),
   verificationMode: z.enum(VERIFICATION_MODES).optional(),
-  callbackUrl: z.union([z.string().trim().url(), z.literal('')]).optional(),
-  returnUrl: z.union([z.string().trim().url(), z.literal('')]).optional(),
-  cancelUrl: z.union([z.string().trim().url(), z.literal('')]).optional(),
+  callbackUrl: z
+    .union([
+      z.string().trim().url().refine(isHttpOrHttpsUrl, 'URL must use http:// or https://'),
+      z.literal(''),
+    ])
+    .optional(),
+  returnUrl: z
+    .union([
+      z.string().trim().url().refine(isHttpOrHttpsUrl, 'URL must use http:// or https://'),
+      z.literal(''),
+    ])
+    .optional(),
+  cancelUrl: z
+    .union([
+      z.string().trim().url().refine(isHttpOrHttpsUrl, 'URL must use http:// or https://'),
+      z.literal(''),
+    ])
+    .optional(),
   expiresInMinutes: z.number().int().min(5).max(120).optional().default(15),
   customer: z
     .object({

@@ -330,12 +330,22 @@ export function PollingStatus({
 
   const canEditTrx = Boolean(onEditSubmission) && submitAttempts < maxSubmitAttempts;
 
+  const isSafeRedirectUrl = (raw?: string | null): raw is string => {
+    if (!raw) return false;
+    try {
+      const parsed = new URL(raw, window.location.origin);
+      return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+    } catch {
+      return false;
+    }
+  };
+
   const handleContinue = () => {
     if (onClose) {
       onClose();
       return;
     }
-    if (returnUrl) {
+    if (isSafeRedirectUrl(returnUrl)) {
       window.location.assign(returnUrl);
     }
   };
@@ -489,13 +499,13 @@ export function PollingStatus({
               Edit Details &amp; Retry
             </Button>
           )}
-          {(onClose || cancelUrl) && (
+          {(onClose || isSafeRedirectUrl(cancelUrl)) && (
             <Button
               variant="secondary"
               size="medium"
               onClick={() => {
                 if (onClose) onClose();
-                else if (cancelUrl) window.location.assign(cancelUrl);
+                else if (isSafeRedirectUrl(cancelUrl)) window.location.assign(cancelUrl);
               }}
               className="w-full sm:flex-1 min-h-11"
             >

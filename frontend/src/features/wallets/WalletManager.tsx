@@ -7,6 +7,7 @@ import {
   type Wallet,
   type WalletRotationState,
 } from './useWallets';
+import { useMerchant } from '@/features/merchants/useMerchant';
 import { VolumeProgressBar } from './VolumeProgressBar';
 import { AddWalletDialog } from './AddWalletDialog';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/base/card/card';
@@ -24,6 +25,7 @@ import {
   RiSmartphoneLine,
   RiFileCopyLine,
   RiCheckLine,
+  RiEditLine,
   RiStarFill,
   RiStarLine,
   RiFlashlightLine,
@@ -97,9 +99,11 @@ function RotationStateBadge({ state }: { state: WalletRotationState }) {
 
 export function WalletManager() {
   const [isAddOpen, setIsAddOpen] = useState(false);
+  const [editingWallet, setEditingWallet] = useState<Wallet | null>(null);
   const [copiedNumber, setCopiedNumber] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
+  const { data: merchantProfile } = useMerchant();
   const { data: overview, isLoading } = useWalletsOverview();
   const toggleMutation = useToggleWalletStatusMutation();
   const setPrimaryMutation = useSetPrimaryWalletMutation();
@@ -115,6 +119,9 @@ export function WalletManager() {
   ).length;
   const hasPlaceholderWallets = placeholderWallets.length > 0;
   const showReadinessWarning = !isLoading && (activeRealWalletCount === 0 || hasPlaceholderWallets);
+  const isWebhookSyncing =
+    merchantProfile?.accountMode === 'WEBHOOK_CONNECTED' &&
+    !merchantProfile?.ignoreStorefrontSync;
 
   const handleCopy = (num: string) => {
     navigator.clipboard.writeText(num);
@@ -183,10 +190,17 @@ export function WalletManager() {
             <div className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-border-button-default bg-background-secondary-default text-foreground-icon-primary">
               <RiSmartphoneLine className="size-5" aria-hidden />
             </div>
-            <div className="space-y-0.5 min-w-0">
-              <h2 className="text-title-2-medium text-text-primary">
-                MFS SIM Rotation Pool
-              </h2>
+            <div className="space-y-1 min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-title-2-medium text-text-primary">
+                  MFS SIM Rotation Pool
+                </h2>
+                {merchantProfile && (
+                  <Chip variant="caption" color={isWebhookSyncing ? 'cyan' : 'soft'}>
+                    {isWebhookSyncing ? 'Syncs with connected website' : 'Personal Hub setup'}
+                  </Chip>
+                )}
+              </div>
               <p className="text-body-regular text-text-secondary">
                 Automatic standby rotation across bKash, Nagad, Rocket, Upay, and Cellfin at ৳250k safe / ৳300k hard cap.
               </p>
@@ -196,7 +210,10 @@ export function WalletManager() {
           <Button
             variant="primary"
             size="small"
-            onClick={() => setIsAddOpen(true)}
+            onClick={() => {
+              setEditingWallet(null);
+              setIsAddOpen(true);
+            }}
             leadingIcon={RiAddLine}
             className="min-h-11 sm:min-h-10 shrink-0"
           >
@@ -303,28 +320,32 @@ export function WalletManager() {
 
       {showReadinessWarning && (
         <Notification
-          status="error"
+          status={hasPlaceholderWallets ? 'error' : 'information'}
           icon={RiErrorWarningLine}
           dismissible={false}
           title={
-            activeRealWalletCount === 0 && hasPlaceholderWallets
-              ? 'Placeholder SIM wallets detected — no active real MFS numbers'
-              : activeRealWalletCount === 0
-                ? 'No active MFS SIM wallets'
+            hasPlaceholderWallets
+              ? activeRealWalletCount === 0
+                ? 'Placeholder SIM wallets detected — no active real MFS numbers'
                 : 'Placeholder SIM wallet detected'
+              : 'Add your MFS receiving number'
           }
           description={
             hasPlaceholderWallets
-              ? 'Placeholder numbers (01700000000 / 01800000000) cannot receive payments. Add or activate your real MFS SIM numbers here, or save Payment Gateways in your connected storefront to sync automatically.'
-              : 'Activate an existing SIM below, add a new SIM, or save Payment Gateways in your connected storefront so checkout can display a live payment number.'
+              ? 'Placeholder numbers (01700000000 / 01800000000) cannot receive payments. Edit or replace them with your real MFS SIM numbers to start receiving payments.'
+              : 'Add your MFS receiving number to activate Payment Links & checkout.'
           }
           actions={[
             {
-              label: 'Add real SIM',
-              onClick: () => setIsAddOpen(true),
+              label: hasPlaceholderWallets ? 'Add real SIM' : 'Add MFS number',
+              onClick: () => {
+                setEditingWallet(null);
+                setIsAddOpen(true);
+              },
               variant: 'primary',
             },
           ]}
+          className={hasPlaceholderWallets ? undefined : 'shadow-none'}
         />
       )}
 
@@ -337,7 +358,7 @@ export function WalletManager() {
         ) : wallets.length === 0 ? (
           <Card className="col-span-full border-dashed">
             <CardContent className="py-12 text-center text-body-regular text-text-secondary">
-              No SIM numbers registered yet. Click &ldquo;Add new SIM&rdquo; to configure your first MFS number.
+              Add your MFS receiving number to activate Payment Links &amp; checkout.
             </CardContent>
           </Card>
         ) : (
@@ -443,19 +464,33 @@ export function WalletManager() {
                     <span className="font-mono text-title-3-semibold text-text-primary tabular-nums tnum">
                       {wallet.walletNumber}
                     </span>
-                    <Button
-                      variant="ghost"
-                      size="xs"
-                      iconOnly
-                      leadingIcon={copiedNumber === wallet.walletNumber ? RiCheckLine : RiFileCopyLine}
-                      aria-label={`Copy ${wallet.walletNumber}`}
-                      onClick={() => handleCopy(wallet.walletNumber)}
-                      className={
-                        copiedNumber === wallet.walletNumber
-                          ? 'text-notification-success-foreground'
-                          : 'text-foreground-icon-secondary'
-                      }
-                    />
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        iconOnly
+                        leadingIcon={RiEditLine}
+                        aria-label={`Edit ${wallet.walletNumber}`}
+                        onClick={() => {
+                          setEditingWallet(wallet);
+                          setIsAddOpen(true);
+                        }}
+                        className="text-foreground-icon-secondary"
+                      />
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        iconOnly
+                        leadingIcon={copiedNumber === wallet.walletNumber ? RiCheckLine : RiFileCopyLine}
+                        aria-label={`Copy ${wallet.walletNumber}`}
+                        onClick={() => handleCopy(wallet.walletNumber)}
+                        className={
+                          copiedNumber === wallet.walletNumber
+                            ? 'text-notification-success-foreground'
+                            : 'text-foreground-icon-secondary'
+                        }
+                      />
+                    </div>
                   </div>
 
                   {/* Volume Quota Progress */}
@@ -470,6 +505,20 @@ export function WalletManager() {
                     <RotationStateBadge state={rotationState} />
 
                     <div className="flex items-center gap-1.5">
+                      {!isConfirmingDelete && (
+                        <Button
+                          variant="secondary"
+                          size="xs"
+                          leadingIcon={RiEditLine}
+                          onClick={() => {
+                            setEditingWallet(wallet);
+                            setIsAddOpen(true);
+                          }}
+                        >
+                          Edit
+                        </Button>
+                      )}
+
                       {canSetPrimary && !isConfirmingDelete && (
                         <Button
                           variant="secondary"
@@ -521,7 +570,14 @@ export function WalletManager() {
         )}
       </div>
 
-      <AddWalletDialog isOpen={isAddOpen} onClose={() => setIsAddOpen(false)} />
+      <AddWalletDialog
+        isOpen={isAddOpen}
+        onClose={() => {
+          setIsAddOpen(false);
+          setEditingWallet(null);
+        }}
+        walletToEdit={editingWallet}
+      />
     </div>
   );
 }

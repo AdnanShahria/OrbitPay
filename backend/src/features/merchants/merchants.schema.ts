@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { RECEIPT_POLICIES, VERIFICATION_MODES } from '../../db/schema';
+import { ACCOUNT_MODES, RECEIPT_POLICIES, VERIFICATION_MODES } from '../../db/schema';
 
 const optionalWebhookUrl = z
   .union([z.string().trim().url('Must be a valid HTTP/HTTPS URL'), z.literal('')])
@@ -17,6 +17,8 @@ export const updateMerchantSettingsSchema = z.object({
     .optional(),
   webhookUrl: optionalWebhookUrl,
   gracePeriodMinutes: z.number().int().min(5).max(1440).optional(),
+  accountMode: z.enum(ACCOUNT_MODES).optional(),
+  ignoreStorefrontSync: z.boolean().optional(),
   verificationMode: z.enum(VERIFICATION_MODES).optional(),
   allowBaseAmountFallback: z.boolean().optional(),
   receiptPolicy: z.enum(RECEIPT_POLICIES).optional(),

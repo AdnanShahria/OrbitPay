@@ -169,4 +169,19 @@
     <string name="diag_parser_result_rejected_provider">Provider: %1$s</string>
     <string name="diag_parser_result_not_payment">NotPayment · Does not match an incoming MFS credit SMS</string>
     <string name="diag_parser_hint_enter">Enter sample SMS text above to inspect the live parse result.</string>
+
+    <!-- SIM Pool Edit & Dual-Mode Diagnostics -->
+    <string name="sim_pool_edit_button">Edit</string>
+    <string name="sim_pool_edit_title">Edit %1$s Number</string>
+    <string name="sim_pool_edit_submit">Save Changes</string>
+    <string name="diag_preflight_mode_standalone">Mode: Standalone</string>
+    <string name="diag_preflight_sims_optional_hint">Optional quick-fill reference · Personal or external SIM numbers are always allowed</string>
+    <string name="diag_preflight_sim_copy">Copy</string>
+    <string name="diag_preflight_sim_copied">Copied %1$s</string>
+    <string name="diag_preflight_wallets_title">Configured Receiving Wallets</string>
+    <string name="diag_preflight_wallets_empty">No receiving MFS numbers configured yet. Add your bKash, Nagad, Rocket, or Upay number in SIM Pool.</string>
+    <string name="diag_preflight_wallet_ready">Ready</string>
+    <string name="diag_preflight_wallet_paused">Paused</string>
+    <string name="diag_preflight_wallet_placeholder">Placeholder</string>
+    <string name="diag_preflight_manage_wallets_button">Manage / Add MFS Numbers</string>
 </resources>

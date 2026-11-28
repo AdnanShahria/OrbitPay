@@ -29,8 +29,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.ExpandLess
@@ -70,14 +72,17 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -89,8 +94,9 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.orbitsaas.payment.R
 import com.orbitsaas.payment.data.local.BlockedMessageEntity
-import com.orbitsaas.payment.data.remote.PreflightProfileMatchDto
+import com.orbitsaas.payment.data.remote.PreflightWalletDto
 import com.orbitsaas.payment.interceptors.parsers.ParseOutcome
+import kotlinx.coroutines.launch
 import com.orbitsaas.payment.service.WsPushState
 import com.orbitsaas.payment.ui.components.ProviderDot
 import com.orbitsaas.payment.ui.components.StatusPill
@@ -122,10 +128,13 @@ private data class SimDialogTarget(
 @Composable
 fun DiagnosticsScreen(
     viewModel: DiagnosticsViewModel = viewModel(),
-    onBackClick: (() -> Unit)? = null
+    onBackClick: (() -> Unit)? = null,
+    onOpenSimPool: (() -> Unit)? = null
 ) {
     val state by viewModel.uiState.collectAsState()
     val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
+    val coroutineScope = rememberCoroutineScope()
     val lifecycleOwner = LocalLifecycleOwner.current
     val snackbarHostState = remember { SnackbarHostState() }
     var blockedExpanded by rememberSaveable { mutableStateOf(false) }
@@ -226,6 +235,15 @@ fun DiagnosticsScreen(
                             initialNumber = existingNumber.orEmpty()
                         )
                     },
+                    onCopySimNumber = { number ->
+                        clipboardManager.setText(AnnotatedString(number))
+                        coroutineScope.launch {
+                            snackbarHostState.showSnackbar(
+                                context.getString(R.string.diag_preflight_sim_copied, number)
+                            )
+                        }
+                    },
+                    onOpenSimPool = onOpenSimPool,
                     onRunFullCheck = { viewModel.runFullSystemCheck() }
                 )
             }
@@ -319,11 +337,14 @@ private fun SystemAndNumberProfileCard(
     state: DiagnosticsUiState,
     onGrantSimPermission: () -> Unit,
     onConfirmSimClick: (slotIndex: Int, carrierName: String, existingNumber: String?) -> Unit,
+    onCopySimNumber: (String) -> Unit,
+    onOpenSimPool: (() -> Unit)?,
     onRunFullCheck: () -> Unit
 ) {
     val cardShape = RoundedCornerShape(20.dp)
     val preflight = state.preflight
     val overallStatus = preflight?.overallStatus?.uppercase(Locale.US)
+    val isStandaloneMode = preflight?.merchant?.accountMode?.equals("STANDALONE", ignoreCase = true) == true
 
     val (statusLabel, statusFg, statusBg) = when (overallStatus) {
         "READY" -> Triple(
@@ -404,7 +425,7 @@ private fun SystemAndNumberProfileCard(
                 )
             }
 
-            // Verification Mode + Storefront Webhook Badges
+            // Verification Mode + Account Mode / Storefront Webhook Badges
             if (preflight != null) {
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -419,21 +440,31 @@ private fun SystemAndNumberProfileCard(
                         background = if (isAutoMode) MaterialTheme.colorScheme.surfaceVariant else StatusAmberBg
                     )
 
-                    StatusPill(
-                        label = stringResource(
-                            if (preflight.merchant.webhookConfigured) {
-                                R.string.diag_preflight_webhook_ok
+                    if (isStandaloneMode) {
+                        StatusPill(
+                            label = stringResource(R.string.diag_preflight_mode_standalone),
+                            foreground = MaterialTheme.colorScheme.primary,
+                            background = MaterialTheme.colorScheme.surfaceVariant
+                        )
+                    }
+
+                    if (!isStandaloneMode || preflight.merchant.webhookConfigured) {
+                        StatusPill(
+                            label = stringResource(
+                                if (preflight.merchant.webhookConfigured) {
+                                    R.string.diag_preflight_webhook_ok
+                                } else {
+                                    R.string.diag_preflight_webhook_missing
+                                }
+                            ),
+                            foreground = if (preflight.merchant.webhookConfigured) {
+                                OrbitSemanticColors.statusGreen
                             } else {
-                                R.string.diag_preflight_webhook_missing
-                            }
-                        ),
-                        foreground = if (preflight.merchant.webhookConfigured) {
-                            OrbitSemanticColors.statusGreen
-                        } else {
-                            OrbitSemanticColors.statusAmber
-                        },
-                        background = if (preflight.merchant.webhookConfigured) StatusGreenBg else StatusAmberBg
-                    )
+                                OrbitSemanticColors.statusAmber
+                            },
+                            background = if (preflight.merchant.webhookConfigured) StatusGreenBg else StatusAmberBg
+                        )
+                    }
                 }
 
                 if (!preflight.merchant.webhookUrl.isNullOrBlank()) {
@@ -479,27 +510,39 @@ private fun SystemAndNumberProfileCard(
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f))
 
-            // Detected / Confirmed Phone SIMs
+            // Detected / Confirmed Phone SIMs (Optional quick-reference helper)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.SimCard,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(18.dp)
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.SimCard,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = stringResource(R.string.diag_preflight_sims_title),
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
                     Text(
-                        text = stringResource(R.string.diag_preflight_sims_title),
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface
+                        text = stringResource(R.string.diag_preflight_sims_optional_hint),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
 
@@ -561,13 +604,16 @@ private fun SystemAndNumberProfileCard(
                             slot = slot,
                             onConfirmClick = {
                                 onConfirmSimClick(slot.slotIndex, slot.carrierName, slot.phoneNumber)
+                            },
+                            onCopyClick = {
+                                slot.phoneNumber?.let(onCopySimNumber)
                             }
                         )
                     }
                 }
             }
 
-            // Number Profile Match Rows
+            // Configured Receiving Wallets (non-blocking)
             if (preflight != null) {
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f))
 
@@ -576,34 +622,63 @@ private fun SystemAndNumberProfileCard(
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.VerifiedUser,
+                        imageVector = Icons.Default.AccountBalanceWallet,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(18.dp)
                     )
                     Text(
-                        text = stringResource(R.string.diag_preflight_matches_title),
+                        text = stringResource(R.string.diag_preflight_wallets_title),
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                 }
 
-                if (preflight.profileMatches.isEmpty()) {
+                if (preflight.wallets.isEmpty()) {
                     Text(
-                        text = stringResource(R.string.diag_preflight_matches_empty),
+                        text = stringResource(R.string.diag_preflight_wallets_empty),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        preflight.profileMatches.forEach { match ->
-                            ProfileMatchRow(match = match)
+                        preflight.wallets.forEach { wallet ->
+                            ConfiguredWalletRow(wallet = wallet)
                         }
                     }
                 }
 
-                if (preflight.recommendations.isNotEmpty()) {
+                if (onOpenSimPool != null) {
+                    OutlinedButton(
+                        onClick = onOpenSimPool,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AccountBalanceWallet,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.size(8.dp))
+                        Text(
+                            text = stringResource(R.string.diag_preflight_manage_wallets_button),
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+
+                val visibleRecommendations = preflight.recommendations.filterNot { rec ->
+                    (isStandaloneMode && rec.contains("webhook", ignoreCase = true)) ||
+                        rec.contains("mismatch", ignoreCase = true) ||
+                        rec.contains("sim_number_unavailable", ignoreCase = true)
+                }
+
+                if (visibleRecommendations.isNotEmpty()) {
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -621,7 +696,7 @@ private fun SystemAndNumberProfileCard(
                                 fontWeight = FontWeight.SemiBold,
                                 color = OrbitSemanticColors.statusAmber
                             )
-                            preflight.recommendations.forEach { rec ->
+                            visibleRecommendations.forEach { rec ->
                                 Row(
                                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                                     verticalAlignment = Alignment.Top
@@ -704,7 +779,8 @@ private fun SystemAndNumberProfileCard(
 @Composable
 private fun SimSlotRow(
     slot: SimSlotInfo,
-    onConfirmClick: () -> Unit
+    onConfirmClick: () -> Unit,
+    onCopyClick: () -> Unit
 ) {
     val sourceLabel = when (slot.source) {
         SimNumberSource.HARDWARE -> stringResource(R.string.diag_preflight_sim_source_hardware)
@@ -749,7 +825,7 @@ private fun SimSlotRow(
                         color = if (slot.phoneNumber != null) {
                             MaterialTheme.colorScheme.onSurface
                         } else {
-                            OrbitSemanticColors.statusAmber
+                            MaterialTheme.colorScheme.onSurfaceVariant
                         }
                     )
                     StatusPill(
@@ -757,43 +833,58 @@ private fun SimSlotRow(
                         foreground = when (slot.source) {
                             SimNumberSource.HARDWARE -> OrbitSemanticColors.statusGreen
                             SimNumberSource.CONFIRMED -> MaterialTheme.colorScheme.primary
-                            SimNumberSource.HIDDEN -> OrbitSemanticColors.statusAmber
+                            SimNumberSource.HIDDEN -> OrbitSemanticColors.statusGray
                         },
                         background = when (slot.source) {
                             SimNumberSource.HARDWARE -> StatusGreenBg
                             SimNumberSource.CONFIRMED -> MaterialTheme.colorScheme.surface
-                            SimNumberSource.HIDDEN -> StatusAmberBg
+                            SimNumberSource.HIDDEN -> StatusGrayBg
                         }
                     )
                 }
             }
 
-            if (slot.phoneNumber == null || slot.source == SimNumberSource.CONFIRMED) {
-                OutlinedButton(
-                    onClick = onConfirmClick,
-                    modifier = Modifier.heightIn(min = 48.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
-                ) {
-                    if (slot.source == SimNumberSource.CONFIRMED) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (slot.phoneNumber != null) {
+                    IconButton(
+                        onClick = onCopyClick,
+                        modifier = Modifier.size(48.dp)
+                    ) {
                         Icon(
-                            imageVector = Icons.Default.Edit,
-                            contentDescription = null,
-                            modifier = Modifier.size(14.dp)
+                            imageVector = Icons.Default.ContentCopy,
+                            contentDescription = stringResource(R.string.diag_preflight_sim_copy),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
                         )
-                        Spacer(modifier = Modifier.size(4.dp))
                     }
-                    Text(
-                        text = stringResource(
-                            if (slot.phoneNumber == null) {
-                                R.string.diag_preflight_sim_set_number
-                            } else {
-                                R.string.diag_preflight_sim_edit_number
-                            }
-                        ),
-                        style = MaterialTheme.typography.labelLarge
-                    )
+                }
+                if (slot.phoneNumber == null || slot.source == SimNumberSource.CONFIRMED) {
+                    OutlinedButton(
+                        onClick = onConfirmClick,
+                        modifier = Modifier.heightIn(min = 48.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                    ) {
+                        if (slot.source == SimNumberSource.CONFIRMED) {
+                            Icon(
+                                imageVector = Icons.Default.Edit,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.size(4.dp))
+                        }
+                        Text(
+                            text = stringResource(
+                                if (slot.phoneNumber == null) {
+                                    R.string.diag_preflight_sim_set_number
+                                } else {
+                                    R.string.diag_preflight_sim_edit_number
+                                }
+                            ),
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
                 }
             }
         }
@@ -801,35 +892,20 @@ private fun SimSlotRow(
 }
 
 @Composable
-private fun ProfileMatchRow(match: PreflightProfileMatchDto) {
-    val normalizedStatus = match.status.uppercase(Locale.US)
-    val (pillLabel, pillFg, pillBg) = when (normalizedStatus) {
-        "MATCHED" -> Triple(
-            if (match.matchedSimSlot != null) {
-                stringResource(R.string.diag_preflight_match_matched_slot, match.matchedSimSlot)
-            } else {
-                stringResource(R.string.diag_preflight_match_matched)
-            },
-            OrbitSemanticColors.statusGreen,
-            StatusGreenBg
-        )
-        "MISMATCH" -> Triple(
-            stringResource(R.string.diag_preflight_match_mismatch),
-            OrbitSemanticColors.statusRed,
-            StatusRedBg
-        )
-        "PLACEHOLDER_NUMBER" -> Triple(
-            stringResource(R.string.diag_preflight_match_placeholder),
-            OrbitSemanticColors.statusRed,
-            StatusRedBg
-        )
-        "SIM_NUMBER_UNAVAILABLE" -> Triple(
-            stringResource(R.string.diag_preflight_match_sim_hidden),
+private fun ConfiguredWalletRow(wallet: PreflightWalletDto) {
+    val (pillLabel, pillFg, pillBg) = when {
+        wallet.isPlaceholder -> Triple(
+            stringResource(R.string.diag_preflight_wallet_placeholder),
             OrbitSemanticColors.statusAmber,
             StatusAmberBg
         )
+        wallet.isActive -> Triple(
+            stringResource(R.string.diag_preflight_wallet_ready),
+            OrbitSemanticColors.statusGreen,
+            StatusGreenBg
+        )
         else -> Triple(
-            normalizedStatus.replace("_", " "),
+            stringResource(R.string.diag_preflight_wallet_paused),
             OrbitSemanticColors.statusGray,
             StatusGrayBg
         )
@@ -858,15 +934,15 @@ private fun ProfileMatchRow(match: PreflightProfileMatchDto) {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    ProviderDot(provider = match.provider, size = 9.dp)
+                    ProviderDot(provider = wallet.provider, size = 9.dp)
                     Text(
-                        text = providerDisplayName(match.provider),
+                        text = providerDisplayName(wallet.provider),
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = match.walletNumber,
+                        text = wallet.walletNumber,
                         style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum"),
                         fontFamily = FontFamily.Monospace,
                         color = MaterialTheme.colorScheme.onSurface,
@@ -882,13 +958,15 @@ private fun ProfileMatchRow(match: PreflightProfileMatchDto) {
                 )
             }
 
-            if (match.message.isNotBlank()) {
-                Text(
-                    text = match.message,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+            val meta = buildList {
+                add(wallet.accountType)
+                if (wallet.isPrimary) add(stringResource(R.string.sim_pool_primary_badge))
+            }.joinToString(" · ")
+            Text(
+                text = meta,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

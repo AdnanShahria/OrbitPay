@@ -1,6 +1,7 @@
 import { eq, and, desc, asc, inArray, sql } from 'drizzle-orm';
 import type { AppDb } from '../../db/client';
 import {
+  merchants,
   merchantDevices,
   merchantWallets,
   type MerchantRecord,
@@ -96,6 +97,8 @@ export interface SyncMerchantWalletsResult {
   activeCount: number;
   placeholderCount: number;
   hasPlaceholderWallets: boolean;
+  ignored?: boolean;
+  reason?: string;
 }
 
 function parseDeviceSimSlots(rawJson: string | null | undefined): DeviceSimSlotSummary[] {
@@ -456,6 +459,7 @@ export async function createWallet(
     currentMonthVolume: 0,
     isPrimary: input.isPrimary,
     isActive: true,
+    source: 'PERSONAL',
     priorityOrder: input.priorityOrder,
   });
 
@@ -522,6 +526,7 @@ export async function updateWallet(
       ...(input.isPrimary !== undefined && { isPrimary: input.isPrimary }),
       ...(input.isActive !== undefined && { isActive: input.isActive }),
       ...(input.priorityOrder !== undefined && { priorityOrder: input.priorityOrder }),
+      source: 'PERSONAL',
     })
     .where(eq(merchantWallets.id, walletId));
 
@@ -559,7 +564,12 @@ export async function dispatchWalletSyncWebhook(
   env?: Env,
   extra?: Record<string, unknown>
 ): Promise<void> {
-  if (!merchant.webhookUrl || !merchant.webhookUrl.trim().startsWith('https://')) {
+  if (
+    merchant.accountMode === 'STANDALONE' ||
+    merchant.ignoreStorefrontSync ||
+    !merchant.webhookUrl ||
+    !merchant.webhookUrl.trim().startsWith('https://')
+  ) {
     return;
   }
   const overview = await getWalletsOverview(db, merchant.id);
@@ -682,8 +692,29 @@ export async function syncMerchantWallets(
   db: AppDb,
   merchantId: string,
   input: SyncWalletsInput,
-  env?: Env
+  env?: Env,
+  merchant?: MerchantRecord
 ): Promise<SyncMerchantWalletsResult> {
+  const targetMerchant =
+    merchant ??
+    (await db.select().from(merchants).where(eq(merchants.id, merchantId)).limit(1))[0];
+
+  if (targetMerchant?.accountMode === 'STANDALONE' || targetMerchant?.ignoreStorefrontSync) {
+    const overview = await getWalletsOverview(db, merchantId, env);
+    const placeholderCount = overview.wallets.filter((w) => w.isPlaceholder).length;
+    const activeCount = overview.wallets.filter((w) => w.isActive && !w.isPlaceholder).length;
+    return {
+      wallets: overview.wallets,
+      devices: overview.devices,
+      syncedCount: 0,
+      activeCount,
+      placeholderCount,
+      hasPlaceholderWallets: placeholderCount > 0,
+      ignored: true,
+      reason: 'Merchant is in personal/standalone mode; storefront sync ignored.',
+    };
+  }
+
   const normalizedItems = input.wallets.map((item, index) => {
     const normalizedNumber = sanitizePhoneNumber(item.walletNumber, item.provider);
     if (!BANGLADESHI_PHONE_REGEX.test(normalizedNumber)) {
@@ -756,6 +787,7 @@ export async function syncMerchantWallets(
           priorityOrder: item.priorityOrder,
           safeVolumeLimit: item.safeLimit,
           monthlyVolumeLimit: item.hardLimit,
+          source: 'STOREFRONT_SYNC',
           ...(item.label !== undefined && { label: item.label }),
           ...(item.deviceId !== undefined && { deviceId: item.deviceId }),
           ...(item.simSlotIndex !== undefined && { simSlotIndex: item.simSlotIndex }),
@@ -777,6 +809,7 @@ export async function syncMerchantWallets(
         currentMonthVolume: 0,
         isPrimary: item.isPrimary ?? false,
         isActive: item.isActive,
+        source: 'STOREFRONT_SYNC',
         priorityOrder: item.priorityOrder,
       });
     }
@@ -791,7 +824,11 @@ export async function syncMerchantWallets(
       .from(merchantWallets)
       .where(eq(merchantWallets.merchantId, merchantId));
     const toRemoveIds = existingAll
-      .filter((w) => !keepKeys.has(`${w.provider}:${sanitizePhoneNumber(w.walletNumber, w.provider)}`))
+      .filter(
+        (w) =>
+          (w.source === 'STOREFRONT_SYNC' || isPlaceholderWalletNumber(w.walletNumber)) &&
+          !keepKeys.has(`${w.provider}:${sanitizePhoneNumber(w.walletNumber, w.provider)}`)
+      )
       .map((w) => w.id);
     if (toRemoveIds.length > 0) {
       await db.delete(merchantWallets).where(inArray(merchantWallets.id, toRemoveIds));

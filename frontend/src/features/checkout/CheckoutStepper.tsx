@@ -54,6 +54,7 @@ export interface CheckoutStepperProps {
   onUploadReceipt?: (file: File) => Promise<ReceiptUploadResponse | undefined>;
   submitAttempts?: number;
   maxSubmitAttempts?: number;
+  onStepChange?: (step: 1 | 2) => void;
   onSubmit: () => void;
   isSubmitting: boolean;
   isSessionLoading?: boolean;
@@ -82,6 +83,7 @@ export function CheckoutStepper({
   isUploadingReceipt = false,
   receiptError,
   onUploadReceipt,
+  onStepChange,
   onSubmit,
   isSubmitting,
   isSessionLoading = false,
@@ -94,6 +96,11 @@ export function CheckoutStepper({
   useEffect(() => {
     setActiveStep(initialStep >= 2 ? 2 : 1);
   }, [initialStep]);
+
+  const handleStepChange = (nextStep: 1 | 2) => {
+    setActiveStep(nextStep);
+    onStepChange?.(nextStep);
+  };
 
   const payAmount = baseAmount > 0 ? baseAmount : uniqueAmount;
   const exactAmountText = payAmount.toFixed(2);
@@ -147,7 +154,7 @@ export function CheckoutStepper({
               key={s.step}
               type="button"
               disabled={isBlocked}
-              onClick={() => setActiveStep(s.step)}
+              onClick={() => handleStepChange(s.step)}
               className={cx(
                 'min-h-10 flex items-center text-caption-1-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer select-none border-b-2 -mb-3 pb-1 disabled:opacity-45 disabled:cursor-not-allowed',
                 isCurrent
@@ -227,7 +234,7 @@ export function CheckoutStepper({
             size="medium"
             className="w-full min-h-11"
             disabled={!activeWallet || isSessionLoading}
-            onClick={() => setActiveStep(2)}
+            onClick={() => handleStepChange(2)}
             trailingIcon={RiArrowRightLine}
           >
             Continue with {meta.name}
@@ -250,7 +257,7 @@ export function CheckoutStepper({
             </div>
             <button
               type="button"
-              onClick={() => setActiveStep(1)}
+              onClick={() => handleStepChange(1)}
               className="text-caption-1-semibold text-text-secondary hover:text-text-primary transition-colors cursor-pointer shrink-0"
             >
               Change

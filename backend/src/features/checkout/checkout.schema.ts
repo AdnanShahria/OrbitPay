@@ -33,7 +33,23 @@ export const verifyCheckoutSchema = z.object({
   customerEmail: z.string().trim().email().optional().or(z.literal('')),
   sessionToken: z.string().optional(),
   receiptAssetId: z.string().trim().optional(),
-  receiptUrl: z.string().trim().optional(),
+  receiptUrl: z
+    .string()
+    .trim()
+    .refine(
+      (val) => {
+        if (!val) return true;
+        if (val.startsWith('/api/v1/router/image/')) return true;
+        try {
+          const parsed = new URL(val);
+          return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+        } catch {
+          return false;
+        }
+      },
+      { message: 'Invalid receipt URL protocol' }
+    )
+    .optional(),
 });
 
 export const sessionStatusQuerySchema = z.object({

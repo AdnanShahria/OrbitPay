@@ -46,12 +46,16 @@ export interface PaymentLinkView {
 export interface PublicPaymentLinkView extends PaymentLinkView {
   storeName: string;
   merchantSlug: string;
+  accountMode?: 'STANDALONE' | 'WEBHOOK_CONNECTED';
+  hasActiveWallets?: boolean;
   effectiveVerificationMode: VerificationMode;
   receiptPolicy: ReceiptPolicy;
   deviceStatus: DeviceStatusSnapshot;
   platformConfig?: PlatformPublicConfig;
   activeWallets: ActiveWallet[];
 }
+
+export type PublicPaymentLinkData = PublicPaymentLinkView;
 
 export interface CreatePaymentLinkDTO {
   slug?: string;

@@ -351,6 +351,8 @@ export async function getPublicPaymentLink(
     ...formatLinkView(link, merchant.storeName, resolvedMerchantSlug, origin),
     storeName: merchant.storeName,
     merchantSlug: resolvedMerchantSlug,
+    accountMode: merchant.accountMode,
+    hasActiveWallets: wallets.length > 0,
     effectiveVerificationMode: link.verificationMode ?? merchant.verificationMode,
     receiptPolicy: merchant.receiptPolicy,
     deviceStatus,

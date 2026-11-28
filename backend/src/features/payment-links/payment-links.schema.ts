@@ -19,8 +19,20 @@ const optionalNullableString = (minLen = 0, maxLen = 1000) =>
       message: `Must be at least ${minLen} characters`,
     });
 
+const isHttpOrHttpsUrl = (value: string): boolean => {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+  } catch {
+    return false;
+  }
+};
+
 const optionalNullableUrl = z
-  .union([z.string().trim().url(), z.literal('')])
+  .union([
+    z.string().trim().url().refine(isHttpOrHttpsUrl, 'URL must use http:// or https://'),
+    z.literal(''),
+  ])
   .nullish()
   .transform((v) => (v == null || v === '' ? undefined : v));
 
@@ -99,8 +111,20 @@ export const updatePaymentLinkSchema = z.object({
   display: paymentDisplaySchema.optional(),
   actions: z.array(paymentActionSchema).max(8).optional(),
   metadata: z.record(z.unknown()).optional(),
-  returnUrl: z.union([z.string().trim().url(), z.literal('')]).optional().nullable(),
-  cancelUrl: z.union([z.string().trim().url(), z.literal('')]).optional().nullable(),
+  returnUrl: z
+    .union([
+      z.string().trim().url().refine(isHttpOrHttpsUrl, 'URL must use http:// or https://'),
+      z.literal(''),
+    ])
+    .optional()
+    .nullable(),
+  cancelUrl: z
+    .union([
+      z.string().trim().url().refine(isHttpOrHttpsUrl, 'URL must use http:// or https://'),
+      z.literal(''),
+    ])
+    .optional()
+    .nullable(),
   isActive: z.boolean().optional(),
   maxUses: z.number().int().positive().optional().nullable(),
   expiresAt: z.string().datetime().optional().nullable(),

@@ -1,7 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { extractApiErrorMessage, unwrapApiResponse } from '@/shared/utils/api';
+import type { MfsProvider } from '@/shared/utils/format';
 import type { PlatformPublicConfig } from '@/features/platform/usePlatformConfig';
+
+export type AdminAccountMode = 'STANDALONE' | 'WEBHOOK_CONNECTED';
+export type AdminVerificationMode = 'AUTO' | 'PURE_MANUAL';
+export type AdminWalletAccountType = 'PERSONAL' | 'PRA' | 'MERCHANT';
 
 export interface AdminProjectSummary {
   id: string;
@@ -10,11 +15,15 @@ export interface AdminProjectSummary {
   webhookUrl: string;
   webhookSecret: string;
   gracePeriodMinutes: number;
+  accountMode?: AdminAccountMode;
+  verificationMode?: AdminVerificationMode;
+  ignoreStorefrontSync?: boolean;
   isActive: boolean;
   lastSeenAt: string | null;
   createdAt: string;
   isOnline: boolean;
   walletsCount: number;
+  paymentLinksCount?: number;
   totalVolume: number;
   verifiedCount: number;
   unclaimedCount: number;
@@ -137,6 +146,8 @@ export interface AdminProjectInspectWallet {
   provider: string;
   accountType: string;
   walletNumber: string;
+  label?: string | null;
+  safeVolumeLimit?: number;
   monthlyVolumeLimit: number;
   currentMonthVolume: number;
   isPrimary: boolean;
@@ -169,11 +180,55 @@ export interface AdminProjectInspectOrderItem {
   createdAt?: string;
 }
 
+export interface AdminInspectPaymentLink {
+  id: string;
+  merchantId?: string;
+  merchantSlug?: string;
+  slug: string;
+  sharePath?: string;
+  shareUrl?: string;
+  title: string;
+  description?: string | null;
+  amountType: 'FIXED' | 'OPEN';
+  fixedAmount?: number | null;
+  minAmount?: number | null;
+  maxAmount?: number | null;
+  verificationMode?: AdminVerificationMode | null;
+  isActive: boolean;
+  usedCount?: number;
+  maxUses?: number | null;
+  createdAt?: string | number;
+}
+
+export interface AdminInspectPendingIntent {
+  id: string;
+  merchantId?: string;
+  externalRefId: string;
+  vertical?: string;
+  status: string;
+  verificationMode?: AdminVerificationMode;
+  baseAmount: number;
+  uniqueAmount: number;
+  paidAmount?: number | null;
+  provider?: string | null;
+  trxId?: string | null;
+  senderNumber?: string | null;
+  receiptUrl?: string | null;
+  escalationReason?: string | null;
+  customer?: { name?: string; email?: string; phone?: string } | null;
+  customerName?: string | null;
+  customerEmail?: string | null;
+  stateVersion?: number;
+  createdAt?: string | number;
+}
+
 export interface AdminProjectInspectData {
   project: AdminProjectSummary;
   wallets: AdminProjectInspectWallet[];
   recentSms: AdminProjectInspectLedgerItem[];
   recentOrders: AdminProjectInspectOrderItem[];
+  paymentLinks: AdminInspectPaymentLink[];
+  pendingIntents: AdminInspectPendingIntent[];
 }
 
 export const ADMIN_KEY_STORAGE = 'orbit_master_admin_key';
@@ -607,16 +662,57 @@ export interface AdminAuthSession {
   createdAt: string;
 }
 
+export interface AdminInitialWalletPayload {
+  provider: MfsProvider;
+  walletNumber: string;
+  accountType?: AdminWalletAccountType;
+  label?: string;
+  isPrimary?: boolean;
+}
+
+export interface CreateProjectPayload {
+  id?: string;
+  storeName: string;
+  slug?: string;
+  webhookUrl?: string;
+  gracePeriodMinutes: number;
+  accountMode?: AdminAccountMode;
+  verificationMode?: AdminVerificationMode;
+  ignoreStorefrontSync?: boolean;
+  initialWallets?: AdminInitialWalletPayload[];
+  createStarterPaymentLink?: boolean;
+  starterLinkTitle?: string;
+  starterLinkAmountType?: 'FIXED' | 'OPEN';
+  starterLinkAmount?: number;
+  ownerEmail?: string;
+  ownerPassword?: string;
+  ownerName?: string;
+}
+
+export interface StarterPaymentLinkInfo {
+  id: string;
+  slug: string;
+  title: string;
+  sharePath: string;
+  shareUrl?: string;
+  amountType?: 'FIXED' | 'OPEN';
+  fixedAmount?: number | null;
+}
+
 export interface CreateProjectResponseData {
   id: string;
   storeName: string;
   slug?: string;
+  accountMode?: AdminAccountMode;
+  verificationMode?: AdminVerificationMode;
+  ignoreStorefrontSync?: boolean;
   webhookUrl: string;
   webhookSecret: string;
   apiKey?: string;
   publishableKey?: string;
   deviceKey: string;
   gracePeriodMinutes: number;
+  starterPaymentLink?: StarterPaymentLinkInfo;
   ownerAccount?: {
     id: string;
     email: string;
@@ -629,15 +725,9 @@ export function useCreateProjectMutation() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (payload: {
-      id?: string;
-      storeName: string;
-      webhookUrl?: string;
-      gracePeriodMinutes: number;
-      ownerEmail?: string;
-      ownerPassword?: string;
-      ownerName?: string;
-    }): Promise<{ success: boolean; data: CreateProjectResponseData }> => {
+    mutationFn: async (
+      payload: CreateProjectPayload,
+    ): Promise<{ success: boolean; data: CreateProjectResponseData }> => {
       const res = await adminFetch('/api/v1/admin/projects', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -760,6 +850,17 @@ export function useRevokeSessionMutation() {
   });
 }
 
+export interface UpdateProjectPayload {
+  storeName?: string;
+  slug?: string;
+  webhookUrl?: string;
+  gracePeriodMinutes?: number;
+  accountMode?: AdminAccountMode;
+  verificationMode?: AdminVerificationMode;
+  ignoreStorefrontSync?: boolean;
+  isActive?: boolean;
+}
+
 export function useUpdateProjectMutation() {
   const queryClient = useQueryClient();
 
@@ -769,13 +870,7 @@ export function useUpdateProjectMutation() {
       updates,
     }: {
       id: string;
-      updates: {
-        storeName?: string;
-        slug?: string;
-        webhookUrl?: string;
-        gracePeriodMinutes?: number;
-        isActive?: boolean;
-      };
+      updates: UpdateProjectPayload;
     }) => {
       const res = await adminFetch(`/api/v1/admin/projects/${id}`, {
         method: 'PATCH',
@@ -834,6 +929,11 @@ export function useAdminProjectInspect(projectId: string | null) {
         status: String(item.status ?? ''),
         createdAt: String(item.smsReceivedAt ?? item.createdAt ?? ''),
       }));
+      const rawLinks = (raw.paymentLinks as AdminInspectPaymentLink[] | undefined) ?? [];
+      const rawPending =
+        (raw.pendingIntents as AdminInspectPendingIntent[] | undefined) ??
+        (raw.pendingPaymentIntents as AdminInspectPendingIntent[] | undefined) ??
+        [];
       return {
         project: raw.project as AdminProjectSummary,
         wallets: (raw.wallets as AdminProjectInspectWallet[]) ?? [],
@@ -842,10 +942,181 @@ export function useAdminProjectInspect(projectId: string | null) {
           (raw.recentOrders as AdminProjectInspectOrderItem[]) ??
           (raw.orders as AdminProjectInspectOrderItem[]) ??
           [],
+        paymentLinks: rawLinks,
+        pendingIntents: rawPending,
       };
     },
     enabled: Boolean(hasAdminCredentials() && projectId),
     retry: false,
+  });
+}
+
+export function useAdminCreateWalletMutation(projectId: string | null) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (payload: {
+      provider: MfsProvider;
+      walletNumber: string;
+      accountType?: AdminWalletAccountType;
+      label?: string | null;
+      isPrimary?: boolean;
+      safeVolumeLimit?: number;
+      monthlyVolumeLimit?: number;
+    }) => {
+      if (!projectId) throw new Error('Missing project ID');
+      const res = await adminFetch(
+        `/api/v1/admin/projects/${encodeURIComponent(projectId)}/wallets`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        },
+      );
+      return unwrapApiResponse<AdminProjectInspectWallet>(res, 'Failed to add MFS wallet');
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'project-inspect', projectId] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'projects'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'overview'] });
+    },
+  });
+}
+
+export function useAdminUpdateWalletMutation(projectId: string | null) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      walletId,
+      updates,
+    }: {
+      walletId: string;
+      updates: {
+        walletNumber?: string;
+        accountType?: AdminWalletAccountType;
+        label?: string | null;
+        isPrimary?: boolean;
+        isActive?: boolean;
+        safeVolumeLimit?: number;
+        monthlyVolumeLimit?: number;
+      };
+    }) => {
+      if (!projectId) throw new Error('Missing project ID');
+      const res = await adminFetch(
+        `/api/v1/admin/projects/${encodeURIComponent(projectId)}/wallets/${encodeURIComponent(walletId)}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updates),
+        },
+      );
+      return unwrapApiResponse<AdminProjectInspectWallet>(res, 'Failed to update wallet');
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'project-inspect', projectId] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'projects'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'overview'] });
+    },
+  });
+}
+
+export function useAdminDeleteWalletMutation(projectId: string | null) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (walletId: string) => {
+      if (!projectId) throw new Error('Missing project ID');
+      const res = await adminFetch(
+        `/api/v1/admin/projects/${encodeURIComponent(projectId)}/wallets/${encodeURIComponent(walletId)}`,
+        {
+          method: 'DELETE',
+        },
+      );
+      return unwrapApiResponse<{ id?: string; deleted?: boolean }>(res, 'Failed to delete wallet');
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'project-inspect', projectId] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'projects'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'overview'] });
+    },
+  });
+}
+
+export function useAdminCreatePaymentLinkMutation(projectId: string | null) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (payload: {
+      title: string;
+      slug?: string;
+      description?: string;
+      amountType: 'FIXED' | 'OPEN';
+      fixedAmount?: number;
+      minAmount?: number;
+      maxAmount?: number;
+      verificationMode?: AdminVerificationMode;
+    }) => {
+      if (!projectId) throw new Error('Missing project ID');
+      const res = await adminFetch(
+        `/api/v1/admin/projects/${encodeURIComponent(projectId)}/payment-links`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        },
+      );
+      return unwrapApiResponse<AdminInspectPaymentLink>(res, 'Failed to create payment link');
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'project-inspect', projectId] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'projects'] });
+    },
+  });
+}
+
+export function useAdminResolvePaymentMutation(projectId: string | null) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      paymentIntentId,
+      decision,
+      reason,
+      trxId,
+      expectedStateVersion,
+    }: {
+      paymentIntentId: string;
+      decision: 'APPROVE' | 'REJECT';
+      reason?: string;
+      trxId?: string;
+      expectedStateVersion?: number;
+    }) => {
+      if (!projectId) throw new Error('Missing project ID');
+      const res = await adminFetch(
+        `/api/v1/admin/projects/${encodeURIComponent(projectId)}/payments/${encodeURIComponent(paymentIntentId)}/resolve`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            decision,
+            reason,
+            trxId,
+            expectedStateVersion,
+          }),
+        },
+      );
+      return unwrapApiResponse<{ paymentIntentId: string; status: string }>(
+        res,
+        'Failed to resolve payment',
+      );
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'project-inspect', projectId] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'projects'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'overview'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'queue'] });
+    },
   });
 }
 

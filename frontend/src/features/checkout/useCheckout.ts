@@ -394,6 +394,50 @@ export function useCheckout(config: CheckoutConfig) {
     );
   }, [orderId, sessionId, targetOrigin]);
 
+  const emitStepChanged = useCallback(
+    (step: 1 | 2) => {
+      postParentMessage(
+        {
+          type: 'ORBIT_STEP_CHANGED',
+          event: 'checkout.step_changed',
+          step,
+          orderId,
+          externalRefId: orderId,
+          sessionId: sessionId ?? null,
+        },
+        targetOrigin,
+      );
+    },
+    [orderId, sessionId, targetOrigin],
+  );
+
+  const emitPaymentSubmitted = useCallback(
+    (payload: {
+      orderId: string;
+      paymentIntentId?: string | null;
+      sessionId?: string | null;
+      provider?: MfsProvider;
+      trxId?: string;
+      amount?: number;
+    }) => {
+      postParentMessage(
+        {
+          type: 'ORBIT_PAYMENT_SUBMITTED',
+          event: 'payment.submitted',
+          orderId: payload.orderId,
+          externalRefId: payload.orderId,
+          paymentIntentId: payload.paymentIntentId ?? null,
+          sessionId: payload.sessionId ?? null,
+          provider: payload.provider,
+          trxId: payload.trxId,
+          amount: payload.amount,
+        },
+        targetOrigin,
+      );
+    },
+    [targetOrigin],
+  );
+
   // Hydrate by sessionId (first-class) OR initialize legacy session via POST /checkout/session
   useEffect(() => {
     let isMounted = true;
@@ -537,12 +581,28 @@ export function useCheckout(config: CheckoutConfig) {
           setPollingStatus('MANUAL_REVIEW_REQUIRED');
           setEscalationReason(data.escalationReason ?? null);
           setCurrentStep('POLLING');
+          emitPaymentSubmitted({
+            orderId: resolvedOrderId,
+            paymentIntentId: data.paymentIntentId ?? null,
+            sessionId: data.sessionId || config.sessionId || null,
+            provider: data.provider || undefined,
+            trxId: data.trxId || undefined,
+            amount: Number(data.paidAmount ?? resolvedUnique),
+          });
         } else if (
           data.status === 'WAITING_FOR_SMS' ||
           data.sessionStatus === 'SUBMITTED'
         ) {
           setPollingStatus('PENDING_VERIFICATION');
           setCurrentStep('POLLING');
+          emitPaymentSubmitted({
+            orderId: resolvedOrderId,
+            paymentIntentId: data.paymentIntentId ?? null,
+            sessionId: data.sessionId || config.sessionId || null,
+            provider: data.provider || undefined,
+            trxId: data.trxId || undefined,
+            amount: Number(data.paidAmount ?? resolvedUnique),
+          });
         } else if (data.status === 'REJECTED' || data.sessionStatus === 'REJECTED') {
           setPollingStatus('REJECTED');
           setEscalationReason(data.escalationReason ?? null);
@@ -741,13 +801,25 @@ export function useCheckout(config: CheckoutConfig) {
           setDeviceStatus((prev) => ({ ...prev, online: result.deviceOnline! }));
         }
         setCurrentStep('POLLING');
+        const submittedTrx = result.trxId || cleanTrx;
+        const submittedAmount = Number(
+          result.paidAmount ?? result.amount ?? effectivePayAmount,
+        );
+        emitPaymentSubmitted({
+          orderId,
+          paymentIntentId: result.paymentIntentId ?? paymentIntentId,
+          sessionId: sessionId ?? null,
+          provider: selectedProvider,
+          trxId: submittedTrx,
+          amount: submittedAmount,
+        });
         emitPending({
           orderId,
           paymentIntentId: result.paymentIntentId ?? paymentIntentId,
           sessionId: sessionId ?? null,
           status: nextStatus,
-          trxId: result.trxId || cleanTrx,
-          amount: Number(result.paidAmount ?? result.amount ?? effectivePayAmount),
+          trxId: submittedTrx,
+          amount: submittedAmount,
           escalationReason: result.escalationReason ?? null,
         });
       }
@@ -887,5 +959,6 @@ export function useCheckout(config: CheckoutConfig) {
     markVerified,
     handlePollStateChange,
     emitClose,
+    emitStepChanged,
   };
 }

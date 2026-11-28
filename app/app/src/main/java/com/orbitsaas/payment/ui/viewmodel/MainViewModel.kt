@@ -1121,12 +1121,52 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             result.onSuccess {
                 _feedbackMessage.value = "SIM number added"
                 refreshWalletsOverview()
+                refreshPreflight()
                 onDone(true)
             }.onFailure { err ->
                 if (err is UnauthorizedException) {
                     handleUnauthorized(err.message)
                 } else {
                     _feedbackMessage.value = err.message ?: "Failed to add SIM number"
+                }
+                onDone(false)
+            }
+            _isWalletMutating.value = false
+        }
+    }
+
+    fun updateWallet(
+        walletId: String,
+        walletNumber: String,
+        accountType: String,
+        label: String?,
+        isPrimary: Boolean,
+        onDone: (Boolean) -> Unit = {}
+    ) {
+        if (_isWalletMutating.value) return
+        viewModelScope.launch {
+            _isWalletMutating.value = true
+            val result = withContext(Dispatchers.IO) {
+                apiClient.updateWallet(
+                    walletId,
+                    UpdateWalletRequest(
+                        walletNumber = walletNumber.trim(),
+                        accountType = accountType,
+                        label = label?.trim()?.ifBlank { null },
+                        isPrimary = isPrimary
+                    )
+                )
+            }
+            result.onSuccess {
+                _feedbackMessage.value = "SIM number updated"
+                refreshWalletsOverview()
+                refreshPreflight()
+                onDone(true)
+            }.onFailure { err ->
+                if (err is UnauthorizedException) {
+                    handleUnauthorized(err.message)
+                } else {
+                    _feedbackMessage.value = err.message ?: "Failed to update SIM number"
                 }
                 onDone(false)
             }
@@ -1143,6 +1183,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             result.onSuccess {
                 refreshWalletsOverview()
+                refreshPreflight()
             }.onFailure { err ->
                 if (err is UnauthorizedException) {
                     handleUnauthorized(err.message)
@@ -1164,6 +1205,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             result.onSuccess {
                 _feedbackMessage.value = "Primary SIM updated"
                 refreshWalletsOverview()
+                refreshPreflight()
             }.onFailure { err ->
                 if (err is UnauthorizedException) {
                     handleUnauthorized(err.message)
@@ -1185,6 +1227,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             result.onSuccess {
                 _feedbackMessage.value = "SIM number removed"
                 refreshWalletsOverview()
+                refreshPreflight()
             }.onFailure { err ->
                 if (err is UnauthorizedException) {
                     handleUnauthorized(err.message)

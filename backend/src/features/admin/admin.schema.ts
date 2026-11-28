@@ -1,5 +1,14 @@
 import { z } from 'zod';
-import { ADMIN_ROLES, USER_ROLES } from '../../db/schema';
+import {
+  ACCOUNT_MODES,
+  ACCOUNT_TYPES,
+  ADMIN_ROLES,
+  MFS_PROVIDERS,
+  USER_ROLES,
+  VERIFICATION_MODES,
+} from '../../db/schema';
+
+const BANGLADESHI_PHONE_REGEX = /^01[3-9]\d{8,9}$/;
 
 const optionalWebhookUrl = z
   .union([
@@ -69,6 +78,17 @@ export const logoutAllAdminSchema = z.object({
   includeCurrent: z.boolean().optional().default(false),
 });
 
+export const initialWalletInputSchema = z.object({
+  provider: z.enum(MFS_PROVIDERS),
+  walletNumber: z
+    .string()
+    .trim()
+    .regex(BANGLADESHI_PHONE_REGEX, 'Must be a valid 11 or 12-digit Bangladeshi mobile number starting with 01'),
+  accountType: z.enum(ACCOUNT_TYPES).optional().default('PERSONAL'),
+  label: z.string().trim().max(60).optional().nullable(),
+  isPrimary: z.boolean().optional(),
+});
+
 export const createProjectSchema = z.object({
   id: optionalBlankToUndefined(
     z.string().trim().min(3, 'Project ID must be at least 3 characters').regex(/^[a-z0-9_-]+$/i, 'Alphanumeric project ID required')
@@ -85,6 +105,14 @@ export const createProjectSchema = z.object({
   ),
   webhookUrl: optionalWebhookUrl,
   gracePeriodMinutes: z.number().int().min(5).max(1440).default(60),
+  accountMode: z.enum(ACCOUNT_MODES).default('WEBHOOK_CONNECTED'),
+  verificationMode: z.enum(VERIFICATION_MODES).default('AUTO'),
+  ignoreStorefrontSync: z.boolean().optional(),
+  initialWallets: z.array(initialWalletInputSchema).max(10).optional(),
+  createStarterPaymentLink: z.boolean().optional(),
+  starterLinkTitle: optionalBlankToUndefined(z.string().trim().min(2).max(160)),
+  starterLinkAmountType: z.enum(['FIXED', 'OPEN']).default('OPEN'),
+  starterLinkAmount: z.number().positive().optional(),
   ownerEmail: optionalBlankToUndefined(
     z
       .string()
@@ -110,6 +138,10 @@ export const updateProjectSchema = z.object({
   webhookUrl: z.union([z.string().trim().url('Must be a valid HTTP/HTTPS URL'), z.literal('')]).optional(),
   gracePeriodMinutes: z.number().int().min(5).max(1440).optional(),
   isActive: z.boolean().optional(),
+  accountMode: z.enum(ACCOUNT_MODES).optional(),
+  verificationMode: z.enum(VERIFICATION_MODES).optional(),
+  ignoreStorefrontSync: z.boolean().optional(),
+  ecommerceEnabled: z.boolean().optional(),
 });
 
 export const createProjectUserSchema = z.object({

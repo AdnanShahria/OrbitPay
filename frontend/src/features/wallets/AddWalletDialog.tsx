@@ -1,5 +1,11 @@
-import React, { useState } from 'react';
-import { useAddWalletMutation, useWalletsOverview, AccountType } from './useWallets';
+import React, { useEffect, useState } from 'react';
+import {
+  useAddWalletMutation,
+  useUpdateWalletMutation,
+  useWalletsOverview,
+  type AccountType,
+  type Wallet,
+} from './useWallets';
 import { Modal, ModalHeader, ModalBody, ModalFooter } from '@/components/base/modal/modal';
 import { Button } from '@/components/base/buttons/button';
 import { Input } from '@/components/base/input/input';
@@ -11,6 +17,7 @@ import { MfsProvider, MFS_METADATA } from '@/shared/utils/format';
 import { cx } from '@/utils/cx';
 import {
   RiAddLine,
+  RiCheckLine,
   RiSmartphoneLine,
   RiErrorWarningLine,
 } from '@remixicon/react';
@@ -18,11 +25,13 @@ import {
 export interface AddWalletDialogProps {
   isOpen: boolean;
   onClose: () => void;
+  walletToEdit?: Wallet | null;
 }
 
 const AUTO_DEVICE_KEY = 'AUTO';
 
-export function AddWalletDialog({ isOpen, onClose }: AddWalletDialogProps) {
+export function AddWalletDialog({ isOpen, onClose, walletToEdit = null }: AddWalletDialogProps) {
+  const isEditing = Boolean(walletToEdit);
   const [provider, setProvider] = useState<MfsProvider>('BKASH');
   const [walletNumber, setWalletNumber] = useState('');
   const [label, setLabel] = useState('');
@@ -34,11 +43,39 @@ export function AddWalletDialog({ isOpen, onClose }: AddWalletDialogProps) {
   const [validationError, setValidationError] = useState<string | null>(null);
 
   const addWalletMutation = useAddWalletMutation();
+  const updateWalletMutation = useUpdateWalletMutation();
   const { data: overview } = useWalletsOverview();
   const devices = overview?.devices ?? [];
 
+  useEffect(() => {
+    if (!isOpen) return;
+    setValidationError(null);
+    if (walletToEdit) {
+      setProvider(walletToEdit.provider);
+      setWalletNumber(walletToEdit.walletNumber || '');
+      setLabel(walletToEdit.label || '');
+      setAccountType(walletToEdit.accountType || 'PERSONAL');
+      setDeviceId(walletToEdit.deviceId || AUTO_DEVICE_KEY);
+      setSafeVolumeLimit(String(walletToEdit.safeVolumeLimit || 250000));
+      setMonthlyLimit(String(walletToEdit.monthlyVolumeLimit || 300000));
+      setIsPrimary(Boolean(walletToEdit.isPrimary));
+    } else {
+      setProvider('BKASH');
+      setWalletNumber('');
+      setLabel('');
+      setAccountType('PERSONAL');
+      setDeviceId(AUTO_DEVICE_KEY);
+      setSafeVolumeLimit('250000');
+      setMonthlyLimit('300000');
+      setIsPrimary(false);
+    }
+  }, [isOpen, walletToEdit]);
+
+  const isSaving = addWalletMutation.isPending || updateWalletMutation.isPending;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSaving) return;
     setValidationError(null);
 
     const cleanNumber = walletNumber.trim().replace(/^\+88/, '');
@@ -70,31 +107,48 @@ export function AddWalletDialog({ isOpen, onClose }: AddWalletDialogProps) {
     }
 
     try {
-      await addWalletMutation.mutateAsync({
-        provider,
-        accountType,
-        walletNumber: cleanNumber,
-        label: label.trim() || undefined,
-        deviceId: deviceId !== AUTO_DEVICE_KEY ? deviceId : undefined,
-        safeVolumeLimit: parsedSafeLimit,
-        monthlyVolumeLimit: parsedMonthlyLimit,
-        isPrimary,
-      });
+      if (walletToEdit) {
+        await updateWalletMutation.mutateAsync({
+          id: walletToEdit.id,
+          updates: {
+            walletNumber: cleanNumber,
+            accountType,
+            label: label.trim() || null,
+            deviceId: deviceId !== AUTO_DEVICE_KEY ? deviceId : null,
+            safeVolumeLimit: parsedSafeLimit,
+            monthlyVolumeLimit: parsedMonthlyLimit,
+            isPrimary,
+          },
+        });
 
-      toast.success('SIM registered', {
-        description: `${MFS_METADATA[provider].name} (${cleanNumber}) added to rotation pool.`,
-      });
+        toast.success('SIM updated', {
+          description: `${MFS_METADATA[provider].name} (${cleanNumber}) saved.`,
+        });
+      } else {
+        await addWalletMutation.mutateAsync({
+          provider,
+          accountType,
+          walletNumber: cleanNumber,
+          label: label.trim() || undefined,
+          deviceId: deviceId !== AUTO_DEVICE_KEY ? deviceId : undefined,
+          safeVolumeLimit: parsedSafeLimit,
+          monthlyVolumeLimit: parsedMonthlyLimit,
+          isPrimary,
+        });
 
-      // Reset and close
-      setWalletNumber('');
-      setLabel('');
-      setDeviceId(AUTO_DEVICE_KEY);
-      setSafeVolumeLimit('250000');
-      setMonthlyLimit('300000');
-      setIsPrimary(false);
+        toast.success('SIM registered', {
+          description: `${MFS_METADATA[provider].name} (${cleanNumber}) added to rotation pool.`,
+        });
+      }
+
       onClose();
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to register SIM';
+      const message =
+        err instanceof Error
+          ? err.message
+          : isEditing
+            ? 'Failed to update SIM'
+            : 'Failed to register SIM';
       setValidationError(message);
     }
   };
@@ -111,17 +165,28 @@ export function AddWalletDialog({ isOpen, onClose }: AddWalletDialogProps) {
     >
       <ModalHeader
         icon={RiSmartphoneLine}
-        title="Add MFS SIM to pool"
-        description="Register a secondary SIM to enable automatic quota rotation and eliminate downtime."
+        title={isEditing ? 'Edit MFS SIM details' : 'Add MFS SIM to pool'}
+        description={
+          isEditing
+            ? 'Update the receiving number, account type, label, or monthly limits for this wallet.'
+            : 'Register an MFS receiving number to enable Payment Links, checkout, and automatic rotation.'
+        }
       />
 
       <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
         <ModalBody className="space-y-5">
           {/* Provider Selection */}
           <div className="space-y-2">
-            <span className="block text-body-medium text-text-primary">
-              MFS provider
-            </span>
+            <div className="flex items-center justify-between gap-2">
+              <span className="block text-body-medium text-text-primary">
+                MFS provider
+              </span>
+              {isEditing && (
+                <span className="text-caption-2-medium text-text-tertiary">
+                  Provider is read-only when editing
+                </span>
+              )}
+            </div>
             <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
               {providers.map((p) => {
                 const meta = MFS_METADATA[p];
@@ -130,10 +195,15 @@ export function AddWalletDialog({ isOpen, onClose }: AddWalletDialogProps) {
                   <button
                     key={p}
                     type="button"
+                    disabled={isEditing}
                     aria-pressed={isSelected}
-                    onClick={() => setProvider(p)}
+                    onClick={() => {
+                      if (!isEditing) setProvider(p);
+                    }}
                     className={cx(
-                      'flex cursor-pointer flex-col items-center gap-1.5 rounded-xl border p-2.5 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring',
+                      'flex flex-col items-center gap-1.5 rounded-xl border p-2.5 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring',
+                      isEditing && !isSelected && 'opacity-45',
+                      isEditing ? 'cursor-default' : 'cursor-pointer',
                       isSelected
                         ? 'border-border-button-active bg-background-secondary-default text-text-primary shadow-xs'
                         : 'border-border-button-default bg-background-primary-default text-text-secondary hover:border-border-button-hover hover:bg-background-primary-hover'
@@ -291,10 +361,10 @@ export function AddWalletDialog({ isOpen, onClose }: AddWalletDialogProps) {
           <Button
             type="submit"
             variant="primary"
-            isLoading={addWalletMutation.isPending}
-            leadingIcon={RiAddLine}
+            isLoading={isSaving}
+            leadingIcon={isEditing ? RiCheckLine : RiAddLine}
           >
-            Register SIM
+            {isEditing ? 'Save Changes' : 'Register SIM'}
           </Button>
         </ModalFooter>
       </form>
