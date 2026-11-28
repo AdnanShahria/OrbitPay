@@ -182,6 +182,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var lastWalletsFetchMs = 0L
     private var lastPreflightFetchMs = 0L
     private var isStatsRefreshing = false
+    @Volatile
+    private var wasNetworkLost = !_isOnline.value
 
     // Flow of recent 50 transactions
     val recentTransactions: StateFlow<List<SmsEntity>> = database.smsDao()
@@ -356,10 +358,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun observePushRefreshEvents() {
         viewModelScope.launch {
-            DynamicPushDispatcher.refreshEvents.collect {
-                refreshPaymentIntents()
-                refreshOrders()
-                refreshStatsFromServer()
+            DynamicPushDispatcher.refreshEvents.collect { reason ->
+                when {
+                    reason.startsWith("order.") -> {
+                        refreshOrders(force = false)
+                    }
+                    reason.startsWith("payment.") -> {
+                        refreshPaymentIntents(force = false)
+                        refreshStatsFromServer(force = false)
+                    }
+                    else -> {
+                        refreshPaymentIntents(force = false)
+                        refreshOrders(force = false)
+                        refreshStatsFromServer(force = false)
+                    }
+                }
             }
         }
     }
@@ -380,12 +393,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         connectivityManager?.registerNetworkCallback(request, object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
                 _isOnline.value = true
-                viewModelScope.launch {
-                    syncNow()
+                if (wasNetworkLost) {
+                    wasNetworkLost = false
+                    viewModelScope.launch {
+                        syncNow()
+                    }
                 }
             }
 
             override fun onLost(network: Network) {
+                wasNetworkLost = true
                 _isOnline.value = false
             }
         })

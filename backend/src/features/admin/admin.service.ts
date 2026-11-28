@@ -33,6 +33,8 @@ import {
   resolveAndPersistMerchantSlug,
   toSafeMerchantSlug,
 } from '../../shared/slug';
+import { getMerchantPushHubStatus } from '../../router/push-hub';
+import type { Env } from '../../shared/types';
 import { recordAdminAudit, type AdminActor } from './admin-auth.service';
 import type {
   CreateProjectDTO,
@@ -162,54 +164,57 @@ export async function getAdminOverview(db: AppDb): Promise<AdminOverviewStats> {
 /**
  * Returns all connected client projects with per-tenant telemetry.
  */
-export async function getAdminProjects(db: AppDb): Promise<AdminProjectSummary[]> {
+export async function getAdminProjects(db: AppDb, env?: Env): Promise<AdminProjectSummary[]> {
   const allMerchants = await db.select().from(merchants).orderBy(desc(merchants.createdAt));
   const now = Date.now();
   const onlineThresholdMs = 5 * 60 * 1000;
 
-  const result: AdminProjectSummary[] = [];
+  return Promise.all(
+    allMerchants.map(async (m) => {
+      const recentHeartbeat = m.lastSeenAt
+        ? now - m.lastSeenAt.getTime() < onlineThresholdMs
+        : false;
 
-  for (const m of allMerchants) {
-    const isOnline = m.lastSeenAt ? now - m.lastSeenAt.getTime() < onlineThresholdMs : false;
+      const [wallets, stats, slug, pushStatus] = await Promise.all([
+        db
+          .select({ count: sql<number>`count(*)` })
+          .from(merchantWallets)
+          .where(and(eq(merchantWallets.merchantId, m.id), eq(merchantWallets.isActive, true))),
+        db
+          .select({
+            verifiedCount: sql<number>`sum(case when status in ('VERIFIED', 'MANUAL_VERIFIED') then 1 else 0 end)`,
+            unclaimedCount: sql<number>`sum(case when status = 'UNCLAIMED' then 1 else 0 end)`,
+            totalVolume: sql<number>`coalesce(sum(case when status in ('VERIFIED', 'MANUAL_VERIFIED') then amount else 0 end), 0)`,
+          })
+          .from(smsLedger)
+          .where(eq(smsLedger.merchantId, m.id)),
+        resolveAndPersistMerchantSlug(db, m),
+        env?.PUSH_HUB ? getMerchantPushHubStatus(env, m.id) : Promise.resolve(null),
+      ]);
 
-    // Per-merchant wallets
-    const wallets = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(merchantWallets)
-      .where(and(eq(merchantWallets.merchantId, m.id), eq(merchantWallets.isActive, true)));
+      const hasLiveAndroidSocket = pushStatus
+        ? (pushStatus.androidSockets ?? pushStatus.activeSockets) > 0
+        : false;
+      const s = stats[0] || { verifiedCount: 0, unclaimedCount: 0, totalVolume: 0 };
 
-    // Per-merchant volume & counts
-    const stats = await db
-      .select({
-        verifiedCount: sql<number>`sum(case when status in ('VERIFIED', 'MANUAL_VERIFIED') then 1 else 0 end)`,
-        unclaimedCount: sql<number>`sum(case when status = 'UNCLAIMED' then 1 else 0 end)`,
-        totalVolume: sql<number>`coalesce(sum(case when status in ('VERIFIED', 'MANUAL_VERIFIED') then amount else 0 end), 0)`,
-      })
-      .from(smsLedger)
-      .where(eq(smsLedger.merchantId, m.id));
-
-    const s = stats[0] || { verifiedCount: 0, unclaimedCount: 0, totalVolume: 0 };
-    const slug = await resolveAndPersistMerchantSlug(db, m);
-
-    result.push({
-      id: m.id,
-      storeName: m.storeName,
-      slug,
-      webhookUrl: m.webhookUrl,
-      webhookSecret: m.webhookSecret,
-      gracePeriodMinutes: m.gracePeriodMinutes,
-      isActive: m.isActive,
-      lastSeenAt: m.lastSeenAt,
-      createdAt: m.createdAt,
-      isOnline,
-      walletsCount: Number(wallets[0]?.count) || 0,
-      totalVolume: Number(s.totalVolume) || 0,
-      verifiedCount: Number(s.verifiedCount) || 0,
-      unclaimedCount: Number(s.unclaimedCount) || 0,
-    });
-  }
-
-  return result;
+      return {
+        id: m.id,
+        storeName: m.storeName,
+        slug,
+        webhookUrl: m.webhookUrl,
+        webhookSecret: m.webhookSecret,
+        gracePeriodMinutes: m.gracePeriodMinutes,
+        isActive: m.isActive,
+        lastSeenAt: m.lastSeenAt,
+        createdAt: m.createdAt,
+        isOnline: recentHeartbeat || hasLiveAndroidSocket,
+        walletsCount: Number(wallets[0]?.count) || 0,
+        totalVolume: Number(s.totalVolume) || 0,
+        verifiedCount: Number(s.verifiedCount) || 0,
+        unclaimedCount: Number(s.unclaimedCount) || 0,
+      };
+    })
+  );
 }
 
 /**

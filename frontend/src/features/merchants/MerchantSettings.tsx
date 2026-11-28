@@ -126,19 +126,28 @@ function getDeliveryChip(status: WebhookDeliveryStatus): { label: string; color:
 }
 
 export interface MerchantSettingsProps {
+  merchantId?: string;
   readOnlyLocked?: boolean;
   onRequestUnlock?: () => void;
 }
 
 export function MerchantSettings({
+  merchantId,
   readOnlyLocked = false,
   onRequestUnlock,
 }: MerchantSettingsProps = {}) {
-  const { data: merchant, isLoading } = useMerchant();
+  const { data: merchant, isLoading } = useMerchant(merchantId);
   const updateSettingsMutation = useUpdateMerchantSettings();
   const rotateSecretMutation = useRotateWebhookSecret();
   const testPingMutation = useTestWebhookPing();
   const replayWebhookMutation = useReplayMerchantWebhook();
+
+  const [expandedCards, setExpandedCards] = useState({
+    profile: true,
+    webhooks: false,
+    deliveries: false,
+    code: false,
+  });
 
   const [webhookFilter, setWebhookFilter] = useState<WebhookDeliveryStatus | 'ALL'>('ALL');
   const {
@@ -146,7 +155,7 @@ export function MerchantSettings({
     isLoading: webhooksLoading,
     refetch: refetchWebhooks,
     isFetching: webhooksFetching,
-  } = useMerchantWebhooks(webhookFilter);
+  } = useMerchantWebhooks(webhookFilter, { enabled: expandedCards.deliveries });
 
   const [storeName, setStoreName] = useState('');
   const [merchantSlug, setMerchantSlug] = useState('');
@@ -173,12 +182,6 @@ export function MerchantSettings({
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [isRotateModalOpen, setIsRotateModalOpen] = useState(false);
   const [replayingId, setReplayingId] = useState<string | null>(null);
-  const [expandedCards, setExpandedCards] = useState({
-    profile: true,
-    webhooks: false,
-    deliveries: false,
-    code: false,
-  });
 
   const toggleCard = (key: keyof typeof expandedCards) => {
     setExpandedCards((prev) => ({ ...prev, [key]: !prev[key] }));

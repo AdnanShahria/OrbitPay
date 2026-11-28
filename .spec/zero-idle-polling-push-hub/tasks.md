@@ -29,3 +29,9 @@
 ## Step 4: Android Companion (Completed)
 - [x] Maintain persistent `/api/v1/device/ws` connection with `'ping'`/`'pong'` keepalive.
 - [x] Disable idle foreground/background polling when WS is connected; trigger `/api/v1/device/sync` only on reconnect/push wake and auto-refresh pinned Home Screen Widgets on payment/order pushes.
+
+## Step 5: Budget Hardening & Accuracy (Completed)
+- [x] `backend/src/features/payments/verification.engine.ts`: use `pushStatus.androidSockets ?? pushStatus.activeSockets` in `computeDeviceOnlineStatus` so open Web Portal sockets never falsely report Android companion devices as online.
+- [x] `wrangler.toml` & `backend/src/worker.ts`: reduce background cron frequency to `*/5 * * * *`, handle `'*/5 * * * *'` in `scheduled`, emit `QUEUE_UPDATED` via `emitMerchantRealtimeEvent` on grace-period escalation, and guard fallback `verification_queue` / `checkout_sessions` updates with `.limit(1)` pre-checks so idle cron ticks execute 0 D1 writes.
+- [x] `backend/src/features/wallets/wallets.service.ts` & `backend/src/features/admin/admin.service.ts`: set `DEVICE_ONLINE_WINDOW_MS` to `10 * 60 * 1000`, enrich live Android socket status in `getWalletsOverview` & `getAdminProjects`, and stamp `lastSeenAt` on `/api/v1/device/ws` connect.
+- [x] `backend/src/features/realtime/realtime.service.ts` & `realtime.routes.ts`: fan out `ADMIN_BUSINESS_EVENTS` to `ADMIN_PUSH_HUB_ROOM_ID` (`'__admin__'`) and allow Admin WebSocket connections at `/api/v1/realtime/ws`.

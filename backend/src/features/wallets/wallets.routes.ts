@@ -36,7 +36,7 @@ router.get('/', async (c) => {
 router.get('/overview', async (c) => {
   const db = c.get('db');
   const merchantId = c.get('merchantId')!;
-  const overview = await getWalletsOverview(db, merchantId);
+  const overview = await getWalletsOverview(db, merchantId, c.env);
   return c.json({ success: true, data: overview });
 });
 

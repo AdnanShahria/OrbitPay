@@ -66,9 +66,24 @@ class RealtimeHub {
 
 export const realtimeHub = new RealtimeHub();
 
+export const ADMIN_PUSH_HUB_ROOM_ID = '__admin__';
+
+const ADMIN_BUSINESS_EVENTS = new Set<RealtimeEventType>([
+  'TRANSACTION_NEW',
+  'SMS_FLAGGED',
+  'PAYMENT_VERIFIED',
+  'QUEUE_UPDATED',
+  'ORDER_CREATED',
+  'ORDER_UPDATED',
+  'WALLET_ROTATED',
+  'WALLET_SYNCED',
+  'PAYMENT_LINK_UPDATED',
+]);
+
 /**
- * Fans out a merchant-scoped realtime event to both the local isolate SSE hub
- * and the merchant's multi-isolate MerchantPushHub Durable Object (`web` sockets only).
+ * Fans out a merchant-scoped realtime event to the local isolate SSE hub,
+ * the merchant's multi-isolate MerchantPushHub Durable Object (`web` sockets only),
+ * and the Admin multi-isolate hub room (`__admin__`) for business events.
  */
 export function emitMerchantRealtimeEvent(
   env: Env | undefined,
@@ -79,12 +94,24 @@ export function emitMerchantRealtimeEvent(
 ): void {
   realtimeHub.broadcast(type, data, merchantId);
 
-  if (merchantId && env?.PUSH_HUB) {
-    const promise = broadcastRealtimeToMerchantWeb(env, merchantId, type, data);
+  if (!env?.PUSH_HUB) {
+    return;
+  }
+
+  const promises: Promise<unknown>[] = [];
+  if (merchantId) {
+    promises.push(broadcastRealtimeToMerchantWeb(env, merchantId, type, data));
+  }
+  if (ADMIN_BUSINESS_EVENTS.has(type)) {
+    promises.push(broadcastRealtimeToMerchantWeb(env, ADMIN_PUSH_HUB_ROOM_ID, type, data));
+  }
+
+  if (promises.length > 0) {
+    const fanout = Promise.allSettled(promises);
     if (ctx) {
-      safeWaitUntil(ctx, promise);
+      safeWaitUntil(ctx, fanout);
     } else {
-      promise.catch((err) => {
+      fanout.catch((err) => {
         console.warn('[Realtime DO Broadcast Error]:', err);
       });
     }

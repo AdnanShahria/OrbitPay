@@ -1,10 +1,13 @@
 import { Hono } from 'hono';
+import { eq } from 'drizzle-orm';
+import { merchantDevices, merchants } from '../../db/schema';
 import type { AppContextEnv } from '../../shared/types';
 import {
   authDeviceMiddleware,
   authMerchantMiddleware,
   authMerchantOrDeviceMiddleware,
   requireOwnerRoleMiddleware,
+  safeWaitUntil,
 } from '../../shared/middleware';
 import {
   ingestSmsBatchSchema,
@@ -190,6 +193,22 @@ router.get('/ws', authDeviceMiddleware, async (c) => {
   }
 
   const merchantId = c.get('merchantId')!;
+  const deviceId = c.get('deviceId');
+  const db = c.get('db');
+  const now = new Date();
+
+  safeWaitUntil(
+    c,
+    Promise.all([
+      db.update(merchants).set({ lastSeenAt: now }).where(eq(merchants.id, merchantId)),
+      deviceId
+        ? db.update(merchantDevices).set({ lastSeenAt: now }).where(eq(merchantDevices.id, deviceId))
+        : Promise.resolve(),
+    ]).catch(() => {
+      // Ignore non-fatal presence stamp errors so WebSocket upgrade never fails
+    })
+  );
+
   const stub = c.env.PUSH_HUB.get(c.env.PUSH_HUB.idFromName(merchantId));
   return stub.fetch('https://push-hub.internal/connect?clientType=android', {
     headers: c.req.raw.headers,

@@ -81,7 +81,7 @@ object AppUpdateManager {
 
     private const val TAG = "AppUpdateManager"
     private const val UPDATES_DIR_NAME = "updates"
-    private const val MIN_AUTO_CHECK_INTERVAL_MS = 15 * 60 * 1000L
+    private const val MIN_AUTO_CHECK_INTERVAL_MS = 12 * 60 * 60 * 1000L
     private const val UPDATE_NOTIFICATION_ID = 77401
 
     private val checkMutex = Mutex()
@@ -105,11 +105,13 @@ object AppUpdateManager {
         forceCheck: Boolean = false
     ) {
         val appContext = context.applicationContext
+        val prefs = PreferencesManager(appContext)
         val now = System.currentTimeMillis()
         val current = _state.value
 
         if (!userInitiated && !forceCheck) {
-            if (now - current.lastCheckedAt < MIN_AUTO_CHECK_INTERVAL_MS) {
+            val effectiveLastChecked = maxOf(current.lastCheckedAt, prefs.lastUpdateCheckAt)
+            if (now - effectiveLastChecked < MIN_AUTO_CHECK_INTERVAL_MS) {
                 return
             }
             if (current.status in setOf(
@@ -125,8 +127,9 @@ object AppUpdateManager {
 
         checkMutex.withLock {
             val latestState = _state.value
+            val effectiveLastChecked = maxOf(latestState.lastCheckedAt, prefs.lastUpdateCheckAt)
             if (!userInitiated && !forceCheck &&
-                System.currentTimeMillis() - latestState.lastCheckedAt < MIN_AUTO_CHECK_INTERVAL_MS
+                System.currentTimeMillis() - effectiveLastChecked < MIN_AUTO_CHECK_INTERVAL_MS
             ) {
                 return@withLock
             }
@@ -136,7 +139,6 @@ object AppUpdateManager {
                 errorMessage = null
             )
 
-            val prefs = PreferencesManager(appContext)
             val apiClient = OrbitApiClient(prefs)
             val result = withContext(Dispatchers.IO) {
                 apiClient.fetchLatestRelease(BuildConfig.VERSION_CODE)
@@ -144,6 +146,7 @@ object AppUpdateManager {
 
             result.onSuccess { data ->
                 val checkedAt = System.currentTimeMillis()
+                prefs.lastUpdateCheckAt = checkedAt
                 val release = data.release
 
                 if (!data.hasRelease || !data.updateAvailable || release == null) {

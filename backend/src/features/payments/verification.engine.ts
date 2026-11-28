@@ -63,7 +63,7 @@ export function isValidProviderTrxId(provider: MfsProvider, trxId: string): bool
 /**
  * Computes live Android Companion online status using the 5-minute heartbeat window
  * across both `merchants.last_seen_at` and active `merchant_devices.last_seen_at`,
- * plus active Durable Object WebSocket connections.
+ * plus active Durable Object Android companion WebSocket connections only.
  */
 export async function computeDeviceOnlineStatus(
   db: AppDb,
@@ -77,7 +77,9 @@ export async function computeDeviceOnlineStatus(
       })
       .from(merchantDevices)
       .where(and(eq(merchantDevices.merchantId, merchant.id), eq(merchantDevices.isActive, true))),
-    env ? getMerchantPushHubStatus(env, merchant.id) : Promise.resolve({ configured: false, activeSockets: 0 }),
+    env
+      ? getMerchantPushHubStatus(env, merchant.id)
+      : Promise.resolve({ configured: false, activeSockets: 0, androidSockets: 0, webSockets: 0 }),
   ]);
 
   const merchantMs = merchant.lastSeenAt ? merchant.lastSeenAt.getTime() : 0;
@@ -91,11 +93,12 @@ export async function computeDeviceOnlineStatus(
   const maxMs = Math.max(merchantMs, deviceMs);
   const lastSeenAt = maxMs > 0 ? new Date(maxMs) : null;
   const recentHeartbeat = maxMs > 0 && Date.now() - maxMs < DEVICE_ONLINE_THRESHOLD_MS;
+  const androidSocketCount = pushStatus.androidSockets ?? pushStatus.activeSockets;
 
   return {
-    online: recentHeartbeat || pushStatus.activeSockets > 0,
+    online: recentHeartbeat || androidSocketCount > 0,
     lastSeenAt,
-    activeSockets: pushStatus.activeSockets,
+    activeSockets: androidSocketCount,
   };
 }
 

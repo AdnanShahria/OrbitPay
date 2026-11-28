@@ -14,6 +14,7 @@ import {
   verificationQueue,
 } from './db/schema';
 import { parseActionsList, parseDisplayMetadata } from './features/payments/verification.engine';
+import { emitMerchantRealtimeEvent } from './features/realtime/realtime.service';
 import {
   dispatchWebhook,
   processWebhookRetries,
@@ -156,22 +157,50 @@ async function escalateExpiredGraceIntents(db: AppDb, env: Env, now: Date): Prom
         `⏱️ Grace Period Exceeded [${display.appName || merchant.storeName}]\nRef: ${updated.externalRefId}\nAmount: ৳${updated.paidAmount ?? updated.uniqueAmount}\nTrxID: ${updated.trxId || 'N/A'}\nRouted to Manual Review.`
       ),
     ]);
+
+    emitMerchantRealtimeEvent(
+      env,
+      'QUEUE_UPDATED',
+      {
+        paymentIntentId: updated.id,
+        orderId: updated.externalRefId,
+        trxId: updated.trxId,
+        expectedAmount: updated.paidAmount ?? updated.uniqueAmount,
+        provider: updated.provider,
+        status: 'MANUAL_REVIEW_REQUIRED',
+        escalationReason: 'GRACE_PERIOD_EXCEEDED',
+      },
+      merchant.id
+    );
   }
 
   // Fallback for any legacy verificationQueue rows without a linked paymentIntentId
-  await db
-    .update(verificationQueue)
-    .set({
-      status: 'MANUAL_REVIEW_REQUIRED',
-      escalationReason: 'GRACE_PERIOD_EXCEEDED',
-      escalatedAt: now,
-    })
+  const legacyExpired = await db
+    .select({ id: verificationQueue.id })
+    .from(verificationQueue)
     .where(
       and(
         eq(verificationQueue.status, 'WAITING_FOR_SMS'),
         lte(verificationQueue.expiresAt, now)
       )
-    );
+    )
+    .limit(1);
+
+  if (legacyExpired.length > 0) {
+    await db
+      .update(verificationQueue)
+      .set({
+        status: 'MANUAL_REVIEW_REQUIRED',
+        escalationReason: 'GRACE_PERIOD_EXCEEDED',
+        escalatedAt: now,
+      })
+      .where(
+        and(
+          eq(verificationQueue.status, 'WAITING_FOR_SMS'),
+          lte(verificationQueue.expiresAt, now)
+        )
+      );
+  }
 }
 
 /**
@@ -238,10 +267,18 @@ async function expireUnsubmittedOpenSessions(db: AppDb, env: Env, now: Date): Pr
   }
 
   // Only expire unsubmitted OPEN checkout sessions; SUBMITTED sessions remain until verified/escalated/rejected
-  await db
-    .update(checkoutSessions)
-    .set({ status: 'EXPIRED' })
-    .where(and(eq(checkoutSessions.status, 'OPEN'), lte(checkoutSessions.expiresAt, now)));
+  const staleOpenSessions = await db
+    .select({ id: checkoutSessions.id })
+    .from(checkoutSessions)
+    .where(and(eq(checkoutSessions.status, 'OPEN'), lte(checkoutSessions.expiresAt, now)))
+    .limit(1);
+
+  if (staleOpenSessions.length > 0) {
+    await db
+      .update(checkoutSessions)
+      .set({ status: 'EXPIRED' })
+      .where(and(eq(checkoutSessions.status, 'OPEN'), lte(checkoutSessions.expiresAt, now)));
+  }
 }
 
 async function runMinuteJobs(db: AppDb, env: Env, now: Date): Promise<void> {
@@ -315,6 +352,8 @@ const worker: ExportedHandler<Env> = {
       case '0 0 1 * *':
         ctx.waitUntil(runMonthlyWalletReset(db));
         break;
+      case '*/5 * * * *':
+      case '*/3 * * * *':
       case '* * * * *':
       default:
         ctx.waitUntil(runMinuteJobs(db, env, now));

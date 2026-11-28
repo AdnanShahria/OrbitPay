@@ -133,6 +133,18 @@ class PreferencesManager(context: Context) {
             prefs.edit().putLong(KEY_LAST_HEARTBEAT, value).apply()
         }
 
+    var lastHeartbeatAt: Long
+        get() = prefs.getLong(KEY_LAST_HEARTBEAT_AT, 0L)
+        set(value) {
+            prefs.edit().putLong(KEY_LAST_HEARTBEAT_AT, value).apply()
+        }
+
+    var lastUpdateCheckAt: Long
+        get() = prefs.getLong(KEY_LAST_UPDATE_CHECK_AT, 0L)
+        set(value) {
+            prefs.edit().putLong(KEY_LAST_UPDATE_CHECK_AT, value).apply()
+        }
+
     var isDarkTheme: Boolean
         get() = prefs.getBoolean(KEY_IS_DARK_THEME, false)
         set(value) {
@@ -303,6 +315,8 @@ class PreferencesManager(context: Context) {
         private const val KEY_ONBOARDING_COMPLETED = "onboarding_completed"
         private const val KEY_FG_SERVICE_ENABLED = "fg_service_enabled"
         private const val KEY_LAST_HEARTBEAT = "last_heartbeat"
+        private const val KEY_LAST_HEARTBEAT_AT = "last_heartbeat_at"
+        private const val KEY_LAST_UPDATE_CHECK_AT = "last_update_check_at"
         private const val KEY_IS_DARK_THEME = "is_dark_theme"
         private const val KEY_EXTRA_TRUSTED_SENDERS = "extra_trusted_senders"
         private const val KEY_LAST_INBOX_SCAN_AT = "last_inbox_scan_at"

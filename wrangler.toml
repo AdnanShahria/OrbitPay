@@ -37,9 +37,9 @@ new_sqlite_classes = ["MerchantPushHub"]
 
 [triggers]
 crons = [
-  "* * * * *",  # Every minute: webhook retries, verification queue & checkout session expiry
-  "0 * * * *",  # Every hour: expired router KV, old auth sessions & router logs cleanup
-  "0 0 1 * *",  # Monthly (1st at 00:00 UTC): reset merchant wallet monthly volume quotas
+  "*/5 * * * *",  # Every 5 minutes: webhook retries, verification queue & checkout session expiry
+  "0 * * * *",    # Every hour: expired router KV, old auth sessions & router logs cleanup
+  "0 0 1 * *",    # Monthly (1st at 00:00 UTC): reset merchant wallet monthly volume quotas
 ]
 
 [vars]

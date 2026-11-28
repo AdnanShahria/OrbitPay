@@ -74,6 +74,7 @@ class VerifyViewModel(application: Application) : AndroidViewModel(application) 
 
     private val preferences = PreferencesManager(application)
     private val apiClient = OrbitApiClient(preferences)
+    private var lastPushRefreshMs = 0L
 
     private val _uiState = MutableStateFlow(
         VerifyUiState(
@@ -88,10 +89,16 @@ class VerifyViewModel(application: Application) : AndroidViewModel(application) 
         loadUnclaimed()
         loadUnpaidOrders()
         viewModelScope.launch {
-            DynamicPushDispatcher.refreshEvents.collect {
-                loadReviewIntents()
-                loadUnclaimed()
-                loadUnpaidOrders()
+            DynamicPushDispatcher.refreshEvents.collect { reason ->
+                val now = System.currentTimeMillis()
+                if (now - lastPushRefreshMs < PUSH_REFRESH_COOLDOWN_MS) return@collect
+                lastPushRefreshMs = now
+
+                when {
+                    reason.startsWith("order.") -> loadUnpaidOrders()
+                    reason.startsWith("payment.") -> loadReviewIntents()
+                    else -> refreshActiveTab()
+                }
             }
         }
     }
@@ -458,6 +465,8 @@ class VerifyViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     companion object {
+        private const val PUSH_REFRESH_COOLDOWN_MS = 10_000L
+
         fun normalizePhone(raw: String?): String {
             if (raw.isNullOrBlank()) return ""
             var digits = raw.replace(Regex("[^0-9]"), "")

@@ -695,7 +695,7 @@ export async function getDeviceStats(
       merchant
         ? computeDeviceOnlineStatus(db, env, merchant)
         : Promise.resolve({ online: false, lastSeenAt: null, activeSockets: 0 }),
-      getWalletsOverview(db, merchantId),
+      getWalletsOverview(db, merchantId, env),
     ]);
 
   return {

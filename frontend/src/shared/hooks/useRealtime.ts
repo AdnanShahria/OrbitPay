@@ -202,12 +202,19 @@ export function useRealtime(options?: UseRealtimeOptions) {
     }
 
     function resolveWsUrl(): string | null {
-      if (!enabled || mode !== 'merchant' || typeof window === 'undefined') {
+      if (!enabled || typeof window === 'undefined') {
         return null;
       }
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+
+      if (mode === 'admin') {
+        const adminToken = getStoredAdminToken()?.trim();
+        if (!adminToken) return null;
+        return `${protocol}//${window.location.host}/api/v1/realtime/ws?adminToken=${encodeURIComponent(adminToken)}`;
+      }
+
       const merchantToken = getAuthToken()?.trim();
       if (!merchantToken) return null;
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       return `${protocol}//${window.location.host}/api/v1/realtime/ws?token=${encodeURIComponent(merchantToken)}`;
     }
 
@@ -233,9 +240,49 @@ export function useRealtime(options?: UseRealtimeOptions) {
       }
     }
 
-    function invalidateAdminIfApplicable() {
+    function invalidateAdminAllForReconnect() {
       if (mode === 'admin') {
         queryClient.invalidateQueries({ queryKey: ['admin'] });
+      }
+    }
+
+    function invalidateAdminForEvent(eventType: string) {
+      if (mode !== 'admin') return;
+
+      switch (eventType) {
+        case 'TRANSACTION_NEW':
+          queryClient.invalidateQueries({ queryKey: ['admin', 'overview'] });
+          queryClient.invalidateQueries({ queryKey: ['admin', 'projects'] });
+          queryClient.invalidateQueries({ queryKey: ['admin', 'queue'] });
+          break;
+        case 'PAYMENT_VERIFIED':
+          queryClient.invalidateQueries({ queryKey: ['admin', 'overview'] });
+          queryClient.invalidateQueries({ queryKey: ['admin', 'projects'] });
+          queryClient.invalidateQueries({ queryKey: ['admin', 'queue'] });
+          queryClient.invalidateQueries({ queryKey: ['admin', 'webhooks'] });
+          break;
+        case 'QUEUE_UPDATED':
+        case 'SMS_FLAGGED':
+          queryClient.invalidateQueries({ queryKey: ['admin', 'overview'] });
+          queryClient.invalidateQueries({ queryKey: ['admin', 'queue'] });
+          break;
+        case 'ORDER_CREATED':
+        case 'ORDER_UPDATED':
+          queryClient.invalidateQueries({ queryKey: ['admin', 'overview'] });
+          queryClient.invalidateQueries({ queryKey: ['admin', 'projects'] });
+          queryClient.invalidateQueries({ queryKey: ['admin', 'webhooks'] });
+          break;
+        case 'WALLET_ROTATED':
+        case 'WALLET_SYNCED':
+          queryClient.invalidateQueries({ queryKey: ['admin', 'projects'] });
+          queryClient.invalidateQueries({ queryKey: ['admin', 'webhooks'] });
+          break;
+        case 'DEVICE_HEARTBEAT':
+        case 'PAYMENT_LINK_UPDATED':
+          queryClient.invalidateQueries({ queryKey: ['admin', 'projects'] });
+          break;
+        default:
+          break;
       }
     }
 
@@ -255,7 +302,7 @@ export function useRealtime(options?: UseRealtimeOptions) {
       switch (eventType) {
         case 'TRANSACTION_NEW': {
           invalidateMerchantQueries();
-          invalidateAdminIfApplicable();
+          invalidateAdminForEvent(eventType);
           break;
         }
         case 'PAYMENT_VERIFIED': {
@@ -269,7 +316,7 @@ export function useRealtime(options?: UseRealtimeOptions) {
             linkTitle?: string;
           };
           invalidateMerchantQueries();
-          invalidateAdminIfApplicable();
+          invalidateAdminForEvent(eventType);
 
           if (mode === 'merchant') {
             notifyPaymentVerified({
@@ -286,7 +333,7 @@ export function useRealtime(options?: UseRealtimeOptions) {
         case 'DEVICE_HEARTBEAT': {
           queryClient.invalidateQueries({ queryKey: ['device', 'stats'] });
           queryClient.invalidateQueries({ queryKey: ['wallets', 'overview'] });
-          invalidateAdminIfApplicable();
+          invalidateAdminForEvent(eventType);
           break;
         }
         case 'QUEUE_UPDATED': {
@@ -302,7 +349,7 @@ export function useRealtime(options?: UseRealtimeOptions) {
           queryClient.invalidateQueries({ queryKey: ['payment-intents'] });
           queryClient.invalidateQueries({ queryKey: ['payment-links'] });
           queryClient.invalidateQueries({ queryKey: ['device', 'stats'] });
-          invalidateAdminIfApplicable();
+          invalidateAdminForEvent(eventType);
 
           if (mode === 'merchant' && payload?.trxId) {
             notifyPaymentSubmitted({
@@ -321,7 +368,7 @@ export function useRealtime(options?: UseRealtimeOptions) {
           queryClient.invalidateQueries({ queryKey: ['orders'] });
           queryClient.invalidateQueries({ queryKey: ['payment-intents'] });
           queryClient.invalidateQueries({ queryKey: ['device', 'stats'] });
-          invalidateAdminIfApplicable();
+          invalidateAdminForEvent(eventType);
           break;
         }
         case 'SMS_FLAGGED': {
@@ -329,7 +376,7 @@ export function useRealtime(options?: UseRealtimeOptions) {
           queryClient.invalidateQueries({ queryKey: ['payment-intents'] });
           queryClient.invalidateQueries({ queryKey: ['verification-queue'] });
           queryClient.invalidateQueries({ queryKey: ['device', 'stats'] });
-          invalidateAdminIfApplicable();
+          invalidateAdminForEvent(eventType);
           break;
         }
         case 'WALLET_ROTATED':
@@ -337,11 +384,12 @@ export function useRealtime(options?: UseRealtimeOptions) {
           queryClient.invalidateQueries({ queryKey: ['wallets'] });
           queryClient.invalidateQueries({ queryKey: ['wallets', 'overview'] });
           queryClient.invalidateQueries({ queryKey: ['device', 'stats'] });
-          invalidateAdminIfApplicable();
+          invalidateAdminForEvent(eventType);
           break;
         }
         case 'PAYMENT_LINK_UPDATED': {
           queryClient.invalidateQueries({ queryKey: ['payment-links'] });
+          invalidateAdminForEvent(eventType);
           break;
         }
         default:
@@ -403,7 +451,7 @@ export function useRealtime(options?: UseRealtimeOptions) {
           if (mode === 'merchant') {
             invalidateMerchantQueries();
           } else {
-            invalidateAdminIfApplicable();
+            invalidateAdminAllForReconnect();
           }
         } else {
           hasConnectedOnceRef.current = true;
@@ -504,7 +552,11 @@ export function useRealtime(options?: UseRealtimeOptions) {
         }
 
         if (!hasOpened) {
-          void authFetch('/api/v1/auth/me')
+          const checkRes =
+            mode === 'admin'
+              ? adminFetch('/api/v1/admin/auth/me')
+              : authFetch('/api/v1/auth/me');
+          void checkRes
             .then((res) => {
               if (cancelled || res.status === 401 || !resolveWsUrl()) {
                 if (res.status === 401) {
@@ -561,7 +613,11 @@ export function useRealtime(options?: UseRealtimeOptions) {
             });
 
             if (hasConnectedOnceRef.current) {
-              invalidateMerchantQueries();
+              if (mode === 'merchant') {
+                invalidateMerchantQueries();
+              } else {
+                invalidateAdminAllForReconnect();
+              }
             } else {
               hasConnectedOnceRef.current = true;
             }
@@ -582,11 +638,7 @@ export function useRealtime(options?: UseRealtimeOptions) {
 
     function connect() {
       if (cancelled) return;
-      if (mode === 'admin') {
-        connectSse();
-      } else {
-        connectWs();
-      }
+      connectWs();
     }
 
     const handleUnauthorized = () => {
@@ -643,6 +695,22 @@ export function useRealtime(options?: UseRealtimeOptions) {
       typeof document !== 'undefined' && document.hidden ? Date.now() : null;
     baselineSeededRef.current = false;
 
+    const seedBaselineFromItems = (items: RecentIntentSnapshot[]) => {
+      for (const item of items) {
+        if (item.status === 'VERIFIED') {
+          notifiedVerifiedRef.current.add(item.id);
+          if (item.trxId) notifiedVerifiedRef.current.add(item.trxId);
+          if (item.externalRefId) notifiedVerifiedRef.current.add(item.externalRefId);
+        } else if (
+          item.status === 'WAITING_FOR_SMS' ||
+          item.status === 'MANUAL_REVIEW_REQUIRED'
+        ) {
+          notifiedPendingRef.current.add(`${item.id}:${item.status}`);
+        }
+      }
+      baselineSeededRef.current = true;
+    };
+
     const syncRecentIntents = async (isInitial = false) => {
       if (cancelled || !getAuthToken()) return;
       if (!isInitial && typeof document !== 'undefined' && document.hidden) return;
@@ -655,6 +723,21 @@ export function useRealtime(options?: UseRealtimeOptions) {
       }
       if (isSyncingIntentsRef.current) return;
 
+      if (isInitial && !baselineSeededRef.current) {
+        const cachedQueries = queryClient.getQueriesData<{
+          items?: RecentIntentSnapshot[];
+        }>({
+          queryKey: ['payment-intents'],
+        });
+        const cachedItems = cachedQueries.flatMap(([, data]) =>
+          Array.isArray(data?.items) ? data.items : [],
+        );
+        if (cachedItems.length > 0) {
+          seedBaselineFromItems(cachedItems);
+          return;
+        }
+      }
+
       isSyncingIntentsRef.current = true;
       try {
         const res = await authFetch('/api/v1/payment-intents?limit=12&offset=0');
@@ -663,19 +746,7 @@ export function useRealtime(options?: UseRealtimeOptions) {
         const items: RecentIntentSnapshot[] = json?.data?.items ?? [];
 
         if (!baselineSeededRef.current) {
-          for (const item of items) {
-            if (item.status === 'VERIFIED') {
-              notifiedVerifiedRef.current.add(item.id);
-              if (item.trxId) notifiedVerifiedRef.current.add(item.trxId);
-              if (item.externalRefId) notifiedVerifiedRef.current.add(item.externalRefId);
-            } else if (
-              item.status === 'WAITING_FOR_SMS' ||
-              item.status === 'MANUAL_REVIEW_REQUIRED'
-            ) {
-              notifiedPendingRef.current.add(`${item.id}:${item.status}`);
-            }
-          }
-          baselineSeededRef.current = true;
+          seedBaselineFromItems(items);
           return;
         }
 

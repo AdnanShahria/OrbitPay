@@ -129,18 +129,18 @@ class OrbitApplication : Application() {
             .build()
 
         val periodicSyncRequest = PeriodicWorkRequestBuilder<SyncWorker>(
-            15, TimeUnit.MINUTES,
-            5, TimeUnit.MINUTES // Flex interval
+            60, TimeUnit.MINUTES,
+            15, TimeUnit.MINUTES // Flex interval
         )
             .setConstraints(constraints)
             .build()
 
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(
             SyncWorker.UNIQUE_WORK_NAME,
-            ExistingPeriodicWorkPolicy.KEEP,
+            ExistingPeriodicWorkPolicy.UPDATE,
             periodicSyncRequest
         )
-        Log.d(TAG, "Periodic WorkManager sync configured (15m interval).")
+        Log.d(TAG, "Periodic WorkManager sync configured (60m interval).")
     }
 
     companion object {

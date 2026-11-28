@@ -307,7 +307,7 @@ router.get('/overview', requireAdminAuth, async (c) => {
  */
 router.get('/projects', requireAdminAuth, async (c) => {
   const db = c.get('db');
-  const projects = await getAdminProjects(db);
+  const projects = await getAdminProjects(db, c.env);
   return c.json({ success: true, data: projects });
 });
 

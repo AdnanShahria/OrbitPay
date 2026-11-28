@@ -110,12 +110,27 @@ class SyncWorker(
                 Log.d(TAG, "Skipping redundant stats fetch: WebSocket connected and no pending SMS uploaded.")
             }
 
-            val hbRes = sendDeviceHeartbeat()
-            if (hbRes.exceptionOrNull() is UnauthorizedException) {
-                Log.w(TAG, "Background heartbeat returned 401 Unauthorized; clearing stale session.")
-                preferencesManager.clearAuthSession()
-                StickyForegroundService.stopService(applicationContext)
-                return@withContext Result.failure()
+            val wsConnected = PushWebSocketClient.connectionState.value == WsPushState.CONNECTED
+            val elapsedSinceHeartbeat = System.currentTimeMillis() - preferencesManager.lastHeartbeatAt
+            val shouldSendHeartbeat = !wsConnected ||
+                pendingUploads.isNotEmpty() ||
+                elapsedSinceHeartbeat >= CONNECTED_HEARTBEAT_INTERVAL_MS
+
+            if (shouldSendHeartbeat) {
+                val hbRes = sendDeviceHeartbeat()
+                if (hbRes.isSuccess) {
+                    preferencesManager.lastHeartbeatAt = System.currentTimeMillis()
+                } else if (hbRes.exceptionOrNull() is UnauthorizedException) {
+                    Log.w(TAG, "Background heartbeat returned 401 Unauthorized; clearing stale session.")
+                    preferencesManager.clearAuthSession()
+                    StickyForegroundService.stopService(applicationContext)
+                    return@withContext Result.failure()
+                }
+            } else {
+                Log.d(
+                    TAG,
+                    "Skipping redundant heartbeat: WebSocket connected, no pending SMS uploaded, elapsed=${elapsedSinceHeartbeat}ms"
+                )
             }
 
             runCatching {
@@ -188,6 +203,7 @@ class SyncWorker(
 
     companion object {
         private const val TAG = "SyncWorker"
+        private const val CONNECTED_HEARTBEAT_INTERVAL_MS = 6 * 60 * 60 * 1000L
         const val UNIQUE_WORK_NAME = "orbit_sync_worker"
 
         /**

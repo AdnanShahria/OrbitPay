@@ -563,7 +563,9 @@ export function useAdminOverview(enabled = true) {
     },
     enabled: Boolean(enabled && hasAdminCredentials()),
     retry: false,
-    refetchInterval: 10_000,
+    refetchInterval: false,
+    refetchOnWindowFocus: false,
+    staleTime: 30_000,
   });
 }
 
@@ -576,7 +578,9 @@ export function useAdminProjects(enabled = true) {
     },
     enabled: Boolean(enabled && hasAdminCredentials()),
     retry: false,
-    refetchInterval: 10_000,
+    refetchInterval: false,
+    refetchOnWindowFocus: false,
+    staleTime: 30_000,
   });
 }
 
@@ -854,7 +858,9 @@ export function useAdminWebhooks(enabled = true) {
     },
     enabled: Boolean(enabled && hasAdminCredentials()),
     retry: false,
-    refetchInterval: 10_000,
+    refetchInterval: false,
+    refetchOnWindowFocus: false,
+    staleTime: 30_000,
   });
 }
 
@@ -884,7 +890,9 @@ export function useAdminQueue(enabled = true) {
     },
     enabled: Boolean(enabled && hasAdminCredentials()),
     retry: false,
-    refetchInterval: 8_000,
+    refetchInterval: false,
+    refetchOnWindowFocus: false,
+    staleTime: 30_000,
   });
 }
 
@@ -976,7 +984,9 @@ export function useAdminSystemHealth(enabled = true) {
     },
     enabled: Boolean(enabled && hasAdminCredentials()),
     retry: false,
-    refetchInterval: 30_000,
+    refetchInterval: false,
+    refetchOnWindowFocus: false,
+    staleTime: 30_000,
   });
 }
 
@@ -1038,7 +1048,9 @@ export function useAdminSecurityState(enabled = true) {
     },
     enabled: Boolean(enabled && hasAdminCredentials()),
     retry: false,
-    refetchInterval: 15_000,
+    refetchInterval: false,
+    refetchOnWindowFocus: false,
+    staleTime: 30_000,
   });
 }
 
@@ -1239,7 +1251,9 @@ export function useAdminMessagingStatus(enabled = true) {
     },
     enabled: Boolean(enabled && hasAdminCredentials()),
     retry: false,
-    refetchInterval: 15_000,
+    refetchInterval: false,
+    refetchOnWindowFocus: false,
+    staleTime: 30_000,
   });
 }
 
@@ -1316,7 +1330,9 @@ export function useAdminReleases(enabled = true) {
     },
     enabled: Boolean(enabled && hasAdminCredentials()),
     retry: false,
-    refetchInterval: 30_000,
+    refetchInterval: false,
+    refetchOnWindowFocus: false,
+    staleTime: 30_000,
   });
 }
 

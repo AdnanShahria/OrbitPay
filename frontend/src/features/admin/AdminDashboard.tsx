@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   RiArrowLeftLine,
   RiBarChartBoxLine,
@@ -7,6 +8,7 @@ import {
   RiLogoutBoxRLine,
   RiMessage2Line,
   RiRadioButtonLine,
+  RiRefreshLine,
   RiShieldCheckLine,
   RiShieldKeyholeLine,
   RiSmartphoneLine,
@@ -128,10 +130,16 @@ function AdminDashboardContent({
   onRefreshAuth: () => Promise<boolean>;
   onExit: () => void;
 }) {
+  const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<AdminTab>('projects');
   const [isSimulating, setIsSimulating] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const { status: realtimeStatus, simulateTransaction } = useRealtime({
+  const {
+    status: realtimeStatus,
+    transport: realtimeTransport,
+    simulateTransaction,
+  } = useRealtime({
     mode: 'admin',
     enabled: true,
   });
@@ -149,6 +157,19 @@ function AdminDashboardContent({
     systemHealth && (!systemHealth.schemaHealthy || systemHealth.missingTables.length > 0),
   );
   const hasMissingR2 = Boolean(systemHealth && !systemHealth.r2Configured);
+
+  const handleRefreshAll = async () => {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    try {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['admin'] }),
+        new Promise<void>((resolve) => setTimeout(resolve, 400)),
+      ]);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   const handleSimulateGlobal = async () => {
     setIsSimulating(true);
@@ -212,17 +233,34 @@ function AdminDashboardContent({
           <div
             className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full border border-border-button-default bg-background-primary-default text-caption-1-medium text-text-secondary"
             title={
-              realtimeStatus === 'connected'
-                ? 'Real-time Server-Sent Events stream active'
-                : 'Connecting to real-time edge stream'
+              realtimeStatus === 'connected' && realtimeTransport === 'websocket'
+                ? 'Live push connected (zero-polling WebSocket)'
+                : realtimeStatus === 'connected'
+                  ? 'Live SSE stream active (fallback)'
+                  : 'Connecting to live push hub...'
             }
           >
             <StatusDot color={realtimeStatus === 'connected' ? 'green' : 'yellow'} />
             <RiRadioButtonLine className="size-3.5 text-foreground-icon-secondary" aria-hidden />
             <span className="hidden md:inline">
-              {realtimeStatus === 'connected' ? 'SSE live' : 'Connecting'}
+              {realtimeStatus === 'connected'
+                ? realtimeTransport === 'websocket'
+                  ? 'Push live'
+                  : 'SSE live'
+                : 'Connecting'}
             </span>
           </div>
+
+          <Button
+            variant="secondary"
+            size="small"
+            leadingIcon={RiRefreshLine}
+            isLoading={isRefreshing}
+            onClick={handleRefreshAll}
+            title="Refresh central hub telemetry"
+          >
+            Refresh
+          </Button>
 
           <ThemeToggle appearance="segmented" size="small" />
 

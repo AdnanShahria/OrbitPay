@@ -12,12 +12,13 @@ import { generateSecureToken } from '../../shared/crypto';
 import { BadRequestError, NotFoundError } from '../../shared/errors';
 import { sanitizePhoneNumber } from '../../shared/parsers/mfs';
 import type { Env } from '../../shared/types';
+import { getMerchantPushHubStatus } from '../../router/push-hub';
 import { emitMerchantRealtimeEvent } from '../realtime/realtime.service';
 import { dispatchWebhook } from '../webhooks/webhook.dispatcher';
 import type { CreateWalletInput, SyncWalletsInput, UpdateWalletInput } from './wallets.schema';
 
 const BANGLADESHI_PHONE_REGEX = /^01[3-9]\d{8,9}$/;
-const DEVICE_ONLINE_WINDOW_MS = 5 * 60 * 1000;
+const DEVICE_ONLINE_WINDOW_MS = 10 * 60 * 1000;
 
 export const DEFAULT_SAFE_VOLUME_LIMIT = 250_000;
 export const DEFAULT_MAX_VOLUME_LIMIT = 300_000;
@@ -120,7 +121,8 @@ function parseDeviceSimSlots(rawJson: string | null | undefined): DeviceSimSlotS
  */
 export async function listMerchantDevicesSummary(
   db: AppDb,
-  merchantId: string
+  merchantId: string,
+  hasLiveAndroidSocket = false
 ): Promise<ConnectedDeviceSummary[]> {
   const rows = await db
     .select()
@@ -129,9 +131,11 @@ export async function listMerchantDevicesSummary(
     .orderBy(desc(merchantDevices.lastSeenAt), desc(merchantDevices.createdAt));
 
   const nowMs = Date.now();
-  return rows.map((d) => {
+  return rows.map((d, index) => {
     const lastSeenMs = d.lastSeenAt ? d.lastSeenAt.getTime() : 0;
-    const isOnline = lastSeenMs > 0 && nowMs - lastSeenMs < DEVICE_ONLINE_WINDOW_MS;
+    const isOnline =
+      (lastSeenMs > 0 && nowMs - lastSeenMs < DEVICE_ONLINE_WINDOW_MS) ||
+      (hasLiveAndroidSocket && index === 0);
     return {
       id: d.id,
       deviceName: d.deviceName,
@@ -375,12 +379,27 @@ export async function listWallets(
  */
 export async function getWalletsOverview(
   db: AppDb,
-  merchantId: string
+  merchantId: string,
+  env?: Env
 ): Promise<WalletsOverviewResult> {
-  const [wallets, devices] = await Promise.all([
-    listWallets(db, merchantId),
+  const [walletRows, rawDevices, pushStatus] = await Promise.all([
+    db
+      .select()
+      .from(merchantWallets)
+      .where(eq(merchantWallets.merchantId, merchantId))
+      .orderBy(desc(merchantWallets.isActive), desc(merchantWallets.isPrimary), asc(merchantWallets.priorityOrder)),
     listMerchantDevicesSummary(db, merchantId),
+    env?.PUSH_HUB ? getMerchantPushHubStatus(env, merchantId) : Promise.resolve(null),
   ]);
+
+  const hasLiveAndroidSocket = pushStatus
+    ? (pushStatus.androidSockets ?? pushStatus.activeSockets) > 0
+    : false;
+  const devices =
+    hasLiveAndroidSocket && rawDevices.length > 0
+      ? rawDevices.map((d, idx) => (idx === 0 ? { ...d, isOnline: true } : d))
+      : rawDevices;
+  const wallets = walletRows.map((w) => enrichWalletRecord(w, devices));
 
   const activeWallets = wallets.filter((w) => w.isActive && !w.isPlaceholder);
   return {

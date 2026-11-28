@@ -372,6 +372,7 @@ export function ConsolidatedSetupHub({
           onToggle={() => toggleSection('settings')}
         >
           <MerchantSettings
+            merchantId={merchantId}
             readOnlyLocked={isLocked}
             onRequestUnlock={handleOpenOtpModal}
           />

@@ -10,7 +10,12 @@ import {
   authMerchantOrDeviceMiddleware,
   authenticateJwtSession,
 } from '../../shared/middleware';
-import { emitMerchantRealtimeEvent, realtimeHub, type RealtimeEvent } from './realtime.service';
+import {
+  ADMIN_PUSH_HUB_ROOM_ID,
+  emitMerchantRealtimeEvent,
+  realtimeHub,
+  type RealtimeEvent,
+} from './realtime.service';
 import { ingestDeviceSmsBatch } from '../device/device.service';
 import { merchants } from '../../db/schema';
 
@@ -130,7 +135,7 @@ router.get('/stream', authStreamMiddleware, async (c) => {
 
 /**
  * GET /api/v1/realtime/ws
- * Upgrades an authenticated Merchant Portal connection to the tenant-scoped
+ * Upgrades an authenticated Admin or Merchant Portal connection to the
  * MerchantPushHub Durable Object WebSocket (`clientType=web`).
  */
 router.get('/ws', authStreamMiddleware, async (c) => {
@@ -138,19 +143,10 @@ router.get('/ws', authStreamMiddleware, async (c) => {
     return c.json({ success: false, error: 'WebSocket upgrade required' }, 426);
   }
 
-  if (c.get('adminUserId')) {
-    return c.json(
-      {
-        success: false,
-        error: 'Admin cross-tenant realtime uses SSE at /api/v1/realtime/stream',
-      },
-      400
-    );
-  }
-
+  const isAdmin = Boolean(c.get('adminUserId'));
   const merchantId = c.get('merchantId');
-  if (!merchantId) {
-    return c.json({ success: false, error: 'Unauthorized: merchant context missing' }, 401);
+  if (!isAdmin && !merchantId) {
+    return c.json({ success: false, error: 'Unauthorized: caller context missing' }, 401);
   }
 
   if (!c.env.PUSH_HUB) {
@@ -160,7 +156,8 @@ router.get('/ws', authStreamMiddleware, async (c) => {
     );
   }
 
-  return c.env.PUSH_HUB.get(c.env.PUSH_HUB.idFromName(merchantId)).fetch(
+  const roomId = isAdmin ? ADMIN_PUSH_HUB_ROOM_ID : merchantId!;
+  return c.env.PUSH_HUB.get(c.env.PUSH_HUB.idFromName(roomId)).fetch(
     'https://push-hub.internal/connect?clientType=web',
     { headers: c.req.raw.headers }
   );

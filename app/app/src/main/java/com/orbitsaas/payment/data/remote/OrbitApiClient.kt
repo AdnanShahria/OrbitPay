@@ -570,31 +570,6 @@ class OrbitApiClient(
     }
 
     /**
-     * Fetches a single universal payment intent by ID or externalRefId.
-     */
-    suspend fun getPaymentIntent(intentId: String): Result<PaymentIntentDto> {
-        return runCatching {
-            val resolvedBaseUrl = PreferencesManager.normalizeServerUrl(baseUrl)
-            val encodedId = intentId.trim().encodeURLPathPart()
-            val url = "$resolvedBaseUrl/api/v1/payment-intents/$encodedId"
-            val response: HttpResponse = client.get(url) {
-                applyAuthHeaders()
-            }
-
-            if (response.status.isSuccess()) {
-                val envelope = response.body<ApiEnvelope<PaymentIntentDto>>()
-                if (envelope.success && envelope.data != null) {
-                    envelope.data
-                } else {
-                    throw Exception(envelope.error ?: envelope.message ?: "Failed to load payment intent")
-                }
-            } else {
-                throwHttpException(response)
-            }
-        }
-    }
-
-    /**
      * Atomically resolves (APPROVE or REJECT) a payment intent with optimistic CAS stateVersion.
      */
     suspend fun resolvePaymentIntent(
@@ -664,29 +639,6 @@ class OrbitApiClient(
                     envelope.data
                 } else {
                     throw Exception(envelope.error ?: envelope.message ?: "Payment action failed")
-                }
-            } else {
-                throwHttpException(response)
-            }
-        }
-    }
-
-    /**
-     * Fetches the current device readiness & wallet profile preflight summary from ORBIT Hub.
-     */
-    suspend fun fetchPreflight(): Result<DevicePreflightData> {
-        return runCatching {
-            val url = "$baseUrl/api/v1/device/preflight"
-            val response: HttpResponse = client.get(url) {
-                applyAuthHeaders()
-            }
-
-            if (response.status.isSuccess()) {
-                val envelope = response.body<ApiEnvelope<DevicePreflightData>>()
-                if (envelope.success && envelope.data != null) {
-                    envelope.data
-                } else {
-                    throw Exception(envelope.error ?: envelope.message ?: "Failed to fetch device preflight")
                 }
             } else {
                 throwHttpException(response)

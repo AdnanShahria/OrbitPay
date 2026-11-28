@@ -182,7 +182,10 @@ export function useTestWebhookPing() {
   });
 }
 
-export function useMerchantWebhooks(status: WebhookDeliveryStatus | 'ALL' = 'ALL') {
+export function useMerchantWebhooks(
+  status: WebhookDeliveryStatus | 'ALL' = 'ALL',
+  options?: { enabled?: boolean },
+) {
   return useQuery<MerchantWebhooksResponse>({
     queryKey: ['merchant-webhooks', status],
     queryFn: async () => {
@@ -199,7 +202,7 @@ export function useMerchantWebhooks(status: WebhookDeliveryStatus | 'ALL' = 'ALL
         offset: Number(data.offset ?? 0),
       };
     },
-    enabled: Boolean(getAuthToken()),
+    enabled: Boolean(getAuthToken()) && (options?.enabled ?? true),
     staleTime: 10_000,
   });
 }
